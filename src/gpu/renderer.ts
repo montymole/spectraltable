@@ -3,13 +3,19 @@ import {
     wireframeVertexShader,
     wireframeFragmentShader,
     pointVertexShader,
-    pointFragmentShader
+    pointFragmentShader,
+    planeVertexShader,
+    planeFragmentShader
 } from './shaders';
-import { mat4Perspective, mat4LookAt, mat4Multiply, mat4RotateX, mat4RotateY } from './math';
+import {
+    mat4Perspective, mat4LookAt, mat4Multiply,
+    mat4RotateX, mat4RotateY, mat4RotateZ, mat4Translate
+} from './math';
 import { SpectralVolume } from './spectral-volume';
-import { VolumeResolution } from '../types';
+import { ReadingPathGeometry } from './reading-path';
+import { VolumeResolution, ReadingPathState, PlaneType } from '../types';
 
-// Renderer for wireframe cube + spectral volume points
+// Renderer for wireframe cube + spectral volume points + reading path
 
 export class Renderer {
     private ctx: WebGLContext;
@@ -29,8 +35,26 @@ export class Renderer {
     private pointUAlpha: WebGLUniformLocation;
     private pointUSize: WebGLUniformLocation;
 
-    // Spectral volume
+    // Reading path rendering
+    private planeProgram: WebGLProgram;
+    private planeVAO: WebGLVertexArrayObject | null = null;
+    private planeIndexCount = 0;
+    private planeUMVP: WebGLUniformLocation;
+    private planeUColor: WebGLUniformLocation;
+    private planeUAlpha: WebGLUniformLocation;
+
+    private lineVAO: WebGLVertexArrayObject | null = null;
+    private lineUMVP: WebGLUniformLocation;
+    private lineUColor: WebGLUniformLocation;
+
+    // State
     private spectralVolume: SpectralVolume;
+    private pathState: ReadingPathState = {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        speed: 0.5,
+        planeType: PlaneType.FLAT
+    };
 
     // Camera state
     private rotationX = 0.3;
@@ -68,8 +92,23 @@ export class Renderer {
         this.pointUAlpha = pointAlpha;
         this.pointUSize = pointSize;
 
-        // Create point cloud geometry
+        // Compile plane shaders (re-using wireframe shader for line, plane shader for surface)
+        this.planeProgram = this.createProgram(planeVertexShader, planeFragmentShader);
+        const planeMVP = ctx.gl.getUniformLocation(this.planeProgram, 'uModelViewProjection');
+        const planeColor = ctx.gl.getUniformLocation(this.planeProgram, 'uColor');
+        const planeAlpha = ctx.gl.getUniformLocation(this.planeProgram, 'uAlpha');
+        if (!planeMVP || !planeColor || !planeAlpha) throw new Error('Failed to get plane uniform locations');
+        this.planeUMVP = planeMVP;
+        this.planeUColor = planeColor;
+        this.planeUAlpha = planeAlpha;
+
+        // Reuse wireframe program for the reading line (it's just a solid color line)
+        this.lineUMVP = wireMVP;
+        this.lineUColor = wireColor;
+
+        // Initialize geometry
         this.updatePointCloud(initialResolution);
+        this.updateReadingPathGeometry();
 
         console.log('✓ Renderer initialized');
     }
@@ -179,10 +218,7 @@ export class Renderer {
     private updatePointCloud(resolution: VolumeResolution): void {
         const gl = this.ctx.gl;
 
-        // Delete old VAO if exists
-        if (this.pointVAO) {
-            gl.deleteVertexArray(this.pointVAO);
-        }
+        if (this.pointVAO) gl.deleteVertexArray(this.pointVAO);
 
         const positions = this.generatePointCloud(resolution);
         this.pointCount = positions.length / 3;
@@ -201,10 +237,58 @@ export class Renderer {
         gl.vertexAttribPointer(aPositionLoc, 3, gl.FLOAT, false, 0, 0);
 
         gl.bindVertexArray(null);
-
         this.pointVAO = vao;
 
         console.log(`✓ Point cloud: ${this.pointCount} points`);
+    }
+
+    private updateReadingPathGeometry(): void {
+        const gl = this.ctx.gl;
+
+        // 1. Update Plane Geometry
+        if (this.planeVAO) gl.deleteVertexArray(this.planeVAO);
+
+        const { positions, indices } = ReadingPathGeometry.generatePlane(this.pathState.planeType);
+        this.planeIndexCount = indices.length;
+
+        const planeVAO = gl.createVertexArray();
+        if (!planeVAO) throw new Error('Failed to create plane VAO');
+        gl.bindVertexArray(planeVAO);
+
+        const planeVBO = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, planeVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+        const planePosLoc = gl.getAttribLocation(this.planeProgram, 'aPosition');
+        gl.enableVertexAttribArray(planePosLoc);
+        gl.vertexAttribPointer(planePosLoc, 3, gl.FLOAT, false, 0, 0);
+
+        const planeIBO = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, planeIBO);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+        gl.bindVertexArray(null);
+        this.planeVAO = planeVAO;
+
+        // 2. Update Line Geometry
+        if (this.lineVAO) gl.deleteVertexArray(this.lineVAO);
+
+        const linePositions = ReadingPathGeometry.generateReadingLine();
+
+        const lineVAO = gl.createVertexArray();
+        if (!lineVAO) throw new Error('Failed to create line VAO');
+        gl.bindVertexArray(lineVAO);
+
+        const lineVBO = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, lineVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, linePositions, gl.STATIC_DRAW);
+
+        const linePosLoc = gl.getAttribLocation(this.wireframeProgram, 'aPosition');
+        gl.enableVertexAttribArray(linePosLoc);
+        gl.vertexAttribPointer(linePosLoc, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindVertexArray(null);
+        this.lineVAO = lineVAO;
     }
 
     public render(): void {
@@ -213,11 +297,11 @@ export class Renderer {
         // Clear
         this.ctx.clear(0.08, 0.08, 0.12);
 
-        // Enable blending for transparent points
+        // Enable blending
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-        // Calculate MVP matrix (shared by both renderers)
+        // Calculate Camera MVP
         const aspect = gl.canvas.width / gl.canvas.height;
         const projection = mat4Perspective(Math.PI / 4, aspect, 0.1, 100.0);
         const view = mat4LookAt([0, 0, 5], [0, 0, 0], [0, 1, 0]);
@@ -227,24 +311,97 @@ export class Renderer {
         const model = mat4Multiply(rotY, rotX);
 
         const viewModel = mat4Multiply(view, model);
-        const mvp = mat4Multiply(projection, viewModel);
+        const cameraMVP = mat4Multiply(projection, viewModel);
 
-        // Draw point cloud (faint blue dots)
+        // 1. Draw Point Cloud (faint blue dots)
         if (this.pointVAO) {
             gl.useProgram(this.pointProgram);
-            gl.uniformMatrix4fv(this.pointUMVP, false, mvp);
+            gl.uniformMatrix4fv(this.pointUMVP, false, cameraMVP);
             gl.uniform3f(this.pointUColor, 0.3, 0.6, 1.0); // Blue
             gl.uniform1f(this.pointUAlpha, 0.15); // Very faint
-            gl.uniform1f(this.pointUSize, 3.0); // 3 pixel points
+            gl.uniform1f(this.pointUSize, 3.0);
 
             gl.bindVertexArray(this.pointVAO);
             gl.drawArrays(gl.POINTS, 0, this.pointCount);
             gl.bindVertexArray(null);
         }
 
-        // Draw wireframe cube on top
+        // 2. Draw Reading Path Plane
+        if (this.planeVAO) {
+            // Calculate plane transform based on path state
+            // Order: Scale -> Rotate -> Translate
+            // We don't scale here, just rotate and translate
+
+            const pRotX = mat4RotateX(this.pathState.rotation.x);
+            const pRotY = mat4RotateY(this.pathState.rotation.y);
+            const pRotZ = mat4RotateZ(this.pathState.rotation.z);
+            const pTrans = mat4Translate(
+                this.pathState.position.x,
+                this.pathState.position.y,
+                this.pathState.position.z
+            );
+
+            // Combine plane transforms: T * Rz * Ry * Rx
+            let planeModel = mat4Multiply(pRotY, pRotX);
+            planeModel = mat4Multiply(pRotZ, planeModel);
+            planeModel = mat4Multiply(pTrans, planeModel);
+
+            // Combine with camera model
+            // Final MVP = Projection * View * (CameraModel * PlaneModel)
+            // Note: CameraModel rotates the whole world. PlaneModel moves plane relative to world.
+            const worldPlaneModel = mat4Multiply(model, planeModel);
+            const planeViewModel = mat4Multiply(view, worldPlaneModel);
+            const planeMVP = mat4Multiply(projection, planeViewModel);
+
+            gl.useProgram(this.planeProgram);
+            gl.uniformMatrix4fv(this.planeUMVP, false, planeMVP);
+            gl.uniform3f(this.planeUColor, 0.0, 1.0, 0.5); // Teal/Greenish
+            gl.uniform1f(this.planeUAlpha, 0.15); // Transparent
+
+            // Draw plane grid as lines (wireframe grid)
+            gl.bindVertexArray(this.planeVAO);
+            gl.drawElements(gl.LINES, this.planeIndexCount, gl.UNSIGNED_SHORT, 0);
+            gl.bindVertexArray(null);
+        }
+
+        // 3. Draw Reading Position Line (Green vertical line)
+        if (this.lineVAO) {
+            // The line moves with the plane's X/Z but stays vertical? 
+            // Or does it move with the plane entirely? 
+            // Usually reading position is a cursor ON the plane.
+            // For now, let's make it follow the plane's position/rotation exactly
+            // effectively showing the "center" of the reading head.
+
+            // Re-calculate plane MVP (same as above)
+            const pRotX = mat4RotateX(this.pathState.rotation.x);
+            const pRotY = mat4RotateY(this.pathState.rotation.y);
+            const pRotZ = mat4RotateZ(this.pathState.rotation.z);
+            const pTrans = mat4Translate(
+                this.pathState.position.x,
+                this.pathState.position.y,
+                this.pathState.position.z
+            );
+
+            let planeModel = mat4Multiply(pRotY, pRotX);
+            planeModel = mat4Multiply(pRotZ, planeModel);
+            planeModel = mat4Multiply(pTrans, planeModel);
+
+            const worldPlaneModel = mat4Multiply(model, planeModel);
+            const planeViewModel = mat4Multiply(view, worldPlaneModel);
+            const lineMVP = mat4Multiply(projection, planeViewModel);
+
+            gl.useProgram(this.wireframeProgram);
+            gl.uniformMatrix4fv(this.lineUMVP, false, lineMVP);
+            gl.uniform3f(this.lineUColor, 0.2, 1.0, 0.2); // Bright Green
+
+            gl.bindVertexArray(this.lineVAO);
+            gl.drawArrays(gl.LINES, 0, 2);
+            gl.bindVertexArray(null);
+        }
+
+        // 4. Draw Wireframe Cube (Bounds)
         gl.useProgram(this.wireframeProgram);
-        gl.uniformMatrix4fv(this.wireframeUMVP, false, mvp);
+        gl.uniformMatrix4fv(this.wireframeUMVP, false, cameraMVP);
         gl.uniform3f(this.wireframeUColor, 0.3, 0.6, 1.0); // Blue
 
         gl.bindVertexArray(this.wireframeVAO);
@@ -261,6 +418,15 @@ export class Renderer {
     public updateVolumeResolution(resolution: VolumeResolution): void {
         this.spectralVolume.updateResolution(resolution);
         this.updatePointCloud(resolution);
+    }
+
+    public updateReadingPath(state: ReadingPathState): void {
+        const typeChanged = state.planeType !== this.pathState.planeType;
+        this.pathState = state;
+
+        if (typeChanged) {
+            this.updateReadingPathGeometry();
+        }
     }
 
     // Mouse interaction

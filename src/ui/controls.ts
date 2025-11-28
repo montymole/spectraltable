@@ -1,4 +1,4 @@
-import { ReadingPathState, SpatialState, VolumeResolution, VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT } from '../types';
+import { ReadingPathState, SpatialState, VolumeResolution, VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT, PlaneType } from '../types';
 
 // UI control panel with sliders for all parameters
 
@@ -9,6 +9,10 @@ export class ControlPanel {
     private pathXSlider: HTMLInputElement;
     private pathYSlider: HTMLInputElement;
     private pathZSlider: HTMLInputElement;
+    private rotXSlider: HTMLInputElement;
+    private rotYSlider: HTMLInputElement;
+    private rotZSlider: HTMLInputElement;
+    private planeTypeSelect: HTMLSelectElement;
     private stereoSpreadSlider: HTMLInputElement;
     private speedSlider: HTMLInputElement;
 
@@ -27,10 +31,19 @@ export class ControlPanel {
         this.container = el;
 
         // Create section headers
-        this.createSection('Path Controls');
-        this.pathXSlider = this.createSlider('path-x', 'Path X', -1, 1, 0, 0.01);
-        this.pathYSlider = this.createSlider('path-y', 'Path Y', -1, 1, 0, 0.01);
-        this.pathZSlider = this.createSlider('path-z', 'Path Z', -1, 1, 0, 0.01);
+        this.createSection('Reading Path');
+        this.pathXSlider = this.createSlider('path-x', 'Position X', -1, 1, 0, 0.01);
+        this.pathYSlider = this.createSlider('path-y', 'Position Y', -1, 1, 0, 0.01);
+        this.pathZSlider = this.createSlider('path-z', 'Position Z', -1, 1, 0, 0.01);
+        this.rotXSlider = this.createSlider('rot-x', 'Rotation X', -Math.PI, Math.PI, 0, 0.01);
+        this.rotYSlider = this.createSlider('rot-y', 'Rotation Y', -Math.PI, Math.PI, 0, 0.01);
+        this.rotZSlider = this.createSlider('rot-z', 'Rotation Z', -Math.PI, Math.PI, 0, 0.01);
+        this.planeTypeSelect = this.createSelect('plane-type', 'Plane Type', [
+            PlaneType.FLAT,
+            PlaneType.SINCOS,
+            PlaneType.WAVE,
+            PlaneType.RIPPLE,
+        ]);
         this.speedSlider = this.createSlider('speed', 'Speed / Scrub', 0, 1, 0.5, 0.01);
 
         this.createSection('Spatial Audio');
@@ -98,6 +111,36 @@ export class ControlPanel {
         return slider;
     }
 
+    private createSelect(id: string, label: string, options: string[]): HTMLSelectElement {
+        const group = document.createElement('div');
+        group.className = 'control-group';
+
+        const labelEl = document.createElement('label');
+        labelEl.htmlFor = id;
+        labelEl.textContent = label;
+
+        const select = document.createElement('select');
+        select.id = id;
+        select.className = 'select';
+
+        for (const option of options) {
+            const optEl = document.createElement('option');
+            optEl.value = option;
+            optEl.textContent = option;
+            select.appendChild(optEl);
+        }
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+
+        group.appendChild(labelRow);
+        group.appendChild(select);
+        this.container.appendChild(group);
+
+        return select;
+    }
+
     private wireUpEvents(): void {
         const pathUpdate = () => {
             if (this.onPathChange) {
@@ -107,7 +150,13 @@ export class ControlPanel {
                         y: parseFloat(this.pathYSlider.value),
                         z: parseFloat(this.pathZSlider.value),
                     },
+                    rotation: {
+                        x: parseFloat(this.rotXSlider.value),
+                        y: parseFloat(this.rotYSlider.value),
+                        z: parseFloat(this.rotZSlider.value),
+                    },
                     speed: parseFloat(this.speedSlider.value),
+                    planeType: this.planeTypeSelect.value as PlaneType,
                 });
             }
         };
@@ -133,6 +182,10 @@ export class ControlPanel {
         this.pathXSlider.addEventListener('input', pathUpdate);
         this.pathYSlider.addEventListener('input', pathUpdate);
         this.pathZSlider.addEventListener('input', pathUpdate);
+        this.rotXSlider.addEventListener('input', pathUpdate);
+        this.rotYSlider.addEventListener('input', pathUpdate);
+        this.rotZSlider.addEventListener('input', pathUpdate);
+        this.planeTypeSelect.addEventListener('change', pathUpdate);
         this.speedSlider.addEventListener('input', pathUpdate);
         this.stereoSpreadSlider.addEventListener('input', spatialUpdate);
 

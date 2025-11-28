@@ -148,6 +148,31 @@ body {
   transform: scale(1.1);
 }
 
+/* Select Dropdown */
+.select {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: #2a2a35;
+  color: #e0e0e0;
+  border: 1px solid #2a2a35;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s;
+}
+
+.select:hover {
+  background: #323240;
+  border-color: #3a3a45;
+}
+
+.select:focus {
+  border-color: #4a9eff;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .controls-container {

@@ -56,9 +56,8 @@ class SpectralTableApp {
     }
 
     private onPathChange(state: ReadingPathState): void {
-        console.log('Path changed:', state);
-        // TODO: Update reading path in renderer
-        // TODO: Trigger audio parameter update
+        // console.log('Path changed:', state); // Too noisy for continuous updates
+        this.renderer.updateReadingPath(state);
     }
 
     private onSpatialChange(state: SpatialState): void {

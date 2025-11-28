@@ -62,27 +62,47 @@ export function mat4LookAt(eye: [number, number, number], center: [number, numbe
     return m;
 }
 
-export function mat4RotateY(angle: number): Mat4 {
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
-
-    const m = mat4Identity();
-    m[0] = c;
-    m[2] = s;
-    m[8] = -s;
-    m[10] = c;
-    return m;
-}
-
 export function mat4RotateX(angle: number): Mat4 {
     const c = Math.cos(angle);
     const s = Math.sin(angle);
 
     const m = mat4Identity();
     m[5] = c;
-    m[6] = -s;
-    m[9] = s;
+    m[6] = s;
+    m[9] = -s;
     m[10] = c;
+    return m;
+}
+
+export function mat4RotateY(angle: number): Mat4 {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+
+    const m = mat4Identity();
+    m[0] = c;
+    m[2] = -s;
+    m[8] = s;
+    m[10] = c;
+    return m;
+}
+
+export function mat4RotateZ(angle: number): Mat4 {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+
+    const m = mat4Identity();
+    m[0] = c;
+    m[1] = s;
+    m[4] = -s;
+    m[5] = c;
+    return m;
+}
+
+export function mat4Translate(x: number, y: number, z: number): Mat4 {
+    const m = mat4Identity();
+    m[12] = x;
+    m[13] = y;
+    m[14] = z;
     return m;
 }
 
