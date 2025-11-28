@@ -1,32 +1,54 @@
-import { ReadingPathState, SpatialState } from '../types';
+import { ReadingPathState, SpatialState, VolumeResolution, VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT } from '../types';
 
-// UI control panel with sliders for path control, stereo spread, and speed
-// Matches the concept image layout
+// UI control panel with sliders for all parameters
 
 export class ControlPanel {
     private container: HTMLElement;
 
+    // Path controls
     private pathXSlider: HTMLInputElement;
     private pathYSlider: HTMLInputElement;
     private pathZSlider: HTMLInputElement;
     private stereoSpreadSlider: HTMLInputElement;
     private speedSlider: HTMLInputElement;
 
+    // Volume density controls
+    private densityXSlider: HTMLInputElement;
+    private densityYSlider: HTMLInputElement;
+    private densityZSlider: HTMLInputElement;
+
     private onPathChange?: (state: ReadingPathState) => void;
     private onSpatialChange?: (state: SpatialState) => void;
+    private onVolumeResolutionChange?: (resolution: VolumeResolution) => void;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
         if (!el) throw new Error(`Container not found: ${containerId}`);
         this.container = el;
 
+        // Create section headers
+        this.createSection('Path Controls');
         this.pathXSlider = this.createSlider('path-x', 'Path X', -1, 1, 0, 0.01);
         this.pathYSlider = this.createSlider('path-y', 'Path Y', -1, 1, 0, 0.01);
         this.pathZSlider = this.createSlider('path-z', 'Path Z', -1, 1, 0, 0.01);
-        this.stereoSpreadSlider = this.createSlider('stereo-spread', 'Stereo Spread', 0, 1, 0.5, 0.01);
         this.speedSlider = this.createSlider('speed', 'Speed / Scrub', 0, 1, 0.5, 0.01);
 
+        this.createSection('Spatial Audio');
+        this.stereoSpreadSlider = this.createSlider('stereo-spread', 'Stereo Spread', 0, 1, 0.5, 0.01);
+
+        this.createSection('Volume Density');
+        this.densityXSlider = this.createSlider('density-x', 'Density X (Frequency)', VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT, 1);
+        this.densityYSlider = this.createSlider('density-y', 'Density Y (Index)', VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT, 1);
+        this.densityZSlider = this.createSlider('density-z', 'Density Z (Morph)', VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT, 1);
+
         this.wireUpEvents();
+    }
+
+    private createSection(title: string): void {
+        const section = document.createElement('div');
+        section.className = 'control-section-title';
+        section.textContent = title;
+        this.container.appendChild(section);
     }
 
     private createSlider(
@@ -46,7 +68,7 @@ export class ControlPanel {
 
         const valueDisplay = document.createElement('span');
         valueDisplay.className = 'value-display';
-        valueDisplay.textContent = value.toFixed(2);
+        valueDisplay.textContent = step >= 1 ? String(Math.round(value)) : value.toFixed(2);
         valueDisplay.id = `${id}-value`;
 
         const slider = document.createElement('input');
@@ -60,7 +82,8 @@ export class ControlPanel {
 
         // Update value display on change
         slider.addEventListener('input', () => {
-            valueDisplay.textContent = parseFloat(slider.value).toFixed(2);
+            const val = parseFloat(slider.value);
+            valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
         });
 
         const labelRow = document.createElement('div');
@@ -97,11 +120,26 @@ export class ControlPanel {
             }
         };
 
+        const volumeUpdate = () => {
+            if (this.onVolumeResolutionChange) {
+                this.onVolumeResolutionChange({
+                    x: Math.round(parseFloat(this.densityXSlider.value)),
+                    y: Math.round(parseFloat(this.densityYSlider.value)),
+                    z: Math.round(parseFloat(this.densityZSlider.value)),
+                });
+            }
+        };
+
         this.pathXSlider.addEventListener('input', pathUpdate);
         this.pathYSlider.addEventListener('input', pathUpdate);
         this.pathZSlider.addEventListener('input', pathUpdate);
         this.speedSlider.addEventListener('input', pathUpdate);
         this.stereoSpreadSlider.addEventListener('input', spatialUpdate);
+
+        // Volume density sliders trigger on change (not input) to avoid too many reinits
+        this.densityXSlider.addEventListener('change', volumeUpdate);
+        this.densityYSlider.addEventListener('change', volumeUpdate);
+        this.densityZSlider.addEventListener('change', volumeUpdate);
     }
 
     public setPathChangeCallback(callback: (state: ReadingPathState) => void): void {
@@ -110,5 +148,9 @@ export class ControlPanel {
 
     public setSpatialChangeCallback(callback: (state: SpatialState) => void): void {
         this.onSpatialChange = callback;
+    }
+
+    public setVolumeResolutionChangeCallback(callback: (resolution: VolumeResolution) => void): void {
+        this.onVolumeResolutionChange = callback;
     }
 }

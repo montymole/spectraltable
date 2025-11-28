@@ -2,7 +2,7 @@ import './style.css';
 import { WebGLContext } from './gpu/context';
 import { Renderer } from './gpu/renderer';
 import { ControlPanel } from './ui/controls';
-import { ReadingPathState, SpatialState } from './types';
+import { ReadingPathState, SpatialState, VolumeResolution, VOLUME_DENSITY_DEFAULT } from './types';
 
 // Main application entry point
 // Initializes WebGL, UI, and wires up event handling
@@ -22,7 +22,14 @@ class SpectralTableApp {
         if (!this.canvas) throw new Error('Canvas not found');
 
         this.glContext = new WebGLContext(this.canvas);
-        this.renderer = new Renderer(this.glContext);
+
+        // Create renderer with default resolution
+        const defaultResolution: VolumeResolution = {
+            x: VOLUME_DENSITY_DEFAULT,
+            y: VOLUME_DENSITY_DEFAULT,
+            z: VOLUME_DENSITY_DEFAULT,
+        };
+        this.renderer = new Renderer(this.glContext, defaultResolution);
 
         // Initialize UI controls
         this.controls = new ControlPanel('control-sliders');
@@ -30,6 +37,7 @@ class SpectralTableApp {
         // Wire up callbacks
         this.controls.setPathChangeCallback(this.onPathChange.bind(this));
         this.controls.setSpatialChangeCallback(this.onSpatialChange.bind(this));
+        this.controls.setVolumeResolutionChangeCallback(this.onVolumeResolutionChange.bind(this));
 
         // Handle window resize
         window.addEventListener('resize', this.onResize.bind(this));
@@ -56,6 +64,11 @@ class SpectralTableApp {
     private onSpatialChange(state: SpatialState): void {
         console.log('Spatial state changed:', state);
         // TODO: Update spatial audio processing
+    }
+
+    private onVolumeResolutionChange(resolution: VolumeResolution): void {
+        console.log('Volume resolution changed:', resolution);
+        this.renderer.updateVolumeResolution(resolution);
     }
 
     private onResize(): void {
@@ -87,6 +100,7 @@ class SpectralTableApp {
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
+        this.renderer.destroy();
     }
 }
 
