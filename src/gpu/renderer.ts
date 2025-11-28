@@ -46,6 +46,7 @@ export class Renderer {
     private lineVAO: WebGLVertexArrayObject | null = null;
     private lineUMVP: WebGLUniformLocation;
     private lineUColor: WebGLUniformLocation;
+    private lineVertexCount = 0; // Added this property
 
     // State
     private spectralVolume: SpectralVolume;
@@ -53,6 +54,7 @@ export class Renderer {
         position: { x: 0, y: 0, z: 0 },
         rotation: { x: 0, y: 0, z: 0 },
         speed: 0.5,
+        scanPosition: 0,
         planeType: PlaneType.FLAT
     };
 
@@ -302,7 +304,7 @@ export class Renderer {
         const linePositions = ReadingPathGeometry.generateReadingLine(
             this.pathState.planeType,
             resolutionX,
-            0 // Z relative to plane
+            this.pathState.scanPosition
         );
 
         this.lineVertexCount = linePositions.length / 3;
@@ -313,7 +315,7 @@ export class Renderer {
 
         const lineVBO = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, lineVBO);
-        gl.bufferData(gl.ARRAY_BUFFER, linePositions, gl.STATIC_DRAW);
+        gl.bufferData(gl.ARRAY_BUFFER, linePositions, gl.DYNAMIC_DRAW);
 
         const linePosLoc = gl.getAttribLocation(this.wireframeProgram, 'aPosition');
         gl.enableVertexAttribArray(linePosLoc);
@@ -324,7 +326,7 @@ export class Renderer {
     }
 
     // Add lineVertexCount property
-    private lineVertexCount = 0;
+
 
     public render(): void {
         const gl = this.ctx.gl;
@@ -428,10 +430,15 @@ export class Renderer {
 
     public updateReadingPath(state: ReadingPathState): void {
         const typeChanged = state.planeType !== this.pathState.planeType;
+        const scanChanged = state.scanPosition !== this.pathState.scanPosition;
+
         this.pathState = state;
 
         if (typeChanged) {
             this.updateReadingPathGeometry();
+        } else if (scanChanged) {
+            const resolution = this.spectralVolume.getResolution();
+            this.updateReadingLineGeometry(resolution.x);
         }
     }
 

@@ -15,6 +15,7 @@ export class ControlPanel {
     private planeTypeSelect: HTMLSelectElement;
     private stereoSpreadSlider: HTMLInputElement;
     private speedSlider: HTMLInputElement;
+    private scanPositionSlider: HTMLInputElement;
 
     // Volume density controls
     private densityXSlider: HTMLInputElement;
@@ -45,6 +46,7 @@ export class ControlPanel {
             PlaneType.RIPPLE,
         ]);
         this.speedSlider = this.createSlider('speed', 'Speed / Scrub', 0, 1, 0.5, 0.01);
+        this.scanPositionSlider = this.createSlider('scan-pos', 'Scan Phase', -1, 1, 0, 0.01);
 
         this.createSection('Spatial Audio');
         this.stereoSpreadSlider = this.createSlider('stereo-spread', 'Stereo Spread', 0, 1, 0.5, 0.01);
@@ -56,6 +58,8 @@ export class ControlPanel {
 
         this.wireUpEvents();
     }
+
+    // ... (createSection, createSlider, createSelect methods remain same)
 
     private createSection(title: string): void {
         const section = document.createElement('div');
@@ -144,20 +148,7 @@ export class ControlPanel {
     private wireUpEvents(): void {
         const pathUpdate = () => {
             if (this.onPathChange) {
-                this.onPathChange({
-                    position: {
-                        x: parseFloat(this.pathXSlider.value),
-                        y: parseFloat(this.pathYSlider.value),
-                        z: parseFloat(this.pathZSlider.value),
-                    },
-                    rotation: {
-                        x: parseFloat(this.rotXSlider.value),
-                        y: parseFloat(this.rotYSlider.value),
-                        z: parseFloat(this.rotZSlider.value),
-                    },
-                    speed: parseFloat(this.speedSlider.value),
-                    planeType: this.planeTypeSelect.value as PlaneType,
-                });
+                this.onPathChange(this.getState());
             }
         };
 
@@ -187,6 +178,7 @@ export class ControlPanel {
         this.rotZSlider.addEventListener('input', pathUpdate);
         this.planeTypeSelect.addEventListener('change', pathUpdate);
         this.speedSlider.addEventListener('input', pathUpdate);
+        this.scanPositionSlider.addEventListener('input', pathUpdate);
         this.stereoSpreadSlider.addEventListener('input', spatialUpdate);
 
         // Volume density sliders trigger on change (not input) to avoid too many reinits
@@ -224,17 +216,18 @@ export class ControlPanel {
                 z: parseFloat(this.rotZSlider.value),
             },
             speed: parseFloat(this.speedSlider.value),
+            scanPosition: parseFloat(this.scanPositionSlider.value),
             planeType: this.planeTypeSelect.value as PlaneType,
         };
     }
 
-    public updatePositionY(y: number): void {
-        this.pathYSlider.value = String(y);
+    public updateScanPosition(pos: number): void {
+        this.scanPositionSlider.value = String(pos);
         // Update display
-        const display = document.getElementById('path-y-value');
-        if (display) display.textContent = y.toFixed(2);
+        const display = document.getElementById('scan-pos-value');
+        if (display) display.textContent = pos.toFixed(2);
 
-        // Trigger callback manually since setting .value doesn't fire event
+        // Trigger callback manually
         if (this.onPathChange) {
             this.onPathChange(this.getState());
         }

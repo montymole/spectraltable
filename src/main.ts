@@ -102,20 +102,15 @@ class SpectralTableApp {
             if (speed > 0) {
                 // Get current state
                 const currentState = this.controls.getState();
-                let newY = currentState.position.y + (speed * 0.5 * deltaTime); // 0.5 scale factor
+                let newScanPos = currentState.scanPosition + (speed * 0.5 * deltaTime); // 0.5 scale factor
 
                 // Loop -1 to 1
-                if (newY > 1) {
-                    newY = -1;
+                if (newScanPos > 1) {
+                    newScanPos = -1;
                 }
 
                 // Update controls (which will trigger callback -> renderer update)
-                // Note: This might cause a loop if we're not careful, but controls.updatePosition 
-                // should update the UI slider without triggering the 'input' event if done right.
-                // Or we just update the renderer directly and the slider visually?
-
-                // Better: Update the internal state and the renderer, and visually update the slider
-                this.controls.updatePositionY(newY);
+                this.controls.updateScanPosition(newScanPos);
             }
 
             this.renderer.render();
