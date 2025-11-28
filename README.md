@@ -8,9 +8,10 @@ This is a **Proof of Concept (PoC)** prototype for the **Spectra Table Synthesis
 - ✅ WebGL 2.0 context with RGBA32F texture support
 - ✅ 3D wireframe cube visualization (mouse rotation)
 - ✅ Spectral volume as 3D point cloud (adjustable density 8-128)
-- ✅ Reading path visualization (transparent plane + position line)
+- ✅ Reading path visualization (transparent plane + scanning line)
 - ✅ Advanced controls: Plane Rotation X/Y/Z, Plane Geometry Types (Flat, SinCos, Wave, Ripple)
-- ✅ UI controls: Path X/Y/Z, Stereo Spread, Speed, Volume Density X/Y/Z
+- ✅ Animation: Reading line scans across plane contour (Speed/Scrub control)
+- ✅ UI controls: Path X/Y/Z, Scan Phase, Stereo Spread, Speed, Volume Density X/Y/Z
 - ✅ Vite dev server with HMR and TypeScript strict mode
 
 **Next:**
