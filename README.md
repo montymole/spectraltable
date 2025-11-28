@@ -1,6 +1,21 @@
-## 🚀 Spectra Table Synthesis: Web Prototype Project Plan (Proof of Concept)
+## 🚀 Spectra Table Synthesis: Web Prototype (Proof of Concept)
 
-This document outlines the project plan for developing a **Proof of Concept (PoC)** prototype for the **Spectra Table Synthesis** method, leveraging browser-based technologies (WebGL, Web Audio, Web MIDI, and TypeScript). The goal is to create a visually rich, functional interface reminiscent of a VST plugin, focusing on the core synthesis concept and the novel user experience.
+This is a **Proof of Concept (PoC)** prototype for the **Spectra Table Synthesis** method, leveraging browser-based technologies (WebGL 2.0, Web Audio, Web MIDI, and TypeScript). The goal is to create a visually rich, functional interface for controlling GPU-accelerated spectral synthesis with a 3D interactive volume.
+
+## 📊 Current Status
+
+**Implemented:**
+- ✅ WebGL 2.0 context with RGBA32F texture support
+- ✅ 3D wireframe cube visualization (mouse rotation)
+- ✅ Spectral volume as 3D point cloud (adjustable density 8-128)
+- ✅ UI controls: Path X/Y/Z, Stereo Spread, Speed, Volume Density X/Y/Z
+- ✅ Vite dev server with HMR and TypeScript strict mode
+
+**Next:**
+- 🔜 Reading path visualization (curve inside cube)
+- 🔜 Web Audio integration (AudioWorklet + iFFT)
+- 🔜 Web MIDI input for pitch control
+- 🔜 GPU-CPU data synchronization (double buffering)
 
 ---
 
@@ -12,12 +27,13 @@ This document outlines the project plan for developing a **Proof of Concept (PoC
 * **Sound Exploration:** Demonstrate the unique sonic capabilities enabled by the **Reading Path** concept.
 * **Performance Flexibility:** Allow flexibility with real-time performance by utilizing large read buffers to prioritize stability and visual fidelity over absolute low-latency.
 
-### 1.2. Technology Stack
-* **Core Logic:** **TypeScript**
-* **Graphics/GPU Compute:** **WebGL 2.0** (for 3D visualization and GPU-based spectral processing/animation)
-* **Audio Output:** **Web Audio API** (AudioWorklet for non-blocking processing if necessary)
-* **Input:** **Web MIDI API** (for keyboard/controller input)
-* **UI/Framework:** HTML/CSS, potentially a minimal UI framework (e.g., React/Vue for component structure, but not strictly required).
+### 1.2. Technology Stack (Implemented)
+* **Core Logic:** **TypeScript** (strict mode)
+* **Build Tool:** **Vite 5.x** (dev server, HMR, production builds)
+* **Graphics/GPU:** **WebGL 2.0** (3D visualization, RGBA32F textures, point cloud rendering)
+* **Audio Output:** **Web Audio API** (AudioWorklet - planned)
+* **Input:** **Web MIDI API** (planned)
+* **UI:** **Vanilla HTML/CSS** (no framework - minimal dependencies, direct DOM control)
 
 ---
 
