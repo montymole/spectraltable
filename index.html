@@ -1,18 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Spectra Table Synthesis</title>
-  </head>
-  <body>
-    <div id="app">
-      <canvas id="gl-canvas"></canvas>
-      <div id="controls">
-        <h1>Spectra Table Synthesis</h1>
-        <p>WebGL2 + Web Audio + Web MIDI</p>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="GPU-accelerated spectral synthesis in the browser" />
+  <title>Spectra Table Synthesis</title>
+</head>
+
+<body>
+  <div id="app">
+    <!-- WebGL Canvas for 3D visualization -->
+    <canvas id="gl-canvas"></canvas>
+
+    <!-- Control Panel -->
+    <div id="controls" class="control-panel">
+      <h1>Spectra Table Synthesis</h1>
+      <div id="control-sliders" class="controls-container">
+        <!-- Sliders injected by ControlPanel class -->
       </div>
     </div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
 </html>
