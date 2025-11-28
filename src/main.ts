@@ -56,9 +56,8 @@ class SpectralTableApp {
     }
 
     private onPathChange(state: ReadingPathState): void {
-        console.log('Path changed:', state);
-        // TODO: Update reading path in renderer
-        // TODO: Trigger audio parameter update
+        // console.log('Path changed:', state); // Too noisy for continuous updates
+        this.renderer.updateReadingPath(state);
     }
 
     private onSpatialChange(state: SpatialState): void {
@@ -89,11 +88,35 @@ class SpectralTableApp {
     }
 
     private startRenderLoop(): void {
-        const render = () => {
+        let lastTime = performance.now();
+
+        const render = (time: number) => {
+            const deltaTime = (time - lastTime) / 1000; // Seconds
+            lastTime = time;
+
+            // Animate reading position (Scrub)
+            // Speed 0 = stop, Speed 1 = fast (e.g. 1 cycle per second)
+            // We map slider 0-1 to a useful speed range, e.g. 0 to 2.0 units/sec
+            const speed = this.controls.getSpeed(); // We need to expose this or read from state
+
+            if (speed > 0) {
+                // Get current state
+                const currentState = this.controls.getState();
+                let newScanPos = currentState.scanPosition + (speed * 0.5 * deltaTime); // 0.5 scale factor
+
+                // Loop -1 to 1
+                if (newScanPos > 1) {
+                    newScanPos = -1;
+                }
+
+                // Update controls (which will trigger callback -> renderer update)
+                this.controls.updateScanPosition(newScanPos);
+            }
+
             this.renderer.render();
             this.animationFrameId = requestAnimationFrame(render);
         };
-        render();
+        requestAnimationFrame(render);
     }
 
     public destroy(): void {
