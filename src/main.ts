@@ -88,11 +88,40 @@ class SpectralTableApp {
     }
 
     private startRenderLoop(): void {
-        const render = () => {
+        let lastTime = performance.now();
+
+        const render = (time: number) => {
+            const deltaTime = (time - lastTime) / 1000; // Seconds
+            lastTime = time;
+
+            // Animate reading position (Scrub)
+            // Speed 0 = stop, Speed 1 = fast (e.g. 1 cycle per second)
+            // We map slider 0-1 to a useful speed range, e.g. 0 to 2.0 units/sec
+            const speed = this.controls.getSpeed(); // We need to expose this or read from state
+
+            if (speed > 0) {
+                // Get current state
+                const currentState = this.controls.getState();
+                let newY = currentState.position.y + (speed * 0.5 * deltaTime); // 0.5 scale factor
+
+                // Loop -1 to 1
+                if (newY > 1) {
+                    newY = -1;
+                }
+
+                // Update controls (which will trigger callback -> renderer update)
+                // Note: This might cause a loop if we're not careful, but controls.updatePosition 
+                // should update the UI slider without triggering the 'input' event if done right.
+                // Or we just update the renderer directly and the slider visually?
+
+                // Better: Update the internal state and the renderer, and visually update the slider
+                this.controls.updatePositionY(newY);
+            }
+
             this.renderer.render();
             this.animationFrameId = requestAnimationFrame(render);
         };
-        render();
+        requestAnimationFrame(render);
     }
 
     public destroy(): void {

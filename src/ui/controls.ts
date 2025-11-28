@@ -206,4 +206,37 @@ export class ControlPanel {
     public setVolumeResolutionChangeCallback(callback: (resolution: VolumeResolution) => void): void {
         this.onVolumeResolutionChange = callback;
     }
+
+    public getSpeed(): number {
+        return parseFloat(this.speedSlider.value);
+    }
+
+    public getState(): ReadingPathState {
+        return {
+            position: {
+                x: parseFloat(this.pathXSlider.value),
+                y: parseFloat(this.pathYSlider.value),
+                z: parseFloat(this.pathZSlider.value),
+            },
+            rotation: {
+                x: parseFloat(this.rotXSlider.value),
+                y: parseFloat(this.rotYSlider.value),
+                z: parseFloat(this.rotZSlider.value),
+            },
+            speed: parseFloat(this.speedSlider.value),
+            planeType: this.planeTypeSelect.value as PlaneType,
+        };
+    }
+
+    public updatePositionY(y: number): void {
+        this.pathYSlider.value = String(y);
+        // Update display
+        const display = document.getElementById('path-y-value');
+        if (display) display.textContent = y.toFixed(2);
+
+        // Trigger callback manually since setting .value doesn't fire event
+        if (this.onPathChange) {
+            this.onPathChange(this.getState());
+        }
+    }
 }
