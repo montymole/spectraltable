@@ -271,9 +271,41 @@ export class Renderer {
         this.planeVAO = planeVAO;
 
         // 2. Update Line Geometry
+        // We use the current volume resolution X for the line detail
+        const resolution = this.spectralVolume.getResolution();
+        this.updateReadingLineGeometry(resolution.x);
+    }
+
+    private updateReadingLineGeometry(resolutionX: number): void {
+        const gl = this.ctx.gl;
+
         if (this.lineVAO) gl.deleteVertexArray(this.lineVAO);
 
-        const linePositions = ReadingPathGeometry.generateReadingLine();
+        // Generate line at Z=0 (relative to plane), we will translate it via matrix
+        // Actually, if the contour depends on Z, we should generate it at Z=0 
+        // and rely on the plane's Z-translation to move it through the volume?
+        // YES. The plane moves through the volume. The line is "on" the plane.
+        // So we generate the line at Z=0 relative to the plane.
+        // Wait, if the plane is curved (e.g. Wave), the height depends on Z.
+        // If we are at Z=0 on the plane, the height is fixed.
+        // But the user might want to scan "along" the plane?
+        // No, the "Reading Position" usually means where we are reading *in the volume*.
+        // If the plane represents the "read head", then the line represents the "current slice".
+        // So the line is fixed to the plane.
+        // Let's assume the line is always at the center of the plane (Z=0 in plane space)
+        // or maybe the user wants to move the line across the plane?
+        // For now, let's keep it simple: The line is the intersection of the plane and the reading position.
+        // Since the plane IS the reading position (it moves), the line is just a visual indicator 
+        // of the plane's contour at the center?
+        // Let's generate it at Z=0 in plane space.
+
+        const linePositions = ReadingPathGeometry.generateReadingLine(
+            this.pathState.planeType,
+            resolutionX,
+            0 // Z relative to plane
+        );
+
+        this.lineVertexCount = linePositions.length / 3;
 
         const lineVAO = gl.createVertexArray();
         if (!lineVAO) throw new Error('Failed to create line VAO');
@@ -290,6 +322,9 @@ export class Renderer {
         gl.bindVertexArray(null);
         this.lineVAO = lineVAO;
     }
+
+    // Add lineVertexCount property
+    private lineVertexCount = 0;
 
     public render(): void {
         const gl = this.ctx.gl;
@@ -326,76 +361,45 @@ export class Renderer {
             gl.bindVertexArray(null);
         }
 
+        // Calculate plane transform
+        const pRotX = mat4RotateX(this.pathState.rotation.x);
+        const pRotY = mat4RotateY(this.pathState.rotation.y);
+        const pRotZ = mat4RotateZ(this.pathState.rotation.z);
+        const pTrans = mat4Translate(
+            this.pathState.position.x,
+            this.pathState.position.y,
+            this.pathState.position.z
+        );
+
+        let planeModel = mat4Multiply(pRotY, pRotX);
+        planeModel = mat4Multiply(pRotZ, planeModel);
+        planeModel = mat4Multiply(pTrans, planeModel);
+
+        const worldPlaneModel = mat4Multiply(model, planeModel);
+        const planeViewModel = mat4Multiply(view, worldPlaneModel);
+        const planeMVP = mat4Multiply(projection, planeViewModel);
+
         // 2. Draw Reading Path Plane
         if (this.planeVAO) {
-            // Calculate plane transform based on path state
-            // Order: Scale -> Rotate -> Translate
-            // We don't scale here, just rotate and translate
-
-            const pRotX = mat4RotateX(this.pathState.rotation.x);
-            const pRotY = mat4RotateY(this.pathState.rotation.y);
-            const pRotZ = mat4RotateZ(this.pathState.rotation.z);
-            const pTrans = mat4Translate(
-                this.pathState.position.x,
-                this.pathState.position.y,
-                this.pathState.position.z
-            );
-
-            // Combine plane transforms: T * Rz * Ry * Rx
-            let planeModel = mat4Multiply(pRotY, pRotX);
-            planeModel = mat4Multiply(pRotZ, planeModel);
-            planeModel = mat4Multiply(pTrans, planeModel);
-
-            // Combine with camera model
-            // Final MVP = Projection * View * (CameraModel * PlaneModel)
-            // Note: CameraModel rotates the whole world. PlaneModel moves plane relative to world.
-            const worldPlaneModel = mat4Multiply(model, planeModel);
-            const planeViewModel = mat4Multiply(view, worldPlaneModel);
-            const planeMVP = mat4Multiply(projection, planeViewModel);
-
             gl.useProgram(this.planeProgram);
             gl.uniformMatrix4fv(this.planeUMVP, false, planeMVP);
             gl.uniform3f(this.planeUColor, 0.0, 1.0, 0.5); // Teal/Greenish
             gl.uniform1f(this.planeUAlpha, 0.15); // Transparent
 
-            // Draw plane grid as lines (wireframe grid)
             gl.bindVertexArray(this.planeVAO);
             gl.drawElements(gl.LINES, this.planeIndexCount, gl.UNSIGNED_SHORT, 0);
             gl.bindVertexArray(null);
         }
 
-        // 3. Draw Reading Position Line (Green vertical line)
+        // 3. Draw Reading Position Line (Green contour line)
         if (this.lineVAO) {
-            // The line moves with the plane's X/Z but stays vertical? 
-            // Or does it move with the plane entirely? 
-            // Usually reading position is a cursor ON the plane.
-            // For now, let's make it follow the plane's position/rotation exactly
-            // effectively showing the "center" of the reading head.
-
-            // Re-calculate plane MVP (same as above)
-            const pRotX = mat4RotateX(this.pathState.rotation.x);
-            const pRotY = mat4RotateY(this.pathState.rotation.y);
-            const pRotZ = mat4RotateZ(this.pathState.rotation.z);
-            const pTrans = mat4Translate(
-                this.pathState.position.x,
-                this.pathState.position.y,
-                this.pathState.position.z
-            );
-
-            let planeModel = mat4Multiply(pRotY, pRotX);
-            planeModel = mat4Multiply(pRotZ, planeModel);
-            planeModel = mat4Multiply(pTrans, planeModel);
-
-            const worldPlaneModel = mat4Multiply(model, planeModel);
-            const planeViewModel = mat4Multiply(view, worldPlaneModel);
-            const lineMVP = mat4Multiply(projection, planeViewModel);
-
+            // Use same MVP as plane so it sticks to it
             gl.useProgram(this.wireframeProgram);
-            gl.uniformMatrix4fv(this.lineUMVP, false, lineMVP);
+            gl.uniformMatrix4fv(this.lineUMVP, false, planeMVP);
             gl.uniform3f(this.lineUColor, 0.2, 1.0, 0.2); // Bright Green
 
             gl.bindVertexArray(this.lineVAO);
-            gl.drawArrays(gl.LINES, 0, 2);
+            gl.drawArrays(gl.LINE_STRIP, 0, this.lineVertexCount);
             gl.bindVertexArray(null);
         }
 
@@ -418,6 +422,8 @@ export class Renderer {
     public updateVolumeResolution(resolution: VolumeResolution): void {
         this.spectralVolume.updateResolution(resolution);
         this.updatePointCloud(resolution);
+        // Also update reading line resolution
+        this.updateReadingLineGeometry(resolution.x);
     }
 
     public updateReadingPath(state: ReadingPathState): void {

@@ -3,6 +3,30 @@ import { PlaneType } from '../types';
 // Generate reading path plane geometry with different algorithms
 
 export class ReadingPathGeometry {
+    // Helper to calculate Y height for a given X, Z and plane type
+    private static calculateHeight(x: number, z: number, planeType: PlaneType): number {
+        switch (planeType) {
+            case PlaneType.FLAT:
+                return 0;
+
+            case PlaneType.SINCOS:
+                // Sine and cosine modulation
+                return 0.3 * (Math.sin(x * Math.PI * 2) * Math.cos(z * Math.PI * 2));
+
+            case PlaneType.WAVE:
+                // Wave pattern
+                return 0.2 * Math.sin((x + z) * Math.PI * 3);
+
+            case PlaneType.RIPPLE:
+                // Circular ripple from center
+                const dist = Math.sqrt(x * x + z * z);
+                return 0.25 * Math.sin(dist * Math.PI * 4) / (1 + dist * 2);
+
+            default:
+                return 0;
+        }
+    }
+
     // Generate a grid-based plane with various height modulation functions
     public static generatePlane(
         planeType: PlaneType,
@@ -18,29 +42,7 @@ export class ReadingPathGeometry {
                 const x = (ix / (gridSize - 1)) * 2 - 1;
                 const z = (iz / (gridSize - 1)) * 2 - 1;
 
-                // Calculate Y based on plane type
-                let y = 0;
-                switch (planeType) {
-                    case PlaneType.FLAT:
-                        y = 0;
-                        break;
-
-                    case PlaneType.SINCOS:
-                        // Sine and cosine modulation
-                        y = 0.3 * (Math.sin(x * Math.PI * 2) * Math.cos(z * Math.PI * 2));
-                        break;
-
-                    case PlaneType.WAVE:
-                        // Wave pattern
-                        y = 0.2 * Math.sin((x + z) * Math.PI * 3);
-                        break;
-
-                    case PlaneType.RIPPLE:
-                        // Circular ripple from center
-                        const dist = Math.sqrt(x * x + z * z);
-                        y = 0.25 * Math.sin(dist * Math.PI * 4) / (1 + dist * 2);
-                        break;
-                }
+                const y = this.calculateHeight(x, z, planeType);
 
                 positions.push(x, y, z);
             }
@@ -74,12 +76,26 @@ export class ReadingPathGeometry {
         };
     }
 
-    // Generate a simple line for reading position indicator
-    public static generateReadingLine(): Float32Array {
-        // Vertical line from bottom to top of cube
-        return new Float32Array([
-            0, -1, 0,  // Bottom
-            0, 1, 0,  // Top
-        ]);
+    // Generate the reading line that follows the plane contour
+    // This line represents the current spectral slice being read
+    // It spans X [-1, 1] at a specific Z (relative to plane)
+    public static generateReadingLine(
+        planeType: PlaneType,
+        resolutionX: number,
+        currentZ: number = 0 // Z position relative to plane space [-1, 1]
+    ): Float32Array {
+        const positions: number[] = [];
+
+        // Ensure we stay within bounds
+        const z = Math.max(-1, Math.min(1, currentZ));
+
+        for (let i = 0; i < resolutionX; i++) {
+            const x = (i / (resolutionX - 1)) * 2 - 1;
+            const y = this.calculateHeight(x, z, planeType);
+
+            positions.push(x, y, z);
+        }
+
+        return new Float32Array(positions);
     }
 }
