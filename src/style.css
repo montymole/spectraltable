@@ -52,6 +52,23 @@ body {
   max-width: 1200px;
 }
 
+/* Section Titles */
+.control-section-title {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #808080;
+  margin-top: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #2a2a35;
+}
+
+.control-section-title:first-child {
+  margin-top: 0;
+}
+
 /* Control Groups */
 .control-group {
   display: flex;

@@ -21,3 +21,14 @@ export interface SpectralSlice {
     pan: Float32Array;        // Stereo pan per frequency
     width: Float32Array;      // Stereo width per frequency
 }
+
+export interface VolumeResolution {
+    x: number;  // Frequency bins (horizontal)
+    y: number;  // Index/harmonic (vertical)
+    z: number;  // Morph/timbre (depth)
+}
+
+// Sensible density ranges for the spectral volume
+export const VOLUME_DENSITY_MIN = 8;
+export const VOLUME_DENSITY_MAX = 128;
+export const VOLUME_DENSITY_DEFAULT = 32;
