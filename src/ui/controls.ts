@@ -6,12 +6,8 @@ export class ControlPanel {
     private container: HTMLElement;
 
     // Path controls
-    private pathXSlider: HTMLInputElement;
     private pathYSlider: HTMLInputElement;
-    private pathZSlider: HTMLInputElement;
-    private rotXSlider: HTMLInputElement;
-    private rotYSlider: HTMLInputElement;
-    private rotZSlider: HTMLInputElement;
+    // Rotation sliders removed - now controlled by mouse
     private planeTypeSelect: HTMLSelectElement;
     private stereoSpreadSlider: HTMLInputElement;
     private speedSlider: HTMLInputElement;
@@ -22,23 +18,29 @@ export class ControlPanel {
     private densityYSlider: HTMLInputElement;
     private densityZSlider: HTMLInputElement;
 
+    // Spectral data controls
+    private spectralDataSelect: HTMLSelectElement;
+
     private onPathChange?: (state: ReadingPathState) => void;
     private onSpatialChange?: (state: SpatialState) => void;
     private onVolumeResolutionChange?: (resolution: VolumeResolution) => void;
+    private onSpectralDataChange?: (dataSet: string) => void;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
         if (!el) throw new Error(`Container not found: ${containerId}`);
         this.container = el;
 
+        this.createSection('Spectral Data');
+        this.spectralDataSelect = this.createSelect('spectral-data-type', 'Data Set', [
+            'blank',
+            'clouds'
+        ]);
+
         // Create section headers
         this.createSection('Reading Path');
-        this.pathXSlider = this.createSlider('path-x', 'Position X', -1, 1, 0, 0.01);
         this.pathYSlider = this.createSlider('path-y', 'Position Y', -1, 1, 0, 0.01);
-        this.pathZSlider = this.createSlider('path-z', 'Position Z', -1, 1, 0, 0.01);
-        this.rotXSlider = this.createSlider('rot-x', 'Rotation X', -Math.PI, Math.PI, 0, 0.01);
-        this.rotYSlider = this.createSlider('rot-y', 'Rotation Y', -Math.PI, Math.PI, 0, 0.01);
-        this.rotZSlider = this.createSlider('rot-z', 'Rotation Z', -Math.PI, Math.PI, 0, 0.01);
+        // Rotation is now controlled by mouse - removed sliders
         this.planeTypeSelect = this.createSelect('plane-type', 'Plane Type', [
             PlaneType.FLAT,
             PlaneType.SINCOS,
@@ -170,12 +172,16 @@ export class ControlPanel {
             }
         };
 
-        this.pathXSlider.addEventListener('input', pathUpdate);
+        const spectralDataUpdate = () => {
+            if (this.onSpectralDataChange) {
+                this.onSpectralDataChange(this.spectralDataSelect.value);
+            }
+        };
+
+        this.spectralDataSelect.addEventListener('change', spectralDataUpdate);
+
         this.pathYSlider.addEventListener('input', pathUpdate);
-        this.pathZSlider.addEventListener('input', pathUpdate);
-        this.rotXSlider.addEventListener('input', pathUpdate);
-        this.rotYSlider.addEventListener('input', pathUpdate);
-        this.rotZSlider.addEventListener('input', pathUpdate);
+        // Rotation sliders removed - controlled by mouse
         this.planeTypeSelect.addEventListener('change', pathUpdate);
         this.speedSlider.addEventListener('input', pathUpdate);
         this.scanPositionSlider.addEventListener('input', pathUpdate);
@@ -199,6 +205,10 @@ export class ControlPanel {
         this.onVolumeResolutionChange = callback;
     }
 
+    public setSpectralDataChangeCallback(callback: (dataSet: string) => void): void {
+        this.onSpectralDataChange = callback;
+    }
+
     public getSpeed(): number {
         return parseFloat(this.speedSlider.value);
     }
@@ -206,14 +216,14 @@ export class ControlPanel {
     public getState(): ReadingPathState {
         return {
             position: {
-                x: parseFloat(this.pathXSlider.value),
+                x: 0,
                 y: parseFloat(this.pathYSlider.value),
-                z: parseFloat(this.pathZSlider.value),
+                z: 0,
             },
             rotation: {
-                x: parseFloat(this.rotXSlider.value),
-                y: parseFloat(this.rotYSlider.value),
-                z: parseFloat(this.rotZSlider.value),
+                x: 0, // Controlled by mouse
+                y: 0, // Not used
+                z: 0, // Controlled by mouse
             },
             speed: parseFloat(this.speedSlider.value),
             scanPosition: parseFloat(this.scanPositionSlider.value),

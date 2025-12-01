@@ -21,8 +21,8 @@ body {
 
 /* WebGL Canvas */
 #gl-canvas {
-  width: 100%;
-  height: 60vh;
+  width: 50%;
+  height: 30vh;
   background: linear-gradient(180deg, #0d0d14 0%, #14141c 100%);
   display: block;
   cursor: crosshair;
@@ -171,6 +171,38 @@ body {
 .select:focus {
   border-color: #4a9eff;
   box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
+}
+
+.top-section {
+  display: flex;
+  width: 100%;
+  height: 30vh;
+  background: #000;
+}
+
+/* WebGL Canvas - Left 50% */
+#gl-canvas {
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(180deg, #0d0d14 0%, #14141c 100%);
+  cursor: crosshair;
+}
+
+/* Spectrogram Canvas - Top Right 25% */
+.spectrogram-canvas {
+  width: 50%;
+  height: 50%;
+  display: block;
+  border-left: 1px solid #2a2a35;
+  border-bottom: 1px solid #2a2a35;
+}
+
+/* Scope Canvas - Bottom Right 25% */
+.scope-canvas {
+  width: 50%;
+  height: 50%;
+  display: block;
+  border-left: 1px solid #2a2a35;
 }
 
 /* Responsive */

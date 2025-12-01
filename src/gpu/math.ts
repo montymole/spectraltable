@@ -121,3 +121,15 @@ export function mat4Multiply(a: Mat4, b: Mat4): Mat4 {
 
     return out;
 }
+
+export function vec3TransformMat4(v: [number, number, number], m: Mat4): [number, number, number] {
+    const x = v[0], y = v[1], z = v[2];
+    const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+    const iw = w !== 0 ? 1.0 / w : 1.0;
+
+    return [
+        (m[0] * x + m[4] * y + m[8] * z + m[12]) * iw,
+        (m[1] * x + m[5] * y + m[9] * z + m[13]) * iw,
+        (m[2] * x + m[6] * y + m[10] * z + m[14]) * iw
+    ];
+}

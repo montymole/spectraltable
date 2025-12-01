@@ -9,7 +9,8 @@ import {
 } from './shaders';
 import {
     mat4Perspective, mat4LookAt, mat4Multiply,
-    mat4RotateX, mat4RotateY, mat4RotateZ, mat4Translate
+    mat4RotateX, mat4RotateY, mat4RotateZ, mat4Translate,
+    vec3TransformMat4
 } from './math';
 import { SpectralVolume } from './spectral-volume';
 import { ReadingPathGeometry } from './reading-path';
@@ -31,7 +32,7 @@ export class Renderer {
     private pointVAO: WebGLVertexArrayObject | null = null;
     private pointCount = 0;
     private pointUMVP: WebGLUniformLocation;
-    private pointUColor: WebGLUniformLocation;
+    private pointUVolume: WebGLUniformLocation; // Changed from pointUColor
     private pointUAlpha: WebGLUniformLocation;
     private pointUSize: WebGLUniformLocation;
 
@@ -40,7 +41,8 @@ export class Renderer {
     private planeVAO: WebGLVertexArrayObject | null = null;
     private planeIndexCount = 0;
     private planeUMVP: WebGLUniformLocation;
-    private planeUColor: WebGLUniformLocation;
+    private planeUModel: WebGLUniformLocation;
+    private planeUVolume: WebGLUniformLocation;
     private planeUAlpha: WebGLUniformLocation;
 
     private lineVAO: WebGLVertexArrayObject | null = null;
@@ -64,6 +66,7 @@ export class Renderer {
     private isDragging = false;
     private lastMouseX = 0;
     private lastMouseY = 0;
+    private activeMouseButton = -1; // -1: None, 0: Left, 2: Right
 
     constructor(ctx: WebGLContext, initialResolution: VolumeResolution) {
         this.ctx = ctx;
@@ -83,25 +86,32 @@ export class Renderer {
         // Compile point cloud shaders
         this.pointProgram = this.createProgram(pointVertexShader, pointFragmentShader);
         const pointMVP = ctx.gl.getUniformLocation(this.pointProgram, 'uModelViewProjection');
-        const pointColor = ctx.gl.getUniformLocation(this.pointProgram, 'uColor');
+        const pointVolume = ctx.gl.getUniformLocation(this.pointProgram, 'uVolume');
         const pointAlpha = ctx.gl.getUniformLocation(this.pointProgram, 'uAlpha');
         const pointSize = ctx.gl.getUniformLocation(this.pointProgram, 'uPointSize');
-        if (!pointMVP || !pointColor || !pointAlpha || !pointSize) {
+
+        // Note: uVolume might be null if optimized out, but usually it shouldn't be if used.
+        // However, getUniformLocation returns null if not found.
+        if (!pointMVP || !pointAlpha || !pointSize) {
             throw new Error('Failed to get point uniform locations');
         }
         this.pointUMVP = pointMVP;
-        this.pointUColor = pointColor;
+        this.pointUVolume = pointVolume!; // Assert non-null or handle it
         this.pointUAlpha = pointAlpha;
         this.pointUSize = pointSize;
 
         // Compile plane shaders (re-using wireframe shader for line, plane shader for surface)
         this.planeProgram = this.createProgram(planeVertexShader, planeFragmentShader);
         const planeMVP = ctx.gl.getUniformLocation(this.planeProgram, 'uModelViewProjection');
-        const planeColor = ctx.gl.getUniformLocation(this.planeProgram, 'uColor');
+        const planeModel = ctx.gl.getUniformLocation(this.planeProgram, 'uModelMatrix');
+        const planeVolume = ctx.gl.getUniformLocation(this.planeProgram, 'uVolume');
         const planeAlpha = ctx.gl.getUniformLocation(this.planeProgram, 'uAlpha');
-        if (!planeMVP || !planeColor || !planeAlpha) throw new Error('Failed to get plane uniform locations');
+
+        if (!planeMVP || !planeAlpha) throw new Error('Failed to get plane uniform locations');
+
         this.planeUMVP = planeMVP;
-        this.planeUColor = planeColor;
+        this.planeUModel = planeModel!; // Assert non-null or handle
+        this.planeUVolume = planeVolume!; // Assert non-null or handle
         this.planeUAlpha = planeAlpha;
 
         // Reuse wireframe program for the reading line (it's just a solid color line)
@@ -283,24 +293,6 @@ export class Renderer {
 
         if (this.lineVAO) gl.deleteVertexArray(this.lineVAO);
 
-        // Generate line at Z=0 (relative to plane), we will translate it via matrix
-        // Actually, if the contour depends on Z, we should generate it at Z=0 
-        // and rely on the plane's Z-translation to move it through the volume?
-        // YES. The plane moves through the volume. The line is "on" the plane.
-        // So we generate the line at Z=0 relative to the plane.
-        // Wait, if the plane is curved (e.g. Wave), the height depends on Z.
-        // If we are at Z=0 on the plane, the height is fixed.
-        // But the user might want to scan "along" the plane?
-        // No, the "Reading Position" usually means where we are reading *in the volume*.
-        // If the plane represents the "read head", then the line represents the "current slice".
-        // So the line is fixed to the plane.
-        // Let's assume the line is always at the center of the plane (Z=0 in plane space)
-        // or maybe the user wants to move the line across the plane?
-        // For now, let's keep it simple: The line is the intersection of the plane and the reading position.
-        // Since the plane IS the reading position (it moves), the line is just a visual indicator 
-        // of the plane's contour at the center?
-        // Let's generate it at Z=0 in plane space.
-
         const linePositions = ReadingPathGeometry.generateReadingLine(
             this.pathState.planeType,
             resolutionX,
@@ -325,10 +317,10 @@ export class Renderer {
         this.lineVAO = lineVAO;
     }
 
-    // Add lineVertexCount property
-
-
     public render(): void {
+        // Update logic (auto-reset plane rotation, etc.)
+        this.update(0.016); // Assume ~60fps
+
         const gl = this.ctx.gl;
 
         // Clear
@@ -350,13 +342,18 @@ export class Renderer {
         const viewModel = mat4Multiply(view, model);
         const cameraMVP = mat4Multiply(projection, viewModel);
 
-        // 1. Draw Point Cloud (faint blue dots)
+        // 1. Draw Point Cloud
         if (this.pointVAO) {
             gl.useProgram(this.pointProgram);
             gl.uniformMatrix4fv(this.pointUMVP, false, cameraMVP);
-            gl.uniform3f(this.pointUColor, 0.3, 0.6, 1.0); // Blue
-            gl.uniform1f(this.pointUAlpha, 0.15); // Very faint
-            gl.uniform1f(this.pointUSize, 3.0);
+
+            // Bind volume texture
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_3D, this.spectralVolume.getTexture());
+            gl.uniform1i(this.pointUVolume, 0);
+
+            gl.uniform1f(this.pointUAlpha, 0.15); // Base alpha
+            gl.uniform1f(this.pointUSize, 3.0);   // Base size
 
             gl.bindVertexArray(this.pointVAO);
             gl.drawArrays(gl.POINTS, 0, this.pointCount);
@@ -385,8 +382,14 @@ export class Renderer {
         if (this.planeVAO) {
             gl.useProgram(this.planeProgram);
             gl.uniformMatrix4fv(this.planeUMVP, false, planeMVP);
-            gl.uniform3f(this.planeUColor, 0.0, 1.0, 0.5); // Teal/Greenish
-            gl.uniform1f(this.planeUAlpha, 0.15); // Transparent
+            gl.uniformMatrix4fv(this.planeUModel, false, worldPlaneModel); // Pass model matrix
+
+            // Bind volume texture (reuse slot 0)
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_3D, this.spectralVolume.getTexture());
+            gl.uniform1i(this.planeUVolume, 0);
+
+            gl.uniform1f(this.planeUAlpha, 0.3); // Slightly more opaque to see colors
 
             gl.bindVertexArray(this.planeVAO);
             gl.drawElements(gl.LINES, this.planeIndexCount, gl.UNSIGNED_SHORT, 0);
@@ -442,31 +445,125 @@ export class Renderer {
         }
     }
 
+    public updateSpectralData(dataSet: string): void {
+        if (dataSet === 'clouds') {
+            this.spectralVolume.generateCloudData();
+        } else {
+            this.spectralVolume.clearData();
+        }
+    }
+
+    public getReadingLineSpectralData(): Float32Array {
+        // 1. Get reading line positions in plane space
+        const resolution = this.spectralVolume.getResolution();
+        const linePositions = ReadingPathGeometry.generateReadingLine(
+            this.pathState.planeType,
+            resolution.x, // Use X resolution for sampling density
+            this.pathState.scanPosition
+        );
+
+        // 2. Calculate plane transform matrix
+        const pRotX = mat4RotateX(this.pathState.rotation.x);
+        const pRotY = mat4RotateY(this.pathState.rotation.y);
+        const pRotZ = mat4RotateZ(this.pathState.rotation.z);
+        const pTrans = mat4Translate(
+            this.pathState.position.x,
+            this.pathState.position.y,
+            this.pathState.position.z
+        );
+
+        let planeModel = mat4Multiply(pRotY, pRotX);
+        planeModel = mat4Multiply(pRotZ, planeModel);
+        planeModel = mat4Multiply(pTrans, planeModel);
+
+        // 3. Transform points to world space and sample volume
+        const numPoints = linePositions.length / 3;
+        const result = new Float32Array(numPoints * 4); // RGBA per point
+
+        for (let i = 0; i < numPoints; i++) {
+            const px = linePositions[i * 3];
+            const py = linePositions[i * 3 + 1];
+            const pz = linePositions[i * 3 + 2];
+
+            // Transform to world space
+            const worldPos = vec3TransformMat4([px, py, pz], planeModel);
+
+            // Convert world space [-1, 1] to texture space [0, 1]
+            const tx = (worldPos[0] + 1.0) * 0.5;
+            const ty = (worldPos[1] + 1.0) * 0.5;
+            const tz = (worldPos[2] + 1.0) * 0.5;
+
+            // Sample volume
+            const sample = this.spectralVolume.sample(tx, ty, tz);
+
+            // Store all channels
+            result[i * 4] = sample[0];     // R: Magnitude
+            result[i * 4 + 1] = sample[1]; // G: Phase
+            result[i * 4 + 2] = sample[2]; // B: Pan
+            result[i * 4 + 3] = sample[3]; // A: Width
+        }
+
+        return result;
+    }
+
     // Mouse interaction
-    public onMouseDown(x: number, y: number): void {
+    public onMouseDown(x: number, y: number, button: number): void {
         this.isDragging = true;
         this.lastMouseX = x;
         this.lastMouseY = y;
+        this.activeMouseButton = button;
     }
 
     public onMouseMove(x: number, y: number): void {
         if (!this.isDragging) return;
 
-        const deltaX = x - this.lastMouseX;
-        const deltaY = y - this.lastMouseY;
-
-        this.rotationY += deltaX * 0.01;
-        this.rotationX += deltaY * 0.01;
-
-        // Clamp rotation X to avoid gimbal lock
-        this.rotationX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.rotationX));
+        const dx = x - this.lastMouseX;
+        const dy = y - this.lastMouseY;
 
         this.lastMouseX = x;
         this.lastMouseY = y;
+
+        const sensitivity = 0.01;
+
+        if (this.activeMouseButton === 2) {
+            // Right click: Rotate Camera (Cube)
+            this.rotationY += dx * sensitivity;
+            this.rotationX += dy * sensitivity;
+        } else if (this.activeMouseButton === 0) {
+            // Left click: Rotate Reading Plane
+            // We update the path state directly.
+            // Note: This needs to be communicated back to controls if we want sliders to update.
+            // For now, we just update local state which might get overwritten by controls if they change.
+            // Ideally, we should emit an event.
+
+            // Invert controls for intuitive feel
+            this.pathState.rotation.z -= dx * sensitivity;
+            this.pathState.rotation.x -= dy * sensitivity;
+
+            // Limit rotation to avoid flipping
+            this.pathState.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pathState.rotation.x));
+            this.pathState.rotation.z = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pathState.rotation.z));
+        }
     }
 
     public onMouseUp(): void {
         this.isDragging = false;
+        this.activeMouseButton = -1;
+    }
+
+    public update(deltaTime: number): void {
+        // Auto-reset plane rotation if not dragging
+        if (!this.isDragging) {
+            const decay = 5.0 * deltaTime; // Speed of return
+
+            // Lerp towards 0
+            this.pathState.rotation.x += (0 - this.pathState.rotation.x) * decay;
+            this.pathState.rotation.z += (0 - this.pathState.rotation.z) * decay;
+
+            // Snap to 0 if very close
+            if (Math.abs(this.pathState.rotation.x) < 0.001) this.pathState.rotation.x = 0;
+            if (Math.abs(this.pathState.rotation.z) < 0.001) this.pathState.rotation.z = 0;
+        }
     }
 
     public destroy(): void {

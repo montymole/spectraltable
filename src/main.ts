@@ -2,6 +2,9 @@ import './style.css';
 import { WebGLContext } from './gpu/context';
 import { Renderer } from './gpu/renderer';
 import { ControlPanel } from './ui/controls';
+import { Spectrogram } from './ui/spectrogram';
+import { StereoScope } from './ui/scope';
+import { AudioEngine } from './audio/audio-engine';
 import { ReadingPathState, SpatialState, VolumeResolution, VOLUME_DENSITY_DEFAULT } from './types';
 
 // Main application entry point
@@ -11,6 +14,9 @@ class SpectralTableApp {
     private glContext: WebGLContext;
     private renderer: Renderer;
     private controls: ControlPanel;
+    private spectrogram: Spectrogram;
+    private scope: StereoScope;
+    private audioEngine: AudioEngine;
     private canvas: HTMLCanvasElement;
     private animationFrameId: number = 0;
 
@@ -34,10 +40,22 @@ class SpectralTableApp {
         // Initialize UI controls
         this.controls = new ControlPanel('control-sliders');
 
+        // Get top section for appending visualization canvases
+        const topSection = document.querySelector('.top-section');
+        if (!topSection) throw new Error('Top section not found');
+
+        // Create Spectrogram and Scope - they will append their canvases directly to top-section
+        this.spectrogram = new Spectrogram(topSection as HTMLElement);
+        this.scope = new StereoScope(topSection as HTMLElement);
+
+        // Initialize Audio Engine
+        this.audioEngine = new AudioEngine();
+
         // Wire up callbacks
         this.controls.setPathChangeCallback(this.onPathChange.bind(this));
         this.controls.setSpatialChangeCallback(this.onSpatialChange.bind(this));
         this.controls.setVolumeResolutionChangeCallback(this.onVolumeResolutionChange.bind(this));
+        this.controls.setSpectralDataChangeCallback(this.onSpectralDataChange.bind(this));
 
         // Handle window resize
         window.addEventListener('resize', this.onResize.bind(this));
@@ -49,6 +67,12 @@ class SpectralTableApp {
         this.canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
         this.canvas.addEventListener('mouseleave', this.onMouseUp.bind(this));
 
+        // Prevent context menu on right-click
+        this.canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            return false;
+        });
+
         // Start render loop
         this.startRenderLoop();
 
@@ -56,18 +80,30 @@ class SpectralTableApp {
     }
 
     private onPathChange(state: ReadingPathState): void {
-        // console.log('Path changed:', state); // Too noisy for continuous updates
         this.renderer.updateReadingPath(state);
     }
 
     private onSpatialChange(state: SpatialState): void {
         console.log('Spatial state changed:', state);
-        // TODO: Update spatial audio processing
     }
 
     private onVolumeResolutionChange(resolution: VolumeResolution): void {
         console.log('Volume resolution changed:', resolution);
         this.renderer.updateVolumeResolution(resolution);
+
+        // Re-generate current spectral data with new resolution
+        // We need to know what the current data set is.
+        // Ideally we store this state, or just ask the controls.
+        // For now, let's just trigger a regeneration of 'clouds' if that was selected,
+        // or 'blank'.
+        // A better way is to have the renderer/volume manage this, but we can cheat:
+        const currentData = (document.getElementById('spectral-data-type') as HTMLSelectElement)?.value || 'blank';
+        this.renderer.updateSpectralData(currentData);
+    }
+
+    private onSpectralDataChange(dataSet: string): void {
+        console.log('Spectral data changed:', dataSet);
+        this.renderer.updateSpectralData(dataSet);
     }
 
     private onResize(): void {
@@ -76,7 +112,12 @@ class SpectralTableApp {
     }
 
     private onMouseDown(event: MouseEvent): void {
-        this.renderer.onMouseDown(event.clientX, event.clientY);
+        this.renderer.onMouseDown(event.clientX, event.clientY, event.button);
+
+        // Resume audio context on user interaction
+        this.audioEngine.initialize().then(() => {
+            this.audioEngine.resume();
+        });
     }
 
     private onMouseMove(event: MouseEvent): void {
@@ -95,25 +136,34 @@ class SpectralTableApp {
             lastTime = time;
 
             // Animate reading position (Scrub)
-            // Speed 0 = stop, Speed 1 = fast (e.g. 1 cycle per second)
-            // We map slider 0-1 to a useful speed range, e.g. 0 to 2.0 units/sec
-            const speed = this.controls.getSpeed(); // We need to expose this or read from state
+            const speed = this.controls.getSpeed();
 
             if (speed > 0) {
-                // Get current state
                 const currentState = this.controls.getState();
-                let newScanPos = currentState.scanPosition + (speed * 0.5 * deltaTime); // 0.5 scale factor
+                let newScanPos = currentState.scanPosition + (speed * 0.5 * deltaTime);
 
-                // Loop -1 to 1
                 if (newScanPos > 1) {
                     newScanPos = -1;
                 }
 
-                // Update controls (which will trigger callback -> renderer update)
                 this.controls.updateScanPosition(newScanPos);
             }
 
             this.renderer.render();
+
+            // Get spectral data (RGBA)
+            const spectralData = this.renderer.getReadingLineSpectralData();
+
+            // Update Visualizations
+            this.spectrogram.addData(spectralData);
+
+            // Update Audio
+            this.audioEngine.updateSpectralData(spectralData);
+
+            // Update Scope
+            const scopeData = this.audioEngine.getScopeData();
+            this.scope.draw(scopeData.left, scopeData.right);
+
             this.animationFrameId = requestAnimationFrame(render);
         };
         requestAnimationFrame(render);
