@@ -49,8 +49,10 @@ export class Spectrogram {
         this.tempCanvas.width = this.width * dpr;
         this.tempCanvas.height = this.height * dpr;
 
-        // Scale context to match DPI
+        // Reset and scale context to match DPI
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.scale(dpr, dpr);
+        this.tempCtx.setTransform(1, 0, 0, 1, 0, 0);
         this.tempCtx.scale(dpr, dpr);
 
         // Clear

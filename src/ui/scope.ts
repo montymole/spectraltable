@@ -46,7 +46,8 @@ export class StereoScope {
         this.canvas.width = this.width * dpr;
         this.canvas.height = this.height * dpr;
 
-        // Scale context to match DPI
+        // Reset and scale context to match DPI
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.scale(dpr, dpr);
 
         // Clear
