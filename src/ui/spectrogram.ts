@@ -33,13 +33,25 @@ export class Spectrogram {
         const rect = this.canvas.parentElement?.getBoundingClientRect();
         if (!rect) return;
 
-        this.width = rect.width;
-        this.height = rect.height || 150; // Default height if not set
+        // Account for device pixel ratio
+        const dpr = window.devicePixelRatio || 1;
 
-        this.canvas.width = this.width;
-        this.canvas.height = this.height;
-        this.tempCanvas.width = this.width;
-        this.tempCanvas.height = this.height;
+        this.width = rect.width;
+        this.height = rect.height || 150;
+
+        // Set canvas display size (CSS pixels)
+        this.canvas.style.width = `${this.width}px`;
+        this.canvas.style.height = `${this.height}px`;
+
+        // Set canvas buffer size (actual pixels)
+        this.canvas.width = this.width * dpr;
+        this.canvas.height = this.height * dpr;
+        this.tempCanvas.width = this.width * dpr;
+        this.tempCanvas.height = this.height * dpr;
+
+        // Scale context to match DPI
+        this.ctx.scale(dpr, dpr);
+        this.tempCtx.scale(dpr, dpr);
 
         // Clear
         this.ctx.fillStyle = '#000';

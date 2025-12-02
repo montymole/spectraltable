@@ -32,11 +32,22 @@ export class StereoScope {
         const rect = this.canvas.parentElement?.getBoundingClientRect();
         if (!rect) return;
 
+        // Account for device pixel ratio
+        const dpr = window.devicePixelRatio || 1;
+
         this.width = rect.width;
         this.height = rect.height || 150;
 
-        this.canvas.width = this.width;
-        this.canvas.height = this.height;
+        // Set canvas display size (CSS pixels)
+        this.canvas.style.width = `${this.width}px`;
+        this.canvas.style.height = `${this.height}px`;
+
+        // Set canvas buffer size (actual pixels)
+        this.canvas.width = this.width * dpr;
+        this.canvas.height = this.height * dpr;
+
+        // Scale context to match DPI
+        this.ctx.scale(dpr, dpr);
 
         // Clear
         this.ctx.fillStyle = '#000';
