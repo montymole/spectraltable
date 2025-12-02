@@ -50,8 +50,8 @@ export class AudioAnalyzer {
         for (let iz = 0; iz < zSize; iz++) {
             // Starting from Z = -1, going towards +1
             const zStart = iz * samplesPerZ;
-            const zEnd = Math.min(zStart + samplesPerZ, totalSamples);
-            const zSegment = channelData.slice(zStart, zEnd);
+            const zEnd = Math.min(zStart + samplesPerZ, processedData.length);
+            const zSegment = processedData.slice(zStart, zEnd);
 
             // Split this Z segment by Y (time slices within this morph layer)
             const samplesPerY = Math.floor(zSegment.length / ySize);
