@@ -23,27 +23,29 @@ export class AudioAnalyzer {
 
         console.log(`Analyzing: ${file.name}, ${audioBuffer.duration.toFixed(2)}s, ${sampleRate}Hz, ${totalSamples} samples`);
 
+        const { x: xSize, y: ySize, z: zSize } = volumeSize;
+
         // Minimum samples needed for good FFT (2048 is a good FFT size)
         const minFFTSize = 2048;
-        const minSamplesPerSegment = minFFTSize;
 
-        // Calculate maximum Z density based on sample length
-        // We need: totalSamples / z / y >= minSamplesPerSegment
-        // So: z <= totalSamples / (y * minSamplesPerSegment)
-        const maxZ = Math.floor(totalSamples / (volumeSize.y * minSamplesPerSegment));
+        // Calculate total samples needed to fill the volume
+        const samplesNeeded = zSize * ySize * minFFTSize;
 
-        let adjustedSize = { ...volumeSize };
+        let processedData: Float32Array;
 
-        if (maxZ < volumeSize.z) {
-            console.warn(`Sample too short for Z=${volumeSize.z}. Adjusting to Z=${maxZ}`);
-            adjustedSize.z = Math.max(1, maxZ); // At least 1
+        if (totalSamples < samplesNeeded) {
+            // Time-stretch (interpolate) to fill the volume
+            console.log(`Time-stretching audio: ${totalSamples} → ${samplesNeeded} samples (${(samplesNeeded / totalSamples).toFixed(2)}x)`);
+            processedData = this.timeStretch(channelData, samplesNeeded);
+        } else {
+            // Use as-is or downsample if much longer
+            processedData = channelData;
         }
 
-        const { x: xSize, y: ySize, z: zSize } = adjustedSize;
         const volumeData = new Float32Array(xSize * ySize * zSize * 4); // RGBA
 
         // Split sample by Z depth (morph layers)
-        const samplesPerZ = Math.floor(totalSamples / zSize);
+        const samplesPerZ = Math.floor(processedData.length / zSize);
 
         for (let iz = 0; iz < zSize; iz++) {
             // Starting from Z = -1, going towards +1
@@ -104,7 +106,28 @@ export class AudioAnalyzer {
         }
 
         console.log('✓ Converted to spectral volume');
-        return { data: volumeData, adjustedSize };
+        return { data: volumeData, adjustedSize: volumeSize };
+    }
+
+    private timeStretch(input: Float32Array, targetLength: number): Float32Array {
+        // Simple linear interpolation time-stretching
+        const output = new Float32Array(targetLength);
+        const ratio = input.length / targetLength;
+
+        for (let i = 0; i < targetLength; i++) {
+            const srcPos = i * ratio;
+            const srcIdx = Math.floor(srcPos);
+            const frac = srcPos - srcIdx;
+
+            // Linear interpolation between samples
+            if (srcIdx + 1 < input.length) {
+                output[i] = input[srcIdx] * (1 - frac) + input[srcIdx + 1] * frac;
+            } else {
+                output[i] = input[srcIdx];
+            }
+        }
+
+        return output;
     }
 
     private simpleFFT(signal: Float32Array): Float32Array {

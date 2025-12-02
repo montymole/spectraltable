@@ -131,18 +131,8 @@ class SpectralTableApp {
             const resolution = this.renderer.getSpectralVolume().getResolution();
 
             // Analyze the audio file and convert to spectral volume
+            // Audio will be time-stretched if needed to fill the volume
             const result = await this.audioAnalyzer.analyzeFile(file, resolution);
-
-            // Check if resolution was adjusted
-            if (result.adjustedSize.z !== resolution.z) {
-                console.log(`Volume resolution adjusted: Z ${resolution.z} → ${result.adjustedSize.z}`);
-
-                // Update the volume resolution
-                this.renderer.updateVolumeResolution(result.adjustedSize);
-
-                // Update the UI sliders to reflect the new density
-                this.controls.setVolumeDensity(result.adjustedSize);
-            }
 
             // Store the volume data with filename as key
             const fileName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
