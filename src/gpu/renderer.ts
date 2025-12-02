@@ -427,8 +427,13 @@ export class Renderer {
     public updateVolumeResolution(resolution: VolumeResolution): void {
         this.spectralVolume.updateResolution(resolution);
         this.updatePointCloud(resolution);
+        this.updateReadingPathGeometry();
         // Also update reading line resolution
         this.updateReadingLineGeometry(resolution.x);
+    }
+
+    public getSpectralVolume(): SpectralVolume {
+        return this.spectralVolume;
     }
 
     public updateReadingPath(state: ReadingPathState): void {

@@ -5,6 +5,7 @@ import { ControlPanel } from './ui/controls';
 import { Spectrogram } from './ui/spectrogram';
 import { StereoScope } from './ui/scope';
 import { AudioEngine } from './audio/audio-engine';
+import { AudioAnalyzer } from './audio/audio-analyzer';
 import { ReadingPathState, SpatialState, VolumeResolution, VOLUME_DENSITY_DEFAULT } from './types';
 
 // Main application entry point
@@ -17,8 +18,12 @@ class SpectralTableApp {
     private spectrogram: Spectrogram;
     private scope: StereoScope;
     private audioEngine: AudioEngine;
+    private audioAnalyzer: AudioAnalyzer;
     private canvas: HTMLCanvasElement;
     private animationFrameId: number = 0;
+
+    // Store uploaded spectral volumes
+    private uploadedVolumes: Map<string, Float32Array> = new Map();
 
     constructor() {
         console.log('Spectra Table Synthesis - Initializing...');
@@ -51,11 +56,15 @@ class SpectralTableApp {
         // Initialize Audio Engine
         this.audioEngine = new AudioEngine();
 
+        // Initialize Audio Analyzer
+        this.audioAnalyzer = new AudioAnalyzer();
+
         // Wire up callbacks
         this.controls.setPathChangeCallback(this.onPathChange.bind(this));
         this.controls.setSpatialChangeCallback(this.onSpatialChange.bind(this));
         this.controls.setVolumeResolutionChangeCallback(this.onVolumeResolutionChange.bind(this));
         this.controls.setSpectralDataChangeCallback(this.onSpectralDataChange.bind(this));
+        this.controls.setWavUploadCallback(this.onWavUpload.bind(this));
 
         // Handle window resize
         window.addEventListener('resize', this.onResize.bind(this));
@@ -103,7 +112,46 @@ class SpectralTableApp {
 
     private onSpectralDataChange(dataSet: string): void {
         console.log('Spectral data changed:', dataSet);
-        this.renderer.updateSpectralData(dataSet);
+
+        // Check if it's an uploaded volume
+        if (this.uploadedVolumes.has(dataSet)) {
+            const volumeData = this.uploadedVolumes.get(dataSet)!;
+            this.renderer.getSpectralVolume().setData(volumeData);
+        } else {
+            // Built-in data sets
+            this.renderer.updateSpectralData(dataSet);
+        }
+    }
+
+    private async onWavUpload(file: File): Promise<void> {
+        console.log('Processing audio file:', file.name);
+
+        try {
+            // Get current volume resolution
+            const resolution = this.renderer.getSpectralVolume().getResolution();
+
+            // Analyze the audio file and convert to spectral volume
+            const result = await this.audioAnalyzer.analyzeFile(file, resolution);
+
+            // Check if resolution was adjusted
+            if (result.adjustedSize.z !== resolution.z) {
+                console.log(`Volume resolution adjusted: Z ${resolution.z} → ${result.adjustedSize.z}`);
+
+                // Update the volume resolution
+                this.renderer.updateVolumeResolution(result.adjustedSize);
+            }
+
+            // Store the volume data with filename as key
+            const fileName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
+            this.uploadedVolumes.set(fileName, result.data);
+
+            // Add to dropdown and select it
+            this.controls.addSpectralDataOption(fileName, fileName);
+
+            console.log('✓ Audio file converted and added to data sets');
+        } catch (error) {
+            console.error('Failed to process audio file:', error);
+        }
     }
 
     private onResize(): void {

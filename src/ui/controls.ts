@@ -20,11 +20,13 @@ export class ControlPanel {
 
     // Spectral data controls
     private spectralDataSelect: HTMLSelectElement;
+    private wavUploadInput: HTMLInputElement;
 
     private onPathChange?: (state: ReadingPathState) => void;
     private onSpatialChange?: (state: SpatialState) => void;
     private onVolumeResolutionChange?: (resolution: VolumeResolution) => void;
     private onSpectralDataChange?: (dataSet: string) => void;
+    private onWavUpload?: (file: File) => void;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
@@ -36,6 +38,9 @@ export class ControlPanel {
             'blank',
             'clouds'
         ]);
+
+        // Add WAV upload
+        this.wavUploadInput = this.createFileInput('wav-upload', 'Upload WAV', '.wav,.mp3,.ogg');
 
         // Create section headers
         this.createSection('Reading Path');
@@ -147,6 +152,31 @@ export class ControlPanel {
         return select;
     }
 
+    private createFileInput(id: string, label: string, accept: string): HTMLInputElement {
+        const group = document.createElement('div');
+        group.className = 'control-group';
+
+        const labelEl = document.createElement('label');
+        labelEl.htmlFor = id;
+        labelEl.textContent = label;
+
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.id = id;
+        input.accept = accept;
+        input.className = 'file-input';
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+
+        group.appendChild(labelRow);
+        group.appendChild(input);
+        this.container.appendChild(group);
+
+        return input;
+    }
+
     private wireUpEvents(): void {
         const pathUpdate = () => {
             if (this.onPathChange) {
@@ -180,6 +210,14 @@ export class ControlPanel {
 
         this.spectralDataSelect.addEventListener('change', spectralDataUpdate);
 
+        // WAV upload
+        this.wavUploadInput.addEventListener('change', () => {
+            const file = this.wavUploadInput.files?.[0];
+            if (file && this.onWavUpload) {
+                this.onWavUpload(file);
+            }
+        });
+
         this.pathYSlider.addEventListener('input', pathUpdate);
         // Rotation sliders removed - controlled by mouse
         this.planeTypeSelect.addEventListener('change', pathUpdate);
@@ -207,6 +245,10 @@ export class ControlPanel {
 
     public setSpectralDataChangeCallback(callback: (dataSet: string) => void): void {
         this.onSpectralDataChange = callback;
+    }
+
+    public setWavUploadCallback(callback: (file: File) => void): void {
+        this.onWavUpload = callback;
     }
 
     public getSpeed(): number {
@@ -241,5 +283,26 @@ export class ControlPanel {
         if (this.onPathChange) {
             this.onPathChange(this.getState());
         }
+    }
+
+    public addSpectralDataOption(value: string, label: string): void {
+        // Check if option already exists
+        const existingOption = Array.from(this.spectralDataSelect.options).find(
+            opt => opt.value === value
+        );
+
+        if (!existingOption) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            this.spectralDataSelect.appendChild(option);
+        }
+
+        // Select the new option
+        this.spectralDataSelect.value = value;
+
+        // Trigger change event
+        const event = new Event('change');
+        this.spectralDataSelect.dispatchEvent(event);
     }
 }

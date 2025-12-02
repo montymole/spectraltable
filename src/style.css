@@ -25,7 +25,37 @@ body {
   height: 30vh;
   background: linear-gradient(180deg, #0d0d14 0%, #14141c 100%);
   display: block;
-  cursor: crosshair;
+  cursor: pointer;
+}
+
+/* File Input */
+.file-input {
+  width: 100%;
+  padding: 8px;
+  background: #1a1a24;
+  border: 1px solid #2a2a35;
+  border-radius: 4px;
+  color: #a0a0b0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.file-input:hover {
+  border-color: #3a3a45;
+}
+
+.file-input::file-selector-button {
+  padding: 6px 12px;
+  background: #2a2a35;
+  border: 1px solid #3a3a45;
+  border-radius: 3px;
+  color: #e0e0f0;
+  cursor: pointer;
+  margin-right: 10px;
+}
+
+.file-input::file-selector-button:hover {
+  background: #3a3a45;
 }
 
 /* Control Panel */
