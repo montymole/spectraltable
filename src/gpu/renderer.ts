@@ -317,9 +317,9 @@ export class Renderer {
         this.lineVAO = lineVAO;
     }
 
-    public render(): void {
+    public render(deltaTime: number = 0.016): void {
         // Update logic (auto-reset plane rotation, etc.)
-        this.update(0.016); // Assume ~60fps
+        this.update(deltaTime);
 
         const gl = this.ctx.gl;
 

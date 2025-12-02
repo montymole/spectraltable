@@ -16,7 +16,7 @@ export class AudioAnalyzer {
         const arrayBuffer = await file.arrayBuffer();
         const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
-        // Get audio data (mix to mono i    f stereo)
+        // Get audio data (mix to mono from stereo)
         const channelData = audioBuffer.getChannelData(0);
         const totalSamples = channelData.length;
         const sampleRate = audioBuffer.sampleRate;

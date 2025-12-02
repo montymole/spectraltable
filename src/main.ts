@@ -200,7 +200,7 @@ class SpectralTableApp {
                 this.controls.updateScanPosition(newScanPos);
             }
 
-            this.renderer.render();
+            this.renderer.render(deltaTime);
 
             // Get spectral data (RGBA)
             const spectralData = this.renderer.getReadingLineSpectralData();
