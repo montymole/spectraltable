@@ -305,4 +305,20 @@ export class ControlPanel {
         const event = new Event('change');
         this.spectralDataSelect.dispatchEvent(event);
     }
+
+    public setVolumeDensity(resolution: VolumeResolution): void {
+        // Update slider values
+        this.densityXSlider.value = String(resolution.x);
+        this.densityYSlider.value = String(resolution.y);
+        this.densityZSlider.value = String(resolution.z);
+
+        // Update displays
+        const xDisplay = document.getElementById('density-x-value');
+        const yDisplay = document.getElementById('density-y-value');
+        const zDisplay = document.getElementById('density-z-value');
+
+        if (xDisplay) xDisplay.textContent = String(Math.round(resolution.x));
+        if (yDisplay) yDisplay.textContent = String(Math.round(resolution.y));
+        if (zDisplay) zDisplay.textContent = String(Math.round(resolution.z));
+    }
 }

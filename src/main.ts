@@ -139,6 +139,9 @@ class SpectralTableApp {
 
                 // Update the volume resolution
                 this.renderer.updateVolumeResolution(result.adjustedSize);
+
+                // Update the UI sliders to reflect the new density
+                this.controls.setVolumeDensity(result.adjustedSize);
             }
 
             // Store the volume data with filename as key

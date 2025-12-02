@@ -40,6 +40,6 @@ export enum PlaneType {
 }
 
 // Sensible density ranges for the spectral volume
-export const VOLUME_DENSITY_MIN = 8;
+export const VOLUME_DENSITY_MIN = 1;  // Minimum 1 for single morph layer
 export const VOLUME_DENSITY_MAX = 128;
 export const VOLUME_DENSITY_DEFAULT = 32;
