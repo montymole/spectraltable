@@ -440,7 +440,17 @@ export class Renderer {
         const typeChanged = state.planeType !== this.pathState.planeType;
         const scanChanged = state.scanPosition !== this.pathState.scanPosition;
 
-        this.pathState = state;
+        // Always preserve mouse-controlled rotation (x and z)
+        // Since rotation sliders were removed, controls always return 0 for rotation
+        // We maintain rotation state internally via mouse interaction
+        this.pathState = {
+            ...state,
+            rotation: {
+                x: this.pathState.rotation.x,  // Preserve mouse-controlled
+                y: state.rotation.y,            // Not used
+                z: this.pathState.rotation.z    // Preserve mouse-controlled
+            }
+        };
 
         if (typeChanged) {
             this.updateReadingPathGeometry();
