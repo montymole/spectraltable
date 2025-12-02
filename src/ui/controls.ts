@@ -42,6 +42,9 @@ export class ControlPanel {
         // Add WAV upload
         this.wavUploadInput = this.createFileInput('wav-upload', 'Upload WAV', '.wav,.mp3,.ogg');
 
+        // Add progress indicator
+        this.createProgressIndicator();
+
         // Create section headers
         this.createSection('Reading Path');
         this.pathYSlider = this.createSlider('path-y', 'Position Y', -1, 1, 0, 0.01);
@@ -175,6 +178,35 @@ export class ControlPanel {
         this.container.appendChild(group);
 
         return input;
+    }
+
+    private createProgressIndicator(): void {
+        const progressContainer = document.createElement('div');
+        progressContainer.id = 'wav-progress-container';
+        progressContainer.className = 'progress-container';
+        progressContainer.style.display = 'none'; // Hidden by default
+
+        const spinner = document.createElement('div');
+        spinner.className = 'spinner';
+
+        const progressBar = document.createElement('div');
+        progressBar.className = 'progress-bar';
+
+        const progressFill = document.createElement('div');
+        progressFill.id = 'wav-progress-fill';
+        progressFill.className = 'progress-fill';
+
+        const progressText = document.createElement('span');
+        progressText.id = 'wav-progress-text';
+        progressText.className = 'progress-text';
+        progressText.textContent = '0%';
+
+        progressBar.appendChild(progressFill);
+        progressContainer.appendChild(spinner);
+        progressContainer.appendChild(progressBar);
+        progressContainer.appendChild(progressText);
+
+        this.container.appendChild(progressContainer);
     }
 
     private wireUpEvents(): void {
@@ -320,5 +352,23 @@ export class ControlPanel {
         if (xDisplay) xDisplay.textContent = String(Math.round(resolution.x));
         if (yDisplay) yDisplay.textContent = String(Math.round(resolution.y));
         if (zDisplay) zDisplay.textContent = String(Math.round(resolution.z));
+    }
+
+    public showProgress(): void {
+        const container = document.getElementById('wav-progress-container');
+        if (container) container.style.display = 'flex';
+    }
+
+    public hideProgress(): void {
+        const container = document.getElementById('wav-progress-container');
+        if (container) container.style.display = 'none';
+    }
+
+    public updateProgress(percent: number): void {
+        const fill = document.getElementById('wav-progress-fill');
+        const text = document.getElementById('wav-progress-text');
+
+        if (fill) fill.style.width = `${percent}%`;
+        if (text) text.textContent = `${Math.round(percent)}%`;
     }
 }

@@ -10,7 +10,8 @@ export class AudioAnalyzer {
 
     public async analyzeFile(
         file: File,
-        volumeSize: { x: number, y: number, z: number }
+        volumeSize: { x: number, y: number, z: number },
+        onProgress?: (percent: number) => void
     ): Promise<{ data: Float32Array, adjustedSize: { x: number, y: number, z: number } }> {
         // Load audio file
         const arrayBuffer = await file.arrayBuffer();
@@ -36,16 +37,22 @@ export class AudioAnalyzer {
         if (totalSamples < samplesNeeded) {
             // Time-stretch (interpolate) to fill the volume
             console.log(`Time-stretching audio: ${totalSamples} → ${samplesNeeded} samples (${(samplesNeeded / totalSamples).toFixed(2)}x)`);
+            if (onProgress) onProgress(10);
             processedData = this.timeStretch(channelData, samplesNeeded);
+            if (onProgress) onProgress(20);
         } else {
             // Use as-is or downsample if much longer
             processedData = channelData;
+            if (onProgress) onProgress(15);
         }
 
         const volumeData = new Float32Array(xSize * ySize * zSize * 4); // RGBA
 
         // Split sample by Z depth (morph layers)
         const samplesPerZ = Math.floor(processedData.length / zSize);
+
+        const totalIterations = zSize * ySize;
+        let iterationCount = 0;
 
         for (let iz = 0; iz < zSize; iz++) {
             // Starting from Z = -1, going towards +1
@@ -102,9 +109,17 @@ export class AudioAnalyzer {
                     // A: Width (based on Z layer)
                     volumeData[idx + 3] = iz / zSize;
                 }
+
+                // Report progress (20% to 100%)
+                iterationCount++;
+                if (onProgress && iterationCount % 10 === 0) {
+                    const percent = 20 + (iterationCount / totalIterations) * 80;
+                    onProgress(percent);
+                }
             }
         }
 
+        if (onProgress) onProgress(100);
         console.log('✓ Converted to spectral volume');
         return { data: volumeData, adjustedSize: volumeSize };
     }

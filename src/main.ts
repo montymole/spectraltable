@@ -127,12 +127,20 @@ class SpectralTableApp {
         console.log('Processing audio file:', file.name);
 
         try {
+            // Show progress
+            this.controls.showProgress();
+            this.controls.updateProgress(0);
+
             // Get current volume resolution
             const resolution = this.renderer.getSpectralVolume().getResolution();
 
             // Analyze the audio file and convert to spectral volume
             // Audio will be time-stretched if needed to fill the volume
-            const result = await this.audioAnalyzer.analyzeFile(file, resolution);
+            const result = await this.audioAnalyzer.analyzeFile(
+                file,
+                resolution,
+                (percent) => this.controls.updateProgress(percent)
+            );
 
             // Store the volume data with filename as key
             const fileName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
@@ -144,6 +152,10 @@ class SpectralTableApp {
             console.log('✓ Audio file converted and added to data sets');
         } catch (error) {
             console.error('Failed to process audio file:', error);
+            alert(`Error processing audio file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } finally {
+            // Hide progress
+            setTimeout(() => this.controls.hideProgress(), 500);
         }
     }
 
