@@ -34,6 +34,7 @@ in vec3 aPosition;
 uniform mat4 uModelViewProjection;
 uniform float uPointSize;
 uniform sampler3D uVolume;
+uniform vec3 uVolumeRes; // Volume resolution (x, y, z) for density calculation
 
 out vec4 vColor;
 
@@ -44,16 +45,25 @@ void main() {
   vec3 texCoord = (aPosition + 1.0) * 0.5;
   vec4 data = texture(uVolume, texCoord);
   
-  // R = Magnitude, G = Phase
+  // R = Magnitude, G = Phase, B = Custom1, A = Custom2
   float magnitude = data.r;
   float phase = data.g;
   
-  // Size based on magnitude (if magnitude > 0)
-  // Base size + magnitude influence
+  // Calculate maximum point size based on grid density
+  // Points should not be larger than the grid cell spacing
+  float minRes = min(min(uVolumeRes.x, uVolumeRes.y), uVolumeRes.z);
+  float maxPointSize = (2.0 / minRes) * 100.0; // Grid cell size in screen space (approximate)
+  
+  // Size based on magnitude with logarithmic scaling
+  // Logarithmic scale makes low magnitudes more visible while preserving dynamics
   float size = uPointSize;
-  if (magnitude > 0.01) {
-      size = uPointSize * (1.0 + magnitude * 2.0);
+  if (magnitude > 0.001) {
+      // log(1 + x*k) gives gentle compression, making dim points visible
+      size = uPointSize * (1.0 + log(1.0 + magnitude * 20.0) * 1.5);
   }
+  
+  // Clamp to max size based on density
+  size = min(size, maxPointSize);
   
   gl_PointSize = size;
   

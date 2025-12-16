@@ -19,14 +19,6 @@ body {
   flex-direction: column;
 }
 
-/* WebGL Canvas */
-#gl-canvas {
-  width: 50%;
-  height: 30vh;
-  background: linear-gradient(180deg, #0d0d14 0%, #14141c 100%);
-  display: block;
-  cursor: pointer;
-}
 
 /* File Input */
 .file-input {
@@ -109,28 +101,8 @@ body {
 }
 
 /* Control Panel */
-#control-sliders {
-  flex: 1;
-  padding: 1.5rem 2rem;
-  background: #1a1a1f;
-  border-top: 1px solid #2a2a35;
-  overflow-y: auto;
-}
-
-.control-panel h1 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  margin-bottom: 1.5rem;
-  letter-spacing: -0.02em;
-  color: #ffffff;
-}
-
-.controls-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1.5rem;
-  max-width: 1200px;
-}
+/* Control Panel */
+/* Styles for controls injected by JS */
 
 /* Section Titles */
 .control-section-title {
@@ -253,45 +225,53 @@ body {
   box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
 }
 
-.top-section {
-  display: flex;
+/* Reset Button */
+.reset-button {
   width: 100%;
-  height: 30vh;
-  background: #000;
+  padding: 0.5rem 0.75rem;
+  background: #2a2a35;
+  color: #e0e0e0;
+  border: 1px solid #2a2a35;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.reset-button:hover {
+  background: #3a3a45;
+  border-color: #4a9eff;
+  color: #4a9eff;
+}
+
+.reset-button:active {
+  transform: scale(0.98);
 }
 
 /* WebGL Canvas - Left 50% */
 #gl-canvas {
   width: 50%;
-  height: 100%;
+  height: 60vh;
   background: linear-gradient(180deg, #0d0d14 0%, #14141c 100%);
   cursor: crosshair;
 }
 
-/* Spectrogram Canvas - Top Right 25% */
-.spectrogram-canvas {
+
+/* Spectrogram Canvas - Top Right */
+#spectrogram-canvas,
+#scope-canvas {
   width: 50%;
-  height: 50%;
-  display: block;
-  border-left: 1px solid #2a2a35;
-  border-bottom: 1px solid #2a2a35;
+  height: 15vh;
+  border: solid 1px blue;
 }
 
-/* Scope Canvas - Bottom Right 25% */
-.scope-canvas {
+#controls {
   width: 50%;
-  height: 50%;
-  display: block;
-  border-left: 1px solid #2a2a35;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  .controls-container {
-    grid-template-columns: 1fr;
-  }
-
-  #gl-canvas {
-    height: 50vh;
-  }
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 1rem;
 }

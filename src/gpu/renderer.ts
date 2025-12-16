@@ -35,6 +35,7 @@ export class Renderer {
     private pointUVolume: WebGLUniformLocation; // Changed from pointUColor
     private pointUAlpha: WebGLUniformLocation;
     private pointUSize: WebGLUniformLocation;
+    private pointUVolumeRes: WebGLUniformLocation;
 
     // Reading path rendering
     private planeProgram: WebGLProgram;
@@ -89,6 +90,7 @@ export class Renderer {
         const pointVolume = ctx.gl.getUniformLocation(this.pointProgram, 'uVolume');
         const pointAlpha = ctx.gl.getUniformLocation(this.pointProgram, 'uAlpha');
         const pointSize = ctx.gl.getUniformLocation(this.pointProgram, 'uPointSize');
+        const pointVolumeRes = ctx.gl.getUniformLocation(this.pointProgram, 'uVolumeRes');
 
         // Note: uVolume might be null if optimized out, but usually it shouldn't be if used.
         // However, getUniformLocation returns null if not found.
@@ -99,6 +101,7 @@ export class Renderer {
         this.pointUVolume = pointVolume!; // Assert non-null or handle it
         this.pointUAlpha = pointAlpha;
         this.pointUSize = pointSize;
+        this.pointUVolumeRes = pointVolumeRes!;
 
         // Compile plane shaders (re-using wireframe shader for line, plane shader for surface)
         this.planeProgram = this.createProgram(planeVertexShader, planeFragmentShader);
@@ -355,6 +358,10 @@ export class Renderer {
             gl.uniform1f(this.pointUAlpha, 0.15); // Base alpha
             gl.uniform1f(this.pointUSize, 3.0);   // Base size
 
+            // Pass volume resolution for density-based size clamping
+            const res = this.spectralVolume.getResolution();
+            gl.uniform3f(this.pointUVolumeRes, res.x, res.y, res.z);
+
             gl.bindVertexArray(this.pointVAO);
             gl.drawArrays(gl.POINTS, 0, this.pointCount);
             gl.bindVertexArray(null);
@@ -461,10 +468,22 @@ export class Renderer {
     }
 
     public updateSpectralData(dataSet: string): void {
-        if (dataSet === 'clouds') {
-            this.spectralVolume.generateCloudData();
-        } else {
-            this.spectralVolume.clearData();
+        switch (dataSet) {
+            case '3d-julia':
+                this.spectralVolume.generate3DJulia();
+                break;
+            case 'mandelbulb':
+                this.spectralVolume.generateMandelbulb();
+                break;
+            case 'menger-sponge':
+                this.spectralVolume.generateMengerSponge();
+                break;
+            case 'perlin-noise':
+                this.spectralVolume.generatePerlinNoise();
+                break;
+            default:
+                this.spectralVolume.clearData();
+                break;
         }
     }
 

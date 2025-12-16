@@ -5,12 +5,10 @@ export class StereoScope {
     private width: number;
     private height: number;
 
-    public mode: 'lissajous' | 'channels' = 'lissajous';
+    public mode: 'lissajous' | 'channels' = 'channels';
 
-    constructor(container: HTMLElement) {
-        this.canvas = document.createElement('canvas');
-        this.canvas.className = 'scope-canvas';
-        container.appendChild(this.canvas);
+    constructor(containerId: string) {
+        this.canvas = document.getElementById(containerId) as HTMLCanvasElement;
 
         // Add click handler to toggle mode
         this.canvas.addEventListener('click', () => {
@@ -21,38 +19,26 @@ export class StereoScope {
         if (!ctx) throw new Error('Failed to get 2D context');
         this.ctx = ctx;
 
-        this.width = 0;
-        this.height = 0;
+        this.width = 320;
+        this.height = 160;
         this.resize();
 
         window.addEventListener('resize', () => this.resize());
     }
 
     private resize(): void {
-        const rect = this.canvas.parentElement?.getBoundingClientRect();
-        if (!rect) return;
+        // Get the display size from the canvas element (set by CSS)
+        const width = this.canvas.clientWidth;
+        const height = this.canvas.clientHeight;
 
-        // Account for device pixel ratio
+        // Handle high DPI displays
         const dpr = window.devicePixelRatio || 1;
 
-        this.width = rect.width;
-        this.height = rect.height || 150;
+        this.canvas.width = width * dpr;
+        this.canvas.height = height * dpr;
 
-        // Set canvas display size (CSS pixels)
-        this.canvas.style.width = `${this.width}px`;
-        this.canvas.style.height = `${this.height}px`;
-
-        // Set canvas buffer size (actual pixels)
-        this.canvas.width = this.width * dpr;
-        this.canvas.height = this.height * dpr;
-
-        // Reset and scale context to match DPI
-        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        this.ctx.scale(dpr, dpr);
-
-        // Clear
-        this.ctx.fillStyle = '#000';
-        this.ctx.fillRect(0, 0, this.width, this.height);
+        this.width = width * dpr;
+        this.height = height * dpr;
     }
 
     public draw(left: Float32Array, right: Float32Array): void {

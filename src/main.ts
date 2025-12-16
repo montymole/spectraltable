@@ -6,7 +6,7 @@ import { Spectrogram } from './ui/spectrogram';
 import { StereoScope } from './ui/scope';
 import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
-import { ReadingPathState, SpatialState, VolumeResolution, VOLUME_DENSITY_DEFAULT } from './types';
+import { ReadingPathState, VolumeResolution, SynthMode, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT } from './types';
 
 // Main application entry point
 // Initializes WebGL, UI, and wires up event handling
@@ -25,6 +25,15 @@ class SpectralTableApp {
     // Store uploaded spectral volumes
     private uploadedVolumes: Map<string, Float32Array> = new Map();
 
+    // Animation state
+    private gameOfLifeActive = false;
+    private gameOfLifeSpeed = 0.5; // 0-1 range
+    private gameOfLifeLastUpdate = 0;
+
+    private perlinNoiseActive = false;
+    private perlinNoiseSpeed = 0.5; // 0-1 range
+    private perlinNoiseLastUpdate = 0;
+
     constructor() {
         console.log('Spectra Table Synthesis - Initializing...');
 
@@ -36,22 +45,18 @@ class SpectralTableApp {
 
         // Create renderer with default resolution
         const defaultResolution: VolumeResolution = {
-            x: VOLUME_DENSITY_DEFAULT,
-            y: VOLUME_DENSITY_DEFAULT,
-            z: VOLUME_DENSITY_DEFAULT,
+            x: VOLUME_DENSITY_X_DEFAULT,
+            y: VOLUME_DENSITY_Y_DEFAULT,
+            z: VOLUME_DENSITY_Z_DEFAULT,
         };
         this.renderer = new Renderer(this.glContext, defaultResolution);
 
         // Initialize UI controls
-        this.controls = new ControlPanel('control-sliders');
+        this.controls = new ControlPanel('controls');
 
-        // Get top section for appending visualization canvases
-        const topSection = document.querySelector('.top-section');
-        if (!topSection) throw new Error('Top section not found');
-
-        // Create Spectrogram and Scope - they will append their canvases directly to top-section
-        this.spectrogram = new Spectrogram(topSection as HTMLElement);
-        this.scope = new StereoScope(topSection as HTMLElement);
+        // Create Spectrogram and Scope
+        this.spectrogram = new Spectrogram('spectrogram-canvas');
+        this.scope = new StereoScope('scope-canvas');
 
         // Initialize Audio Engine
         this.audioEngine = new AudioEngine();
@@ -61,14 +66,21 @@ class SpectralTableApp {
 
         // Wire up callbacks
         this.controls.setPathChangeCallback(this.onPathChange.bind(this));
-        this.controls.setSpatialChangeCallback(this.onSpatialChange.bind(this));
         this.controls.setVolumeResolutionChangeCallback(this.onVolumeResolutionChange.bind(this));
         this.controls.setSpectralDataChangeCallback(this.onSpectralDataChange.bind(this));
         this.controls.setWavUploadCallback(this.onWavUpload.bind(this));
+        this.controls.setDynamicParamChangeCallback(this.onDynamicParamChange.bind(this));
+        this.controls.setSynthModeChangeCallback(this.onSynthModeChange.bind(this));
+        this.controls.setFrequencyChangeCallback(this.onFrequencyChange.bind(this));
 
         // Handle window resize
         window.addEventListener('resize', this.onResize.bind(this));
         this.onResize();
+
+        // Initialize audio engine early
+        this.audioEngine.initialize().then(() => {
+            console.log('✓ Audio engine ready (suspended until user interaction)');
+        });
 
         // Wire up mouse events for 3D rotation
         this.canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
@@ -82,6 +94,20 @@ class SpectralTableApp {
             return false;
         });
 
+        // Resume audio on any canvas interaction
+        this.canvas.addEventListener('click', () => {
+            this.audioEngine.resume();
+        });
+
+        // Keyboard shortcuts
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                this.audioEngine.resume();
+                console.log('Audio resumed (Space)');
+            }
+        });
+
         // Start render loop
         this.startRenderLoop();
 
@@ -92,39 +118,94 @@ class SpectralTableApp {
         this.renderer.updateReadingPath(state);
     }
 
-    private onSpatialChange(state: SpatialState): void {
-        console.log('Spatial state changed:', state);
-    }
+
 
     private onVolumeResolutionChange(resolution: VolumeResolution): void {
         console.log('Volume resolution changed:', resolution);
         this.renderer.updateVolumeResolution(resolution);
 
         // Re-generate current spectral data with new resolution
-        // We need to know what the current data set is.
-        // Ideally we store this state, or just ask the controls.
-        // For now, let's just trigger a regeneration of 'clouds' if that was selected,
-        // or 'blank'.
-        // A better way is to have the renderer/volume manage this, but we can cheat:
         const currentData = (document.getElementById('spectral-data-type') as HTMLSelectElement)?.value || 'blank';
-        this.renderer.updateSpectralData(currentData);
+
+        // Reinitialize Game of Life if it's active
+        if (currentData === 'game-of-life' && this.gameOfLifeActive) {
+            this.renderer.getSpectralVolume().initGameOfLife();
+            this.gameOfLifeLastUpdate = performance.now();
+            console.log('✓ Game of Life reinitialized with new density');
+        } else if (currentData === 'perlin-noise' && this.perlinNoiseActive) {
+            this.renderer.getSpectralVolume().generatePerlinNoise(0);
+            this.perlinNoiseLastUpdate = performance.now();
+            console.log('✓ Perlin noise reinitialized with new density');
+        } else if (!this.uploadedVolumes.has(currentData)) {
+            // Regenerate other built-in datasets
+            this.renderer.updateSpectralData(currentData);
+        }
+        // Note: Uploaded volumes maintain their data across resolution changes
     }
 
     private onSpectralDataChange(dataSet: string): void {
         console.log('Spectral data changed:', dataSet);
 
+        // Stop any active animations
+        this.gameOfLifeActive = false;
+        this.perlinNoiseActive = false;
+
         // Check if it's an uploaded volume
         if (this.uploadedVolumes.has(dataSet)) {
             const volumeData = this.uploadedVolumes.get(dataSet)!;
             this.renderer.getSpectralVolume().setData(volumeData);
+            this.controls.hideDynamicParam();
+        } else if (dataSet === 'game-of-life') {
+            // Initialize Game of Life
+            this.renderer.getSpectralVolume().initGameOfLife();
+            this.gameOfLifeActive = true;
+            this.gameOfLifeLastUpdate = performance.now();
+
+            // Show dynamic parameter slider for evolution speed (0-1)
+            this.controls.showDynamicParam('Evolution Speed', 0, 1, 0.5, 0.01);
+            console.log('✓ Game of Life initialized');
+        } else if (dataSet === 'perlin-noise') {
+            // Initialize Perlin noise
+            this.renderer.getSpectralVolume().generatePerlinNoise(0);
+            this.perlinNoiseActive = true;
+            this.perlinNoiseLastUpdate = performance.now();
+
+            // Show dynamic parameter slider for evolution speed (0-1)
+            this.controls.showDynamicParam('Evolution Speed', 0, 1, 0.5, 0.01);
+            console.log('✓ Perlin Noise initialized with evolution');
         } else {
             // Built-in data sets
             this.renderer.updateSpectralData(dataSet);
+            this.controls.hideDynamicParam();
+        }
+
+        // Resume audio when data changes
+        this.audioEngine.resume();
+    }
+
+    private onDynamicParamChange(value: number): void {
+        // Update speed for active animation (0-1 range)
+        if (this.gameOfLifeActive) {
+            this.gameOfLifeSpeed = value;
+            console.log(`Game of Life speed: ${value.toFixed(2)} (0=pause, 1=instant)`);
+        } else if (this.perlinNoiseActive) {
+            this.perlinNoiseSpeed = value;
+            console.log(`Perlin noise speed: ${value.toFixed(2)} (0=static, 1=fast)`);
         }
     }
 
-    private async onWavUpload(file: File): Promise<void> {
-        console.log('Processing audio file:', file.name);
+    private onSynthModeChange(mode: SynthMode): void {
+        this.audioEngine.setMode(mode);
+        console.log(`✓ Synth mode: ${mode}`);
+    }
+
+    private onFrequencyChange(freq: number): void {
+        this.audioEngine.setWavetableFrequency(freq);
+    }
+
+    private async onWavUpload(files: FileList): Promise<void> {
+        const fileArray = Array.from(files);
+        console.log(`Processing ${fileArray.length} audio file(s) for morphing`);
 
         try {
             // Show progress
@@ -134,25 +215,41 @@ class SpectralTableApp {
             // Get current volume resolution
             const resolution = this.renderer.getSpectralVolume().getResolution();
 
-            // Analyze the audio file and convert to spectral volume
-            // Audio will be time-stretched if needed to fill the volume
-            const result = await this.audioAnalyzer.analyzeFile(
-                file,
-                resolution,
+            // Set Y density to number of files
+            const numSamples = fileArray.length;
+            const newResolution = {
+                ...resolution,
+                y: numSamples
+            };
+
+            // Update Y density slider
+            this.controls.setVolumeDensity(newResolution);
+            this.renderer.updateVolumeResolution(newResolution);
+
+            // Analyze all files and build the morphing volume
+            const volumeData = await this.audioAnalyzer.analyzeMultipleFiles(
+                fileArray,
+                newResolution,
                 (percent) => this.controls.updateProgress(percent)
             );
 
-            // Store the volume data with filename as key
-            const fileName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
-            this.uploadedVolumes.set(fileName, result.data);
+            // Store the volume data
+            const volumeName = fileArray.length === 1
+                ? fileArray[0].name.replace(/\.[^/.]+$/, '')
+                : `Morph_${fileArray.length}_samples`;
+
+            this.uploadedVolumes.set(volumeName, volumeData);
+
+            // Set volume data directly
+            this.renderer.getSpectralVolume().setData(volumeData);
 
             // Add to dropdown and select it
-            this.controls.addSpectralDataOption(fileName, fileName);
+            this.controls.addSpectralDataOption(volumeName, volumeName);
 
-            console.log('✓ Audio file converted and added to data sets');
+            console.log(`✓ Processed ${fileArray.length} file(s) into morphing volume`);
         } catch (error) {
-            console.error('Failed to process audio file:', error);
-            alert(`Error processing audio file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error('Failed to process audio file(s):', error);
+            alert(`Error processing audio file(s): ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
             // Hide progress
             setTimeout(() => this.controls.hideProgress(), 500);
@@ -168,9 +265,7 @@ class SpectralTableApp {
         this.renderer.onMouseDown(event.clientX, event.clientY, event.button);
 
         // Resume audio context on user interaction
-        this.audioEngine.initialize().then(() => {
-            this.audioEngine.resume();
-        });
+        this.audioEngine.resume();
     }
 
     private onMouseMove(event: MouseEvent): void {
@@ -188,15 +283,48 @@ class SpectralTableApp {
             const deltaTime = (time - lastTime) / 1000; // Seconds
             lastTime = time;
 
+            // Update Game of Life animation
+            if (this.gameOfLifeActive && this.gameOfLifeSpeed > 0) {
+                // Speed 0 = paused
+                // Speed 1 = instant (no delay)
+                // Map speed to delay: at 1.0 -> 0ms delay, at 0.01 -> 1000ms delay
+                const delay = (1.0 - this.gameOfLifeSpeed) * 1000;
+                const timeSinceLastUpdate = time - this.gameOfLifeLastUpdate;
+
+                if (timeSinceLastUpdate >= delay) {
+                    this.renderer.getSpectralVolume().stepGameOfLife();
+                    this.gameOfLifeLastUpdate = time;
+                }
+            }
+
+            // Update Perlin noise animation
+            if (this.perlinNoiseActive && this.perlinNoiseSpeed > 0) {
+                // Speed 0 = static
+                // Speed 1 = fast evolution (every frame)
+                // Speed controls frequency of updates
+                const delay = (1.0 - this.perlinNoiseSpeed) * 100; // Max 100ms between updates
+                const timeSinceLastUpdate = time - this.perlinNoiseLastUpdate;
+
+                if (timeSinceLastUpdate >= delay) {
+                    this.renderer.getSpectralVolume().stepPerlinNoise();
+                    this.perlinNoiseLastUpdate = time;
+                }
+            }
+
             // Animate reading position (Scrub)
+            // Speed range: -1 (backwards) to +1 (forwards), 0 = stationary
             const speed = this.controls.getSpeed();
 
-            if (speed > 0) {
+            if (speed !== 0) {
                 const currentState = this.controls.getState();
+                // Use speed directly - negative values move backwards
                 let newScanPos = currentState.scanPosition + (speed * 0.5 * deltaTime);
 
+                // Wrap around in both directions
                 if (newScanPos > 1) {
-                    newScanPos = -1;
+                    newScanPos = -1 + (newScanPos - 1);
+                } else if (newScanPos < -1) {
+                    newScanPos = 1 + (newScanPos + 1);
                 }
 
                 this.controls.updateScanPosition(newScanPos);

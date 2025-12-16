@@ -1,4 +1,4 @@
-import { ReadingPathState, SpatialState, VolumeResolution, VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT, PlaneType } from '../types';
+import { ReadingPathState, VolumeResolution, SynthMode, VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, PlaneType } from '../types';
 
 // UI control panel with sliders for all parameters
 
@@ -9,9 +9,14 @@ export class ControlPanel {
     private pathYSlider: HTMLInputElement;
     // Rotation sliders removed - now controlled by mouse
     private planeTypeSelect: HTMLSelectElement;
-    private stereoSpreadSlider: HTMLInputElement;
+
     private speedSlider: HTMLInputElement;
     private scanPositionSlider: HTMLInputElement;
+
+    // Synth mode controls
+    private synthModeSelect: HTMLSelectElement;
+    private frequencySlider: HTMLInputElement;
+    private frequencyContainer: HTMLElement | null = null;
 
     // Volume density controls
     private densityXSlider: HTMLInputElement;
@@ -21,12 +26,16 @@ export class ControlPanel {
     // Spectral data controls
     private spectralDataSelect: HTMLSelectElement;
     private wavUploadInput: HTMLInputElement;
+    private dynamicParamSlider: HTMLInputElement | null = null;
+    private dynamicParamContainer: HTMLElement | null = null;
 
     private onPathChange?: (state: ReadingPathState) => void;
-    private onSpatialChange?: (state: SpatialState) => void;
     private onVolumeResolutionChange?: (resolution: VolumeResolution) => void;
     private onSpectralDataChange?: (dataSet: string) => void;
-    private onWavUpload?: (file: File) => void;
+    private onWavUpload?: (files: FileList) => void;
+    private onDynamicParamChange?: (value: number) => void;
+    private onSynthModeChange?: (mode: SynthMode) => void;
+    private onFrequencyChange?: (freq: number) => void;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
@@ -36,18 +45,28 @@ export class ControlPanel {
         this.createSection('Spectral Data');
         this.spectralDataSelect = this.createSelect('spectral-data-type', 'Data Set', [
             'blank',
-            'clouds'
+            '3d-julia',
+            'mandelbulb',
+            'menger-sponge',
+            'perlin-noise',
+            'game-of-life'
         ]);
 
-        // Add WAV upload
-        this.wavUploadInput = this.createFileInput('wav-upload', 'Upload WAV', '.wav,.mp3,.ogg');
+        // Add reset button next to dataset selector
+        this.createResetButton();
+
+        // Dynamic parameter slider (shown for certain datasets)
+        this.createDynamicParameterSlider();
+
+        // Add WAV upload (multi-select for morphing)
+        this.wavUploadInput = this.createFileInput('wav-upload', 'Upload WAV (Multi-select)', '.wav,.mp3,.ogg', true);
 
         // Add progress indicator
         this.createProgressIndicator();
 
         // Create section headers
         this.createSection('Reading Path');
-        this.pathYSlider = this.createSlider('path-y', 'Position Y', -1, 1, 0, 0.01);
+        this.pathYSlider = this.createSlider('path-y', 'Position Y (Morph)', -1, 1, 0, 0.01);
         // Rotation is now controlled by mouse - removed sliders
         this.planeTypeSelect = this.createSelect('plane-type', 'Plane Type', [
             PlaneType.FLAT,
@@ -55,16 +74,21 @@ export class ControlPanel {
             PlaneType.WAVE,
             PlaneType.RIPPLE,
         ]);
-        this.speedSlider = this.createSlider('speed', 'Speed / Scrub', 0, 1, 0.5, 0.01);
+        this.speedSlider = this.createSlider('speed', 'Scrub Speed', -1, 1, 0, 0.01);
         this.scanPositionSlider = this.createSlider('scan-pos', 'Scan Phase', -1, 1, 0, 0.01);
 
-        this.createSection('Spatial Audio');
-        this.stereoSpreadSlider = this.createSlider('stereo-spread', 'Stereo Spread', 0, 1, 0.5, 0.01);
+        // Synthesis mode section
+        this.createSection('Synthesis');
+        this.synthModeSelect = this.createSelect('synth-mode', 'Mode', [
+            SynthMode.WAVETABLE,
+            SynthMode.SPECTRAL,
+        ]);
+        this.frequencySlider = this.createFrequencySlider();
 
         this.createSection('Volume Density');
-        this.densityXSlider = this.createSlider('density-x', 'Density X (Frequency)', VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT, 1);
-        this.densityYSlider = this.createSlider('density-y', 'Density Y (Index)', VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT, 1);
-        this.densityZSlider = this.createSlider('density-z', 'Density Z (Morph)', VOLUME_DENSITY_MIN, VOLUME_DENSITY_MAX, VOLUME_DENSITY_DEFAULT, 1);
+        this.densityXSlider = this.createSlider('density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1);
+        this.densityYSlider = this.createSlider('density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1);
+        this.densityZSlider = this.createSlider('density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1);
 
         this.wireUpEvents();
     }
@@ -155,7 +179,65 @@ export class ControlPanel {
         return select;
     }
 
-    private createFileInput(id: string, label: string, accept: string): HTMLInputElement {
+    private createFrequencySlider(): HTMLInputElement {
+        // Frequency slider with note name display
+        // Range: 20Hz to 2000Hz, default 220Hz (A3)
+        const group = document.createElement('div');
+        group.id = 'frequency-container';
+        group.className = 'control-group';
+
+        const labelEl = document.createElement('label');
+        labelEl.htmlFor = 'frequency';
+        labelEl.textContent = 'Frequency';
+
+        const valueDisplay = document.createElement('span');
+        valueDisplay.className = 'value-display';
+        valueDisplay.id = 'frequency-value';
+        valueDisplay.textContent = '220 Hz (A3)';
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.id = 'frequency';
+        slider.min = '20';
+        slider.max = '2000';
+        slider.value = '220';
+        slider.step = '1';
+        slider.className = 'slider';
+
+        // Update value display with note name
+        slider.addEventListener('input', () => {
+            const freq = parseFloat(slider.value);
+            const noteName = this.freqToNoteName(freq);
+            valueDisplay.textContent = `${Math.round(freq)} Hz (${noteName})`;
+            if (this.onFrequencyChange) {
+                this.onFrequencyChange(freq);
+            }
+        });
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+        labelRow.appendChild(valueDisplay);
+
+        group.appendChild(labelRow);
+        group.appendChild(slider);
+        this.container.appendChild(group);
+
+        this.frequencyContainer = group;
+        return slider;
+    }
+
+    private freqToNoteName(freq: number): string {
+        // A4 = 440Hz = MIDI 69
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const midiNote = 12 * Math.log2(freq / 440) + 69;
+        const roundedMidi = Math.round(midiNote);
+        const octave = Math.floor(roundedMidi / 12) - 1;
+        const noteIndex = roundedMidi % 12;
+        return `${noteNames[noteIndex]}${octave}`;
+    }
+
+    private createFileInput(id: string, label: string, accept: string, multiple: boolean = false): HTMLInputElement {
         const group = document.createElement('div');
         group.className = 'control-group';
 
@@ -167,6 +249,7 @@ export class ControlPanel {
         input.type = 'file';
         input.id = id;
         input.accept = accept;
+        input.multiple = multiple;
         input.className = 'file-input';
 
         const labelRow = document.createElement('div');
@@ -178,6 +261,74 @@ export class ControlPanel {
         this.container.appendChild(group);
 
         return input;
+    }
+
+    private createResetButton(): void {
+        const group = document.createElement('div');
+        group.className = 'control-group';
+
+        const button = document.createElement('button');
+        button.id = 'reset-dataset-btn';
+        button.textContent = '↻ Reset Dataset';
+        button.className = 'reset-button';
+
+        button.addEventListener('click', () => {
+            // Trigger spectral data change callback to reinit current dataset
+            if (this.onSpectralDataChange) {
+                const currentDataset = this.spectralDataSelect.value;
+                this.onSpectralDataChange(currentDataset);
+            }
+        });
+
+        group.appendChild(button);
+        this.container.appendChild(group);
+    }
+
+    private createDynamicParameterSlider(): void {
+        const container = document.createElement('div');
+        container.id = 'dynamic-param-container';
+        container.className = 'control-group';
+        container.style.display = 'none'; // Hidden by default
+
+        const labelEl = document.createElement('label');
+        labelEl.htmlFor = 'dynamic-param';
+        labelEl.id = 'dynamic-param-label';
+        labelEl.textContent = 'Parameter';
+
+        const valueDisplay = document.createElement('span');
+        valueDisplay.className = 'value-display';
+        valueDisplay.id = 'dynamic-param-value';
+        valueDisplay.textContent = '500';
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.id = 'dynamic-param';
+        slider.min = '0';
+        slider.max = '1000';
+        slider.value = '500';
+        slider.step = '10';
+        slider.className = 'slider';
+
+        // Update value display on change
+        slider.addEventListener('input', () => {
+            const val = parseFloat(slider.value);
+            valueDisplay.textContent = Math.round(val).toString();
+            if (this.onDynamicParamChange) {
+                this.onDynamicParamChange(val);
+            }
+        });
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+        labelRow.appendChild(valueDisplay);
+
+        container.appendChild(labelRow);
+        container.appendChild(slider);
+        this.container.appendChild(container);
+
+        this.dynamicParamSlider = slider;
+        this.dynamicParamContainer = container;
     }
 
     private createProgressIndicator(): void {
@@ -216,13 +367,7 @@ export class ControlPanel {
             }
         };
 
-        const spatialUpdate = () => {
-            if (this.onSpatialChange) {
-                this.onSpatialChange({
-                    stereoSpread: parseFloat(this.stereoSpreadSlider.value),
-                });
-            }
-        };
+
 
         const volumeUpdate = () => {
             if (this.onVolumeResolutionChange) {
@@ -242,11 +387,11 @@ export class ControlPanel {
 
         this.spectralDataSelect.addEventListener('change', spectralDataUpdate);
 
-        // WAV upload
+        // WAV upload (multi-file support)
         this.wavUploadInput.addEventListener('change', () => {
-            const file = this.wavUploadInput.files?.[0];
-            if (file && this.onWavUpload) {
-                this.onWavUpload(file);
+            const files = this.wavUploadInput.files;
+            if (files && files.length > 0 && this.onWavUpload) {
+                this.onWavUpload(files);
             }
         });
 
@@ -255,7 +400,18 @@ export class ControlPanel {
         this.planeTypeSelect.addEventListener('change', pathUpdate);
         this.speedSlider.addEventListener('input', pathUpdate);
         this.scanPositionSlider.addEventListener('input', pathUpdate);
-        this.stereoSpreadSlider.addEventListener('input', spatialUpdate);
+
+        // Synth mode change
+        this.synthModeSelect.addEventListener('change', () => {
+            const mode = this.synthModeSelect.value as SynthMode;
+            // Show/hide frequency slider based on mode
+            if (this.frequencyContainer) {
+                this.frequencyContainer.style.display = mode === SynthMode.WAVETABLE ? 'block' : 'none';
+            }
+            if (this.onSynthModeChange) {
+                this.onSynthModeChange(mode);
+            }
+        });
 
         // Volume density sliders trigger on change (not input) to avoid too many reinits
         this.densityXSlider.addEventListener('change', volumeUpdate);
@@ -267,8 +423,12 @@ export class ControlPanel {
         this.onPathChange = callback;
     }
 
-    public setSpatialChangeCallback(callback: (state: SpatialState) => void): void {
-        this.onSpatialChange = callback;
+    public setSynthModeChangeCallback(callback: (mode: SynthMode) => void): void {
+        this.onSynthModeChange = callback;
+    }
+
+    public setFrequencyChangeCallback(callback: (freq: number) => void): void {
+        this.onFrequencyChange = callback;
     }
 
     public setVolumeResolutionChangeCallback(callback: (resolution: VolumeResolution) => void): void {
@@ -279,8 +439,38 @@ export class ControlPanel {
         this.onSpectralDataChange = callback;
     }
 
-    public setWavUploadCallback(callback: (file: File) => void): void {
+    public setWavUploadCallback(callback: (files: FileList) => void): void {
         this.onWavUpload = callback;
+    }
+
+    public setDynamicParamChangeCallback(callback: (value: number) => void): void {
+        this.onDynamicParamChange = callback;
+    }
+
+    public showDynamicParam(label: string, min: number, max: number, value: number, step: number): void {
+        if (!this.dynamicParamSlider || !this.dynamicParamContainer) return;
+
+        const labelEl = document.getElementById('dynamic-param-label');
+        const valueDisplay = document.getElementById('dynamic-param-value');
+
+        if (labelEl) labelEl.textContent = label;
+
+        this.dynamicParamSlider.min = String(min);
+        this.dynamicParamSlider.max = String(max);
+        this.dynamicParamSlider.value = String(value);
+        this.dynamicParamSlider.step = String(step);
+
+        if (valueDisplay) {
+            valueDisplay.textContent = step >= 1 ? String(Math.round(value)) : value.toFixed(2);
+        }
+
+        this.dynamicParamContainer.style.display = 'block';
+    }
+
+    public hideDynamicParam(): void {
+        if (this.dynamicParamContainer) {
+            this.dynamicParamContainer.style.display = 'none';
+        }
     }
 
     public getSpeed(): number {

@@ -7,10 +7,8 @@ export class Spectrogram {
     private tempCanvas: HTMLCanvasElement;
     private tempCtx: CanvasRenderingContext2D;
 
-    constructor(container: HTMLElement) {
-        this.canvas = document.createElement('canvas');
-        this.canvas.className = 'spectrogram-canvas';
-        container.appendChild(this.canvas);
+    constructor(contaiderId: string) {
+        this.canvas = document.getElementById(contaiderId) as HTMLCanvasElement;
 
         const ctx = this.canvas.getContext('2d');
         if (!ctx) throw new Error('Failed to get 2D context');
@@ -22,38 +20,30 @@ export class Spectrogram {
         if (!tempCtx) throw new Error('Failed to get temp 2D context');
         this.tempCtx = tempCtx;
 
-        this.width = 0;
-        this.height = 0;
+        this.width = 320;
+        this.height = 160;
         this.resize();
 
         window.addEventListener('resize', () => this.resize());
     }
 
     private resize(): void {
-        const rect = this.canvas.parentElement?.getBoundingClientRect();
-        if (!rect) return;
+        // Get the display size from the canvas element (set by CSS)
+        const width = this.canvas.clientWidth;
+        const height = this.canvas.clientHeight;
 
-        // Account for device pixel ratio
+        // Handle high DPI displays
         const dpr = window.devicePixelRatio || 1;
 
-        this.width = rect.width;
-        this.height = rect.height || 150;
+        this.canvas.width = width * dpr;
+        this.canvas.height = height * dpr;
 
-        // Set canvas display size (CSS pixels)
-        this.canvas.style.width = `${this.width}px`;
-        this.canvas.style.height = `${this.height}px`;
+        this.width = width * dpr;
+        this.height = height * dpr;
 
-        // Set canvas buffer size (actual pixels)
-        this.canvas.width = this.width * dpr;
-        this.canvas.height = this.height * dpr;
-        this.tempCanvas.width = this.width * dpr;
-        this.tempCanvas.height = this.height * dpr;
-
-        // Reset and scale context to match DPI
-        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        this.ctx.scale(dpr, dpr);
-        this.tempCtx.setTransform(1, 0, 0, 1, 0, 0);
-        this.tempCtx.scale(dpr, dpr);
+        // Update temp canvas size
+        this.tempCanvas.width = width * dpr;
+        this.tempCanvas.height = height * dpr;
 
         // Clear
         this.ctx.fillStyle = '#000';

@@ -10,19 +10,10 @@
 
 <body>
   <div id="app">
-    <div class="top-section">
-      <!-- WebGL Canvas for 3D visualization -->
-      <canvas id="gl-canvas"></canvas>
-      <!-- Visualization Container will be injected here -->
-    </div>
-
-    <!-- Control Panel -->
-    <div id="controls" class="control-panel">
-      <h1>Spectra Table Synthesis</h1>
-      <div id="control-sliders" class="controls-container">
-        <!-- Sliders injected by ControlPanel class -->
-      </div>
-    </div>
+    <canvas id="gl-canvas"></canvas>
+    <canvas id="spectrogram-canvas"></canvas>
+    <canvas id="scope-canvas"></canvas>
+    <div id="controls"></div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
