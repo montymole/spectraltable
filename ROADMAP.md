@@ -114,7 +114,16 @@ spectraltable/
 | Perlin Noise | ✅ | Animated 4D noise, scrub control |
 | Game of Life | ✅ | 3D cellular automata |
 
-### Phase 6: UI Controls ✅ COMPLETE
+### Phase 6: Wavetable Synthesis Mode ✅ COMPLETE
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| AM Synthesis Engine | ✅ | Carrier * Magnitude Envelope |
+| Carrier Selection | ✅ | Sine, Saw, Square, Triangle |
+| Feedback Loop | ✅ | Output feedback for evolving timbres |
+| UI Integration | ✅ | Dynamic visibility of controls |
+
+### Phase 7: UI Controls ✅ COMPLETE
 
 | Component | Status | Details |
 |-----------|--------|---------|
@@ -128,21 +137,30 @@ spectraltable/
 | Dynamic Parameter | ✅ | Context-sensitive param slider |
 | WAV Upload | ✅ | Multi-file input |
 | Reset Button | ✅ | One-click state reset |
+| Synth Mode Select | ✅ | Wavetable vs Spectral switch |
+| Visualizer Labels | ✅ | Floating mode indicators |
 
 ---
 
 ## Planned Features (Not Yet Implemented)
 
-### Phase 7: MIDI Integration
+### Phase 8: MIDI Integration
 
 | Component | Status | Priority |
 |-----------|--------|----------|
 | Web MIDI Access | 🔜 | HIGH |
-| Note → Pitch Scaling | 🔜 | HIGH |
-| CC → Parameter Mapping | 🔜 | MEDIUM |
-| Polyphony/Voice Stealing | 🔜 | LOW |
+| Wavetable Pitch Control | 🔜 | HIGH |
+| Spectral (IFFT) Pitch Strategy | 🔜 | HIGH |
 
-### Phase 8: GPU Animation
+**Proposal for Spectral Pitch:**
+In IFFT mode, the engine sums sines at fixed bin frequencies (0-20kHz). To pitch this "timbre":
+1.  **Fundamental Multiplier:** Introduce a pitch factor `P = TargetFreq / BaseFreq`.
+2.  **Frequency Scaling:** Multiply every bin's calculated frequency by `P`.
+    *   `BinFreq = (BinIndex * Spacing) * P`
+    *   This shifts all formants and harmonics proportionally (sampler-style pitch shifting).
+3.  **Base Frequency:** Define a root frequency (e.g. 440Hz) for the unshifted spectral data.
+
+### Phase 9: GPU Animation
 
 | Component | Status | Priority |
 |-----------|--------|----------|

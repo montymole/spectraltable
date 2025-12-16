@@ -6,6 +6,7 @@ import { Spectrogram } from './ui/spectrogram';
 import { StereoScope } from './ui/scope';
 import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
+import { MidiHandler } from './audio/midi-handler';
 import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT } from './types';
 
 // Main application entry point
@@ -19,6 +20,7 @@ class SpectralTableApp {
     private scope: StereoScope;
     private audioEngine: AudioEngine;
     private audioAnalyzer: AudioAnalyzer;
+    private midiHandler: MidiHandler;
     private canvas: HTMLCanvasElement;
     private animationFrameId: number = 0;
 
@@ -63,6 +65,13 @@ class SpectralTableApp {
 
         // Initialize Audio Analyzer
         this.audioAnalyzer = new AudioAnalyzer();
+
+        // Initialize MIDI Handler
+        this.midiHandler = new MidiHandler();
+        this.midiHandler.setNoteChangeCallback(this.onMidiNote.bind(this));
+        this.midiHandler.setConnectionChangeCallback((isConnected) => {
+            if (isConnected) console.log('✓ MIDI Device Connected');
+        });
 
         // Wire up callbacks
         this.controls.setPathChangeCallback(this.onPathChange.bind(this));
@@ -211,6 +220,38 @@ class SpectralTableApp {
 
     private onFeedbackChange(amount: number): void {
         this.audioEngine.setFeedback(amount);
+    }
+
+    private onMidiNote(note: number | null): void {
+        if (note === null) return; // Ignore note off for now (pitch stays at last note)
+
+        // Convert MIDI note to frequency
+        // f = 440 * 2^((n - 69) / 12)
+        const freq = 440 * Math.pow(2, (note - 69) / 12);
+
+        const mode = this.audioEngine.getMode();
+
+        if (mode === SynthMode.WAVETABLE) {
+            // Override frequency slider
+            this.audioEngine.setWavetableFrequency(freq);
+
+            // Update UI slider to match
+            // We need to access the controls to update the slider visual
+            // Currently controls doesn't expose a method to set value, so we might need to add one
+            // or just let it diverge. But better to update it.
+            // Let's add setFrequencyValue to ControlPanel in next step if needed.
+            if (this.controls) {
+                this.controls.setFrequency(freq);
+            }
+        } else if (mode === SynthMode.SPECTRAL) {
+            // Spectral Mode Pitch Strategy
+            // Root = 440Hz (A4)
+            // Multiplier = TargetFreq / Root
+            const rootFreq = 440;
+            const multiplier = freq / rootFreq;
+
+            this.audioEngine.setSpectralPitch(multiplier);
+        }
     }
 
     private async onWavUpload(files: FileList): Promise<void> {

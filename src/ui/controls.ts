@@ -232,6 +232,7 @@ export class ControlPanel {
         this.container.appendChild(group);
 
         this.frequencyContainer = group;
+        this.frequencySlider = slider;
         return slider;
     }
 
@@ -277,6 +278,7 @@ export class ControlPanel {
         this.container.appendChild(group);
 
         this.carrierContainer = group;
+        this.carrierSelect = select;
         return select;
     }
 
@@ -321,6 +323,7 @@ export class ControlPanel {
         this.container.appendChild(group);
 
         this.feedbackContainer = group;
+        this.feedbackSlider = slider;
         return slider;
     }
 
@@ -533,6 +536,17 @@ export class ControlPanel {
 
     public setFrequencyChangeCallback(callback: (freq: number) => void): void {
         this.onFrequencyChange = callback;
+    }
+
+    public setFrequency(freq: number): void {
+        if (this.frequencySlider) {
+            this.frequencySlider.value = String(freq);
+        }
+        const valueDisplay = document.getElementById('frequency-value');
+        if (valueDisplay) {
+            const noteName = this.freqToNoteName(freq);
+            valueDisplay.textContent = `${Math.round(freq)} Hz (${noteName})`;
+        }
     }
 
     public setCarrierChangeCallback(callback: (carrier: CarrierType) => void): void {

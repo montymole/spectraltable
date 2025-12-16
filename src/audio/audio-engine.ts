@@ -11,9 +11,12 @@ class SpectralProcessor extends AudioWorkletProcessor {
         super();
         this.spectralData = new Float32Array(1024 * 4); // RGBA
         this.phaseAccumulators = new Float32Array(1024); // For oscillator bank
+        this.frequencyMultiplier = 1.0;
         this.port.onmessage = (e) => {
             if (e.data.type === 'spectral-data') {
                 this.spectralData = e.data.data;
+            } else if (e.data.type === 'frequency-multiplier') {
+                this.frequencyMultiplier = e.data.value;
             }
         };
     }
@@ -40,7 +43,8 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 const minFreq = 20;
                 const maxFreq = 20000;
                 const normalizedBin = bin / numPoints;
-                const freq = minFreq + (maxFreq - minFreq) * normalizedBin;
+                const baseFreq = minFreq + (maxFreq - minFreq) * normalizedBin;
+                const freq = baseFreq * this.frequencyMultiplier;
                 
                 const db = mag * 60 - 60;
                 const linearMag = Math.pow(10, db / 20);
@@ -381,6 +385,15 @@ export class AudioEngine {
             left: this.frequencyDataL,
             right: this.frequencyDataR
         };
+    }
+
+    public setSpectralPitch(multiplier: number): void {
+        if (this.workletNode && this.currentMode === SynthMode.SPECTRAL) {
+            this.workletNode.port.postMessage({
+                type: 'frequency-multiplier',
+                value: multiplier
+            });
+        }
     }
 
     public resume(): void {
