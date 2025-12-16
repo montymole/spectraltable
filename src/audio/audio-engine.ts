@@ -209,6 +209,16 @@ export class AudioEngine {
     private splitNode: ChannelSplitterNode;
     private analyserL: AnalyserNode;
     private analyserR: AnalyserNode;
+    private masterGain: GainNode;
+
+    // ADSR Envelope
+    public attack = 0.1;
+    public decay = 0.2;
+    public sustain = 0.5;
+    public release = 0.5;
+
+    private lastNoteTime = 0;
+    private isNoteOn = false;
 
     // Wavetable frequency (Hz)
     private wavetableFrequency = 220;
@@ -226,6 +236,9 @@ export class AudioEngine {
         this.splitNode = this.ctx.createChannelSplitter(2);
         this.analyserL = this.ctx.createAnalyser();
         this.analyserR = this.ctx.createAnalyser();
+
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = 0;
 
         this.analyserL.fftSize = 2048;
         this.analyserR.fftSize = 2048;
@@ -285,8 +298,10 @@ export class AudioEngine {
         });
 
         // Connect graph
-        this.workletNode.connect(this.ctx.destination);
-        this.workletNode.connect(this.splitNode);
+        // Connect graph
+        this.workletNode.connect(this.masterGain);
+        this.masterGain.connect(this.ctx.destination);
+        this.masterGain.connect(this.splitNode);
 
         // If wavetable mode, send initial frequency
         if (this.currentMode === SynthMode.WAVETABLE) {
@@ -400,5 +415,82 @@ export class AudioEngine {
         if (this.ctx.state === 'suspended') {
             this.ctx.resume();
         }
+    }
+
+    public triggerAttack(params?: { a: number, d: number, s: number }): void {
+        const now = this.ctx.currentTime;
+        this.lastNoteTime = now;
+        this.isNoteOn = true;
+
+        if (params) {
+            this.attack = params.a;
+            this.decay = params.d;
+            this.sustain = params.s;
+        }
+
+        // Cancel any pending ramps
+        this.masterGain.gain.cancelScheduledValues(now);
+
+        // Smooth transition from current value
+        const currentGain = this.masterGain.gain.value; // Approximate, see getGain() for precision
+        this.masterGain.gain.setValueAtTime(currentGain, now);
+
+        // Attack ramp
+        // Target peak (1.0 or user defined?) usually 1.0, then decay to Sustain
+        const peak = 1.0;
+        this.masterGain.gain.linearRampToValueAtTime(peak, now + this.attack);
+
+        // Decay ramp
+        this.masterGain.gain.linearRampToValueAtTime(this.sustain, now + this.attack + this.decay);
+    }
+
+    public triggerRelease(r?: number): void {
+        const now = this.ctx.currentTime;
+        this.isNoteOn = false;
+
+        if (r !== undefined) this.release = r;
+
+        // Cancel future
+        this.masterGain.gain.cancelScheduledValues(now);
+
+        // We need to ramp from *current* calculated gain to 0
+        // Web Audio's .value attribute is not always the instantaneous ramp value during scheduling
+        // But cancelScheduledValues() sets it to the current scheduled value? 
+        // No, it holds the value at 'now'. 
+        // However, safest to calculate it or just use setTargetAtTime which handles it automatically?
+        // User asked for "green line graph", implies linear release.
+        // linearRampToValueAtTime requires a starting point.
+
+        // Let's rely on browser behavior: 
+        // cancelScheduledValues(now) -> the param value becomes constant at the value it had at 'now'.
+        // So we just ramp from there.
+        // Wait, if we are in middle of attack, 'value' might jump?
+        // Actually, strictly speaking `setValueAtTime(this.masterGain.gain.value, now)` is needed to anchor it.
+        // But reading `.value` during automation is spec'd to return the automated value?
+        // "If the AudioParam is being automated, the value property returns the current value of the parameter." (MDN)
+
+        const currentGain = this.masterGain.gain.value;
+        this.masterGain.gain.setValueAtTime(currentGain, now);
+        this.masterGain.gain.linearRampToValueAtTime(0, now + this.release);
+    }
+
+    public getEnvelopeState(): {
+        attack: number,
+        decay: number,
+        sustain: number,
+        release: number,
+        isNoteOn: boolean,
+        lastNoteTime: number,
+        currentTime: number
+    } {
+        return {
+            attack: this.attack,
+            decay: this.decay,
+            sustain: this.sustain,
+            release: this.release,
+            isNoteOn: this.isNoteOn,
+            lastNoteTime: this.lastNoteTime,
+            currentTime: this.ctx.currentTime
+        };
     }
 }

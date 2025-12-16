@@ -7,6 +7,7 @@ import { StereoScope } from './ui/scope';
 import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
 import { MidiHandler } from './audio/midi-handler';
+import { EnvelopeEditor } from './ui/envelope-editor';
 import { PianoKeyboard } from './ui/piano';
 import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT } from './types';
 
@@ -23,7 +24,9 @@ class SpectralTableApp {
     private audioAnalyzer: AudioAnalyzer;
     private midiHandler: MidiHandler;
     private piano: PianoKeyboard;
+    private envelopeEditor: EnvelopeEditor;
     private canvas: HTMLCanvasElement;
+    private currentNote: number | null = null;
     private animationFrameId: number = 0;
 
     // Store uploaded spectral volumes
@@ -64,6 +67,9 @@ class SpectralTableApp {
 
         // Initialize Audio Engine
         this.audioEngine = new AudioEngine();
+
+        // Initialize Envelope Editor
+        this.envelopeEditor = new EnvelopeEditor('envelope-canvas', this.audioEngine);
 
         // Initialize Audio Analyzer
         this.audioAnalyzer = new AudioAnalyzer();
@@ -257,7 +263,19 @@ class SpectralTableApp {
     }
 
     private onMidiNote(note: number | null): void {
-        if (note === null) return; // Ignore note off for now (pitch stays at last note)
+        // Handle Note Off / All Keys Up
+        if (note === null) {
+            this.currentNote = null;
+            this.audioEngine.triggerRelease();
+            return;
+        }
+
+        // Avoid re-triggering if the highest note hasn't changed (e.g. releasing a lower key)
+        if (note === this.currentNote) {
+            return;
+        }
+
+        this.currentNote = note;
 
         // Convert MIDI note to frequency
         // f = 440 * 2^((n - 69) / 12)
@@ -286,6 +304,9 @@ class SpectralTableApp {
 
             this.audioEngine.setSpectralPitch(multiplier);
         }
+
+        // Trigger Envelope Attack (Multi-trigger behavior: every new note triggers attack)
+        this.audioEngine.triggerAttack();
     }
 
     private async onWavUpload(files: FileList): Promise<void> {
