@@ -3,24 +3,26 @@ import { PlaneType } from '../types';
 // Generate reading path plane geometry with different algorithms
 
 export class ReadingPathGeometry {
-    // Helper to calculate Y height for a given X, Z and plane type
-    private static calculateHeight(x: number, z: number, planeType: PlaneType): number {
+    // Helper to calculate Y height for a given X, Z and plane type with phase
+    private static calculateHeight(x: number, z: number, planeType: PlaneType, phase: number = 0): number {
         switch (planeType) {
             case PlaneType.FLAT:
                 return 0;
 
             case PlaneType.SINCOS:
-                // Sine and cosine modulation
-                return 0.3 * (Math.sin(x * Math.PI * 2) * Math.cos(z * Math.PI * 2));
+                // Sine and cosine modulation with phase
+                // Add phase to create movement
+                return 0.3 * (Math.sin((x + phase) * Math.PI * 2) * Math.cos((z + phase) * Math.PI * 2));
 
             case PlaneType.WAVE:
                 // Wave pattern
-                return 0.2 * Math.sin((x + z) * Math.PI * 3);
+                return 0.2 * Math.sin((x + z + phase) * Math.PI * 3);
 
             case PlaneType.RIPPLE:
                 // Circular ripple from center
                 const dist = Math.sqrt(x * x + z * z);
-                return 0.25 * Math.sin(dist * Math.PI * 4) / (1 + dist * 2);
+                // Invert phase for outward ripple effect
+                return 0.25 * Math.sin((dist - phase) * Math.PI * 4) / (1 + dist * 2);
 
             default:
                 return 0;
@@ -30,7 +32,8 @@ export class ReadingPathGeometry {
     // Generate a grid-based plane with various height modulation functions
     public static generatePlane(
         planeType: PlaneType,
-        gridSize: number = 32
+        gridSize: number = 32,
+        phase: number = 0
     ): { positions: Float32Array; indices: Uint16Array } {
         const positions: number[] = [];
         const indices: number[] = [];
@@ -42,7 +45,7 @@ export class ReadingPathGeometry {
                 const x = (ix / (gridSize - 1)) * 2 - 1;
                 const z = (iz / (gridSize - 1)) * 2 - 1;
 
-                const y = this.calculateHeight(x, z, planeType);
+                const y = this.calculateHeight(x, z, planeType, phase);
 
                 positions.push(x, y, z);
             }
@@ -82,7 +85,8 @@ export class ReadingPathGeometry {
     public static generateReadingLine(
         planeType: PlaneType,
         resolutionX: number,
-        currentZ: number = 0 // Z position relative to plane space [-1, 1]
+        currentZ: number = 0, // Z position relative to plane space [-1, 1]
+        phase: number = 0
     ): Float32Array {
         const positions: number[] = [];
 
@@ -91,7 +95,7 @@ export class ReadingPathGeometry {
 
         for (let i = 0; i < resolutionX; i++) {
             const x = (i / (resolutionX - 1)) * 2 - 1;
-            const y = this.calculateHeight(x, z, planeType);
+            const y = this.calculateHeight(x, z, planeType, phase);
 
             positions.push(x, y, z);
         }
