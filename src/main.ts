@@ -6,7 +6,7 @@ import { Spectrogram } from './ui/spectrogram';
 import { StereoScope } from './ui/scope';
 import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
-import { ReadingPathState, VolumeResolution, SynthMode, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT } from './types';
+import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT } from './types';
 
 // Main application entry point
 // Initializes WebGL, UI, and wires up event handling
@@ -72,6 +72,8 @@ class SpectralTableApp {
         this.controls.setDynamicParamChangeCallback(this.onDynamicParamChange.bind(this));
         this.controls.setSynthModeChangeCallback(this.onSynthModeChange.bind(this));
         this.controls.setFrequencyChangeCallback(this.onFrequencyChange.bind(this));
+        this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
+        this.controls.setFeedbackChangeCallback(this.onFeedbackChange.bind(this));
 
         // Handle window resize
         window.addEventListener('resize', this.onResize.bind(this));
@@ -201,6 +203,14 @@ class SpectralTableApp {
 
     private onFrequencyChange(freq: number): void {
         this.audioEngine.setWavetableFrequency(freq);
+    }
+
+    private onCarrierChange(carrier: CarrierType): void {
+        this.audioEngine.setCarrier(carrier);
+    }
+
+    private onFeedbackChange(amount: number): void {
+        this.audioEngine.setFeedback(amount);
     }
 
     private async onWavUpload(files: FileList): Promise<void> {

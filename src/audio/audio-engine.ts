@@ -73,45 +73,65 @@ class SpectralProcessor extends AudioWorkletProcessor {
 registerProcessor('spectral-processor', SpectralProcessor);
 `;
 
-// Processor code for wavetable synthesis
-// Each reading line = one waveform cycle
-// Magnitude values directly become the waveform shape
+// Processor code for wavetable AM synthesis with feedback
+// Carrier wave (sine/saw/square/tri) modulated by reading line magnitudes
+// Magnitude 0 = silence, Magnitude 1 = full carrier amplitude
+// Feedback: previous output mixed back into carrier for evolving timbres
 const WAVETABLE_PROCESSOR_CODE = `
 class WavetableProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
-        this.wavetable = new Float32Array(1024); // Single-cycle waveform
-        this.wavetableSize = 64;
-        this.phase = 0;
-        this.frequency = 220; // A3 default, will be overridden by MIDI
+        this.envelope = new Float32Array(1024); // Amplitude envelope from reading line
+        this.envelopeSize = 64;
+        this.phase = 0;           // Carrier phase (0-1)
+        this.envPhase = 0;        // Envelope read position (0-1)
+        this.frequency = 220;     // Carrier frequency Hz
+        this.carrierType = 0;     // 0=sine, 1=saw, 2=square, 3=triangle
+        this.feedback = 0;        // Feedback amount 0-1
+        this.lastSample = 0;      // Previous output for feedback
+        
         this.port.onmessage = (e) => {
             if (e.data.type === 'spectral-data') {
-                // Extract magnitude channel as waveform
-                // Input: RGBA interleaved [mag, phase, custom1, custom2, ...]
                 const data = e.data.data;
                 const numPoints = data.length / 4;
-                this.wavetableSize = numPoints;
+                this.envelopeSize = numPoints;
                 
-                // Normalize and build waveform: mag values become wave shape
-                // Convert from 0..1 magnitude domain to -1..+1 waveform domain
                 let maxMag = 0;
                 for (let i = 0; i < numPoints; i++) {
                     const mag = data[i * 4];
                     if (mag > maxMag) maxMag = mag;
                 }
                 
-                // Build waveform centered around zero
                 const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
                 for (let i = 0; i < numPoints; i++) {
-                    // Magnitude becomes the waveform amplitude at this point
-                    // Shift from 0..1 to -1..+1 centered
-                    const mag = data[i * 4] * scale;
-                    this.wavetable[i] = (mag - 0.5) * 2.0;
+                    this.envelope[i] = data[i * 4] * scale;
                 }
             } else if (e.data.type === 'frequency') {
                 this.frequency = e.data.value;
+            } else if (e.data.type === 'carrier') {
+                this.carrierType = e.data.value;
+            } else if (e.data.type === 'feedback') {
+                this.feedback = e.data.value;
             }
         };
+    }
+    
+    // Generate carrier waveform sample at phase (0-1)
+    carrier(phase, type) {
+        switch (type) {
+            case 0: // Sine
+                return Math.sin(phase * 2 * Math.PI);
+            case 1: // Saw (falling)
+                return 1 - 2 * phase;
+            case 2: // Square
+                return phase < 0.5 ? 1 : -1;
+            case 3: // Triangle
+                return phase < 0.5 
+                    ? 4 * phase - 1 
+                    : 3 - 4 * phase;
+            default:
+                return Math.sin(phase * 2 * Math.PI);
+        }
     }
 
     process(inputs, outputs, parameters) {
@@ -119,8 +139,7 @@ class WavetableProcessor extends AudioWorkletProcessor {
         const channelL = output[0];
         const channelR = output[1];
         
-        if (this.wavetableSize < 2) {
-            // No valid wavetable yet
+        if (this.envelopeSize < 2) {
             for (let i = 0; i < channelL.length; i++) {
                 channelL[i] = 0;
                 channelR[i] = 0;
@@ -128,29 +147,42 @@ class WavetableProcessor extends AudioWorkletProcessor {
             return true;
         }
         
-        // Phase increment per sample
-        // One full waveform cycle = frequency Hz
-        const phaseInc = this.frequency / sampleRate;
+        const carrierPhaseInc = this.frequency / sampleRate;
+        const envPhaseInc = carrierPhaseInc;
         
         for (let i = 0; i < channelL.length; i++) {
-            // Linear interpolation within wavetable
-            const tablePos = this.phase * this.wavetableSize;
-            const idx0 = Math.floor(tablePos) % this.wavetableSize;
-            const idx1 = (idx0 + 1) % this.wavetableSize;
-            const frac = tablePos - Math.floor(tablePos);
+            // Get base carrier sample
+            let carrierSample = this.carrier(this.phase, this.carrierType);
             
-            const sample = this.wavetable[idx0] * (1 - frac) + this.wavetable[idx1] * frac;
+            // Mix in feedback: blend carrier with previous output
+            // feedback=0: pure carrier, feedback=1: 50/50 mix with previous
+            if (this.feedback > 0) {
+                carrierSample = carrierSample * (1 - this.feedback * 0.5) + this.lastSample * this.feedback * 0.5;
+            }
             
-            // Simple stereo (mono for now)
+            // Get envelope with linear interpolation
+            const envPos = this.envPhase * this.envelopeSize;
+            const envIdx0 = Math.floor(envPos) % this.envelopeSize;
+            const envIdx1 = (envIdx0 + 1) % this.envelopeSize;
+            const envFrac = envPos - Math.floor(envPos);
+            const amplitude = this.envelope[envIdx0] * (1 - envFrac) + this.envelope[envIdx1] * envFrac;
+            
+            // AM synthesis: carrier * envelope
+            const sample = carrierSample * amplitude;
+            
+            // Store for feedback
+            this.lastSample = sample;
+            
             const gain = 0.5;
             channelL[i] = sample * gain;
             channelR[i] = sample * gain;
             
-            // Advance phase
-            this.phase += phaseInc;
-            if (this.phase >= 1.0) {
-                this.phase -= 1.0;
-            }
+            // Advance phases
+            this.phase += carrierPhaseInc;
+            if (this.phase >= 1.0) this.phase -= 1.0;
+            
+            this.envPhase += envPhaseInc;
+            if (this.envPhase >= 1.0) this.envPhase -= 1.0;
         }
         
         return true;
@@ -174,6 +206,12 @@ export class AudioEngine {
 
     // Wavetable frequency (Hz)
     private wavetableFrequency = 220;
+
+    // Carrier waveform type (0=sine, 1=saw, 2=square, 3=triangle)
+    private carrierType = 0;
+
+    // Feedback amount (0-1)
+    private feedback = 0;
 
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -279,6 +317,36 @@ export class AudioEngine {
 
     public getWavetableFrequency(): number {
         return this.wavetableFrequency;
+    }
+
+    public setCarrier(type: number): void {
+        this.carrierType = type;
+
+        if (this.workletNode && this.currentMode === SynthMode.WAVETABLE) {
+            this.workletNode.port.postMessage({
+                type: 'carrier',
+                value: type
+            });
+        }
+    }
+
+    public getCarrier(): number {
+        return this.carrierType;
+    }
+
+    public setFeedback(amount: number): void {
+        this.feedback = amount;
+
+        if (this.workletNode && this.currentMode === SynthMode.WAVETABLE) {
+            this.workletNode.port.postMessage({
+                type: 'feedback',
+                value: amount
+            });
+        }
+    }
+
+    public getFeedback(): number {
+        return this.feedback;
     }
 
     public updateSpectralData(data: Float32Array): void {

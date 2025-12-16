@@ -1,4 +1,4 @@
-import { ReadingPathState, VolumeResolution, SynthMode, VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, PlaneType } from '../types';
+import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, PlaneType } from '../types';
 
 // UI control panel with sliders for all parameters
 
@@ -17,6 +17,10 @@ export class ControlPanel {
     private synthModeSelect: HTMLSelectElement;
     private frequencySlider: HTMLInputElement;
     private frequencyContainer: HTMLElement | null = null;
+    private carrierSelect: HTMLSelectElement;
+    private carrierContainer: HTMLElement | null = null;
+    private feedbackSlider: HTMLInputElement;
+    private feedbackContainer: HTMLElement | null = null;
 
     // Volume density controls
     private densityXSlider: HTMLInputElement;
@@ -36,6 +40,8 @@ export class ControlPanel {
     private onDynamicParamChange?: (value: number) => void;
     private onSynthModeChange?: (mode: SynthMode) => void;
     private onFrequencyChange?: (freq: number) => void;
+    private onCarrierChange?: (carrier: CarrierType) => void;
+    private onFeedbackChange?: (amount: number) => void;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
@@ -83,7 +89,9 @@ export class ControlPanel {
             SynthMode.WAVETABLE,
             SynthMode.SPECTRAL,
         ]);
+        this.carrierSelect = this.createCarrierSelect();
         this.frequencySlider = this.createFrequencySlider();
+        this.feedbackSlider = this.createFeedbackSlider();
 
         this.createSection('Volume Density');
         this.densityXSlider = this.createSlider('density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1);
@@ -224,6 +232,95 @@ export class ControlPanel {
         this.container.appendChild(group);
 
         this.frequencyContainer = group;
+        return slider;
+    }
+
+    private createCarrierSelect(): HTMLSelectElement {
+        const group = document.createElement('div');
+        group.id = 'carrier-container';
+        group.className = 'control-group';
+
+        const labelEl = document.createElement('label');
+        labelEl.htmlFor = 'carrier';
+        labelEl.textContent = 'Carrier';
+
+        const select = document.createElement('select');
+        select.id = 'carrier';
+        select.className = 'select';
+
+        const options = [
+            { value: '0', label: 'Sine' },
+            { value: '1', label: 'Saw' },
+            { value: '2', label: 'Square' },
+            { value: '3', label: 'Triangle' },
+        ];
+
+        for (const opt of options) {
+            const optEl = document.createElement('option');
+            optEl.value = opt.value;
+            optEl.textContent = opt.label;
+            select.appendChild(optEl);
+        }
+
+        select.addEventListener('change', () => {
+            if (this.onCarrierChange) {
+                this.onCarrierChange(parseInt(select.value) as CarrierType);
+            }
+        });
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+
+        group.appendChild(labelRow);
+        group.appendChild(select);
+        this.container.appendChild(group);
+
+        this.carrierContainer = group;
+        return select;
+    }
+
+    private createFeedbackSlider(): HTMLInputElement {
+        const group = document.createElement('div');
+        group.id = 'feedback-container';
+        group.className = 'control-group';
+
+        const labelEl = document.createElement('label');
+        labelEl.htmlFor = 'feedback';
+        labelEl.textContent = 'Feedback';
+
+        const valueDisplay = document.createElement('span');
+        valueDisplay.className = 'value-display';
+        valueDisplay.id = 'feedback-value';
+        valueDisplay.textContent = '0%';
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.id = 'feedback';
+        slider.min = '0';
+        slider.max = '0.99';
+        slider.value = '0';
+        slider.step = '0.01';
+        slider.className = 'slider';
+
+        slider.addEventListener('input', () => {
+            const val = parseFloat(slider.value);
+            valueDisplay.textContent = Math.round(val * 100) + '%';
+            if (this.onFeedbackChange) {
+                this.onFeedbackChange(val);
+            }
+        });
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+        labelRow.appendChild(valueDisplay);
+
+        group.appendChild(labelRow);
+        group.appendChild(slider);
+        this.container.appendChild(group);
+
+        this.feedbackContainer = group;
         return slider;
     }
 
@@ -404,9 +501,16 @@ export class ControlPanel {
         // Synth mode change
         this.synthModeSelect.addEventListener('change', () => {
             const mode = this.synthModeSelect.value as SynthMode;
-            // Show/hide frequency slider based on mode
+            // Show/hide wavetable-specific controls based on mode
+            const isWavetable = mode === SynthMode.WAVETABLE;
             if (this.frequencyContainer) {
-                this.frequencyContainer.style.display = mode === SynthMode.WAVETABLE ? 'block' : 'none';
+                this.frequencyContainer.style.display = isWavetable ? 'block' : 'none';
+            }
+            if (this.carrierContainer) {
+                this.carrierContainer.style.display = isWavetable ? 'block' : 'none';
+            }
+            if (this.feedbackContainer) {
+                this.feedbackContainer.style.display = isWavetable ? 'block' : 'none';
             }
             if (this.onSynthModeChange) {
                 this.onSynthModeChange(mode);
@@ -429,6 +533,14 @@ export class ControlPanel {
 
     public setFrequencyChangeCallback(callback: (freq: number) => void): void {
         this.onFrequencyChange = callback;
+    }
+
+    public setCarrierChangeCallback(callback: (carrier: CarrierType) => void): void {
+        this.onCarrierChange = callback;
+    }
+
+    public setFeedbackChangeCallback(callback: (amount: number) => void): void {
+        this.onFeedbackChange = callback;
     }
 
     public setVolumeResolutionChangeCallback(callback: (resolution: VolumeResolution) => void): void {

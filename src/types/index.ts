@@ -57,3 +57,11 @@ export enum SynthMode {
     SPECTRAL = 'spectral',   // iFFT / additive synthesis from frequency bins
     WAVETABLE = 'wavetable', // Direct waveform playback from reading line
 }
+
+// Carrier waveform types for wavetable AM synthesis
+export enum CarrierType {
+    SINE = 0,
+    SAW = 1,
+    SQUARE = 2,
+    TRIANGLE = 3,
+}
