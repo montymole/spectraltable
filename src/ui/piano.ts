@@ -7,8 +7,10 @@ export class PianoKeyboard {
     // Callbacks
     private onNoteChange: ((note: number, velocity: number) => void) | null = null;
 
-    // Range: C3 (48) to C5 (72)
-    private startNote = 48;
+    // Range: Defaults to 3 Octaves
+    private numOctaves = 3;
+    private baseOctave = 3; // Starts at C3
+    private startNote = 36;
     private endNote = 72;
 
     constructor(containerId: string) {
@@ -16,10 +18,21 @@ export class PianoKeyboard {
         if (!el) throw new Error(`Container ${containerId} not found`);
         this.container = el;
 
-        this.createKeys();
+        this.updateRange(); // Calculates start/end and creates keys
 
         // Prevent drag selection
         this.container.addEventListener('selectstart', e => e.preventDefault());
+    }
+
+    public setBaseOctave(octave: number) {
+        this.baseOctave = octave;
+        this.updateRange();
+    }
+
+    private updateRange() {
+        this.startNote = this.baseOctave * 12;
+        this.endNote = this.startNote + (this.numOctaves * 12);
+        this.createKeys();
     }
 
     private createKeys() {
@@ -40,7 +53,7 @@ export class PianoKeyboard {
         let whiteKeyIndex = 0;
 
         for (let note = this.startNote; note <= this.endNote; note++) {
-            const octave = Math.floor(note / 12);
+            // const octave = Math.floor(note / 12); // Unused
             const noteInOctave = note % 12;
             const isWhite = whiteKeys.includes(noteInOctave);
 
@@ -57,10 +70,6 @@ export class PianoKeyboard {
             } else {
                 key.className = 'piano-key black';
                 key.style.width = `${whiteKeyWidth * 0.7}%`;
-                // Position logic for black keys
-                // Should be centered on the line between white keys
-                // Current white key index is for the NEXT white key
-                // So this black key is after the (whiteKeyIndex - 1)th white key
                 key.style.left = `${(whiteKeyIndex - 1) * whiteKeyWidth + (whiteKeyWidth * 0.65)}%`;
                 key.style.zIndex = '2';
             }
@@ -69,7 +78,6 @@ export class PianoKeyboard {
             key.addEventListener('mousedown', (e) => {
                 if (e.buttons === 1) {
                     this.triggerNoteOn(note);
-                    // Add global mouseup listener to catch release outside key
                     const upHandler = () => {
                         this.triggerNoteOff(note);
                         window.removeEventListener('mouseup', upHandler);
@@ -105,7 +113,6 @@ export class PianoKeyboard {
         if (this.onNoteChange) this.onNoteChange(note, 0);
     }
 
-    // Called from Main when MIDI sends raw note
     public setVisualizeState(note: number, on: boolean) {
         const key = this.keys.get(note);
         if (!key) return; // Out of range

@@ -98,6 +98,10 @@ class SpectralTableApp {
             this.midiHandler.selectInput(id);
         });
 
+        this.controls.setOctaveChangeCallback((octave) => {
+            this.piano.setBaseOctave(octave);
+        });
+
         // Initial input list population (might be empty initially)
         setTimeout(() => {
             this.controls.updateMidiInputs(this.midiHandler.getInputs());

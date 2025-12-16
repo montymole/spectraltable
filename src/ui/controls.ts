@@ -22,6 +22,7 @@ export class ControlPanel {
     private feedbackSlider: HTMLInputElement;
     private feedbackContainer: HTMLElement | null = null;
     private midiSelect!: HTMLSelectElement;
+    private octaveSelect!: HTMLSelectElement;
 
     // Volume density controls
     private densityXSlider: HTMLInputElement;
@@ -45,6 +46,7 @@ export class ControlPanel {
     private onCarrierChange: ((carrier: CarrierType) => void) | null = null;
     private onFeedbackChange: ((amount: number) => void) | null = null;
     private onMidiInputChange: ((id: string) => void) | null = null;
+    private onOctaveChange: ((octave: number) => void) | null = null;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
@@ -96,6 +98,7 @@ export class ControlPanel {
         this.carrierSelect = this.createCarrierSelect();
         this.feedbackSlider = this.createFeedbackSlider();
         this.midiSelect = this.createMidiSelect();
+        this.octaveSelect = this.createOctaveSelect();
 
         this.createSection('Visualization');
         this.densityXSlider = this.createSlider('density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1);
@@ -366,6 +369,17 @@ export class ControlPanel {
         return select;
     }
 
+    private createOctaveSelect(): HTMLSelectElement {
+        const select = this.createSelect('octave-select', 'Keyboard Octave', ['0', '1', '2', '3', '4', '5', '6', '7']);
+        select.value = '3'; // Default C3
+        select.addEventListener('change', () => {
+            if (this.onOctaveChange) {
+                this.onOctaveChange(parseInt(select.value, 10));
+            }
+        });
+        return select;
+    }
+
     private freqToNoteName(freq: number): string {
         // A4 = 440Hz = MIDI 69
         const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -598,6 +612,10 @@ export class ControlPanel {
 
     public setMidiInputChangeCallback(callback: (id: string) => void): void {
         this.onMidiInputChange = callback;
+    }
+
+    public setOctaveChangeCallback(callback: (octave: number) => void): void {
+        this.onOctaveChange = callback;
     }
 
     public updateMidiInputs(inputs: { id: string, name: string }[]): void {
