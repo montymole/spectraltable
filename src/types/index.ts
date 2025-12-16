@@ -65,3 +65,73 @@ export enum CarrierType {
     SQUARE = 2,
     TRIANGLE = 3,
 }
+
+// Generator parameter interfaces
+export interface JuliaParams {
+    scale: number;      // 0.5 - 2.0, default 1.2
+    cReal: number;      // -1 to 1, default -0.4
+    cImag: number;      // -1 to 1, default 0.6
+}
+
+export interface MandelbulbParams {
+    power: number;      // 2 - 12, default 8
+    scale: number;      // 0.5 - 2.0, default 1.2
+    iterations: number; // 4 - 20, default 12
+}
+
+export interface MengerParams {
+    iterations: number; // 1 - 5, default 4
+    scale: number;      // 0.5 - 2.0, default 1.0
+    holeSize: number;   // 0.2 - 0.5, default 0.33
+}
+
+export interface PlasmaParams {
+    frequency: number;  // 1 - 10, default 3
+    complexity: number; // 1 - 6, default 4
+    contrast: number;   // 0.5 - 3.0, default 2.0
+}
+
+export interface GameOfLifeParams {
+    density: number;    // 0.1 - 0.5, default 0.3
+    birthMin: number;   // 4 - 6, default 5
+    surviveMin: number; // 3 - 6, default 4
+}
+
+export type GeneratorParams = JuliaParams | MandelbulbParams | MengerParams | PlasmaParams | GameOfLifeParams;
+
+// Default generator parameters
+export const defaultJuliaParams: JuliaParams = { scale: 1.2, cReal: -0.4, cImag: 0.6 };
+export const defaultMandelbulbParams: MandelbulbParams = { power: 8, scale: 1.2, iterations: 12 };
+export const defaultMengerParams: MengerParams = { iterations: 4, scale: 1.0, holeSize: 0.33 };
+export const defaultPlasmaParams: PlasmaParams = { frequency: 3, complexity: 4, contrast: 2.0 };
+export const defaultGameOfLifeParams: GameOfLifeParams = { density: 0.3, birthMin: 5, surviveMin: 4 };
+
+// Preset system
+export interface PresetControls {
+    pathY: number;
+    scanPosition: number;
+    planeType: string;
+    synthMode: string;
+    frequency: number;
+    carrier: number;
+    feedback: number;
+    densityX: number;
+    densityY: number;
+    densityZ: number;
+    spectralData: string;
+    generatorParams?: GeneratorParams;
+    lfo1: { waveform: string; frequency: number; amplitude: number; offset: number };
+    lfo2: { waveform: string; frequency: number; amplitude: number; offset: number };
+    modRouting: { pathY: string; scanPhase: string; shapePhase: string };
+    envelope: { attack: number; decay: number; sustain: number; release: number };
+    octave: number;
+}
+
+export interface PresetData {
+    name: string;
+    timestamp: number;
+    controls: PresetControls;
+}
+
+export const STORAGE_KEY_STATE = 'spectraltable_state';
+export const STORAGE_KEY_PRESETS = 'spectraltable_presets';

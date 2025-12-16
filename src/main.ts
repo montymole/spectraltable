@@ -9,7 +9,11 @@ import { AudioAnalyzer } from './audio/audio-analyzer';
 import { MidiHandler } from './audio/midi-handler';
 import { EnvelopeEditor } from './ui/envelope-editor';
 import { PianoKeyboard } from './ui/piano';
-import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT } from './types';
+import {
+    ReadingPathState, VolumeResolution, SynthMode, CarrierType,
+    VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT,
+    GeneratorParams, PresetControls
+} from './types';
 import { LFO, LFOWaveform } from './modulators/lfo';
 
 // Main application entry point
@@ -134,6 +138,8 @@ class SpectralTableApp {
         this.controls.setFrequencyChangeCallback(this.onFrequencyChange.bind(this));
         this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
         this.controls.setFeedbackChangeCallback(this.onFeedbackChange.bind(this));
+        this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
+        this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
 
         // LFO Wiring
         this.controls.setLFOParamChangeCallback((index, param, value) => {
@@ -188,7 +194,74 @@ class SpectralTableApp {
         // Start render loop
         this.startRenderLoop();
 
+        // Try to restore saved state
+        this.restoreSavedState();
+
         console.log('✓ Application initialized');
+    }
+
+    private restoreSavedState(): void {
+        const savedState = this.controls.loadSavedState();
+        if (savedState) {
+            console.log('Restoring saved state...');
+            this.applyPresetState(savedState);
+        }
+    }
+
+    private onPresetLoad(controls: PresetControls): void {
+        console.log('Loading preset...');
+        this.applyPresetState(controls);
+    }
+
+    private applyPresetState(state: PresetControls): void {
+        // Apply to controls UI
+        this.controls.applyState(state);
+
+        // Apply to LFOs
+        this.lfo1.setWaveform(state.lfo1.waveform as any);
+        this.lfo1.setFrequency(state.lfo1.frequency);
+        this.lfo1.setAmplitude(state.lfo1.amplitude);
+        this.lfo1.setOffset(state.lfo1.offset);
+
+        this.lfo2.setWaveform(state.lfo2.waveform as any);
+        this.lfo2.setFrequency(state.lfo2.frequency);
+        this.lfo2.setAmplitude(state.lfo2.amplitude);
+        this.lfo2.setOffset(state.lfo2.offset);
+
+        // Apply modulation routing
+        this.pathYSource = state.modRouting.pathY;
+        this.scanPhaseSource = state.modRouting.scanPhase;
+        this.shapePhaseSource = state.modRouting.shapePhase;
+
+        // Apply audio settings
+        this.audioEngine.setMode(state.synthMode as SynthMode);
+        this.audioEngine.setWavetableFrequency(state.frequency);
+        this.audioEngine.setCarrier(state.carrier);
+        this.audioEngine.setFeedback(state.feedback);
+
+        // Apply envelope
+        this.audioEngine.attack = state.envelope.attack;
+        this.audioEngine.decay = state.envelope.decay;
+        this.audioEngine.sustain = state.envelope.sustain;
+        this.audioEngine.release = state.envelope.release;
+
+        // Apply piano octave
+        this.piano.setBaseOctave(state.octave);
+
+        // Apply volume resolution
+        const resolution = { x: state.densityX, y: state.densityY, z: state.densityZ };
+        this.renderer.updateVolumeResolution(resolution);
+
+        // Update generator params UI and trigger data generation
+        this.controls.updateGeneratorParamsUI(state.spectralData, state.generatorParams);
+
+        // Trigger spectral data change (will use generator params if available)
+        this.onSpectralDataChange(state.spectralData);
+
+        // Update path
+        this.onPathChange(this.controls.getState());
+
+        console.log('✓ State applied');
     }
 
     private onPathChange(state: ReadingPathState): void {
@@ -227,14 +300,18 @@ class SpectralTableApp {
         this.gameOfLifeActive = false;
         this.sinePlasmaActive = false;
 
+        // Show generator params UI for supported generators
+        this.controls.updateGeneratorParamsUI(dataSet);
+
         // Check if it's an uploaded volume
         if (this.uploadedVolumes.has(dataSet)) {
             const volumeData = this.uploadedVolumes.get(dataSet)!;
             this.renderer.getSpectralVolume().setData(volumeData);
             this.controls.hideDynamicParam();
         } else if (dataSet === 'game-of-life') {
-            // Initialize Game of Life
-            this.renderer.getSpectralVolume().initGameOfLife();
+            // Initialize Game of Life with current params
+            const params = this.controls.getCurrentGeneratorParams();
+            this.renderer.updateSpectralData(dataSet, params || undefined);
             this.gameOfLifeActive = true;
             this.gameOfLifeLastUpdate = performance.now();
 
@@ -242,8 +319,9 @@ class SpectralTableApp {
             this.controls.showDynamicParam('Evolution Speed', 0, 1, 0.5, 0.01);
             console.log('✓ Game of Life initialized');
         } else if (dataSet === 'sine-plasma') {
-            // Initialize Sine Plasma
-            this.renderer.getSpectralVolume().generateSinePlasma(0);
+            // Initialize Sine Plasma with current params
+            const params = this.controls.getCurrentGeneratorParams();
+            this.renderer.updateSpectralData(dataSet, params || undefined);
             this.sinePlasmaActive = true;
             this.sinePlasmaLastUpdate = performance.now();
 
@@ -251,8 +329,9 @@ class SpectralTableApp {
             this.controls.showDynamicParam('Evolution Speed', 0, 1, 0.5, 0.01);
             console.log('✓ Sine Plasma initialized with evolution');
         } else {
-            // Built-in data sets
-            this.renderer.updateSpectralData(dataSet);
+            // Built-in data sets with params
+            const params = this.controls.getCurrentGeneratorParams();
+            this.renderer.updateSpectralData(dataSet, params || undefined);
             this.controls.hideDynamicParam();
         }
 
@@ -286,6 +365,11 @@ class SpectralTableApp {
 
     private onFeedbackChange(amount: number): void {
         this.audioEngine.setFeedback(amount);
+    }
+
+    private onGeneratorParamsChange(dataSet: string, params: GeneratorParams): void {
+        // Regenerate with new params
+        this.renderer.updateSpectralData(dataSet, params);
     }
 
     private onMidiNote(note: number | null): void {

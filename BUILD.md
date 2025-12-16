@@ -62,22 +62,27 @@ This serves the `dist/` folder locally to test the production build.
 
 ```
 spectraltable/
-├── src/              # Source code (TypeScript)
-│   ├── main.ts       # Entry point
-│   └── style.css     # Global styles
-├── dist/             # Production build output (generated)
-├── index.html        # HTML entry point
-├── vite.config.ts    # Vite configuration
-├── tsconfig.json     # TypeScript configuration
-└── package.json      # Dependencies and scripts
+├── src/                    # Source code (TypeScript)
+│   ├── main.ts             # Entry point
+│   ├── style.css           # Global styles
+│   ├── audio/              # Audio engine, analyzer, MIDI
+│   ├── gpu/                # WebGL rendering, shaders, spectral volume
+│   ├── modulators/         # LFO logic
+│   ├── types/              # Type definitions
+│   └── ui/                 # Control panel, visualizers, piano
+├── dist/                   # Production build output (generated)
+├── index.html              # HTML entry point
+├── vite.config.ts          # Vite configuration
+├── tsconfig.json           # TypeScript configuration
+└── package.json            # Dependencies and scripts
 ```
 
 ## Browser Requirements
 
 This application requires:
 - **WebGL 2.0** - For GPU compute and 3D rendering
-- **Web Audio API** - For audio synthesis
-- **Web MIDI API** - For MIDI controller input (optional)
+- **Web Audio API** - For audio synthesis (AudioWorklet)
+- **Web MIDI API** - For MIDI controller input (optional, Chrome/Edge recommended)
 
 ### Compatibility
 

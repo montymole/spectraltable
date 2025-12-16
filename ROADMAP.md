@@ -38,8 +38,9 @@ spectraltable/
 │   ├── main.ts                 # App entry point, orchestration
 │   ├── style.css               # UI styling
 │   ├── audio/
-│   │   ├── audio-engine.ts     # AudioContext, worklet, iFFT synthesis
-│   │   └── audio-analyzer.ts   # WAV file FFT analysis
+│   │   ├── audio-engine.ts     # AudioContext, worklet, iFFT/wavetable synthesis
+│   │   ├── audio-analyzer.ts   # WAV file FFT analysis
+│   │   └── midi-handler.ts     # Web MIDI API integration
 │   ├── gpu/
 │   │   ├── context.ts          # WebGL2 context setup
 │   │   ├── math.ts             # Vector/matrix utilities
@@ -47,10 +48,14 @@ spectraltable/
 │   │   ├── renderer.ts         # 3D rendering pipeline
 │   │   ├── shaders.ts          # GLSL shaders
 │   │   └── spectral-volume.ts  # 3D texture + data generators
+│   ├── modulators/
+│   │   └── lfo.ts              # LFO logic (sine, square, saw, triangle)
 │   ├── types/
 │   │   └── index.ts            # Shared type definitions
 │   └── ui/
 │       ├── controls.ts         # ControlPanel - sliders, selects, file inputs
+│       ├── envelope-editor.ts  # Interactive ADSR editor canvas
+│       ├── piano.ts            # On-screen piano keyboard
 │       ├── scope.ts            # StereoScope - Lissajous/channel visualizer
 │       └── spectrogram.ts      # Spectrogram - scrolling frequency display
 ├── index.html                  # HTML entry point
@@ -111,7 +116,7 @@ spectraltable/
 | 3D Julia | ✅ | Fractal with low-freq concentration |
 | Mandelbulb | ✅ | 3D Mandelbrot variant |
 | Menger Sponge | ✅ | Recursive cubic fractal |
-| Perlin Noise | ✅ | Animated 4D noise, scrub control |
+| Sine Plasma | ✅ | Animated demo-scene plasma effect |
 | Game of Life | ✅ | 3D cellular automata |
 
 ### Phase 6: Wavetable Synthesis Mode ✅ COMPLETE
@@ -142,7 +147,28 @@ spectraltable/
 
 ---
 
-## Planned Features (Not Yet Implemented)
+## Current Priorities
+
+### Bug Fixes (Resolved)
+
+| Bug ID | Component | Issue | Status |
+|--------|-----------|-------|--------|
+| BUG-001 | 3D Julia Generator | Volume mostly empty, poor centering | ✅ Fixed |
+| BUG-002 | Mandelbulb Generator | Volume mostly empty, samples outside fractal | ✅ Fixed |
+| BUG-003 | Menger Sponge Generator | Erratic/chaotic patterns, broken recursion | ✅ Fixed |
+
+### New Features
+
+| Feature ID | Component | Description | Status |
+|------------|-----------|-------------|--------|
+| FEAT-001 | Generator Params | Adjustable parameters per generator (2-3 sliders each) | ✅ Complete |
+| FEAT-002 | Preset System | localStorage persistence + named presets UI | ✅ Complete |
+
+See [CHECKLIST.md](./CHECKLIST.md#known-bugs--issues) for implementation details.
+
+---
+
+## Recently Completed Features
 
 ### Phase 8: MIDI Integration ✅ COMPLETE
 
@@ -154,16 +180,47 @@ spectraltable/
 | On-screen Piano Keyboard | ✅ | Virtual keyboard with visualization |
 | MIDI Input Selector | ✅ | Dynamic port selection dropdown |
 
-### Phase 9: Modulation System (LFOs) 🚀
+### Phase 9: Modulation System (LFOs) ✅ COMPLETE
 
 | Component | Status | Details |
 |-----------|--------|---------|
 | LFO Logic | ✅ | 2 Units (Sine, Square, Saw, Tri) |
-| LFO UI Controls | ✅ | Wave, Freq (0-1Hz), Amp (0-1) |
-| Modulation Routing | ✅ | Assign LFOs to Scan Phase & Morph Y |
+| LFO UI Controls | ✅ | Wave, Freq (0-1Hz), Amp (0-1), Offset (-1 to 1) |
+| Modulation Routing | ✅ | Assign LFOs to Scan Phase, Morph Y, Shape Phase |
 | Visualization Control | ✅ | Render loop modulation logic |
 
-### Phase 10: Optimization
+### Phase 10: Envelope System ✅ COMPLETE
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| ADSR Envelope | ✅ | Attack, Decay, Sustain, Release |
+| Interactive Editor | ✅ | Drag nodes to adjust parameters |
+| Visual Playhead | ✅ | Shows current envelope position |
+| Note Triggering | ✅ | Attack on note-on, release on note-off |
+
+---
+
+## Planned Features (Not Yet Implemented)
+
+### Phase 11: Generator Improvements 🔜
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| Fix Julia Generator | 🔜 | BUG-001: Better centering, scale, C constant |
+| Fix Mandelbulb Generator | 🔜 | BUG-002: Center at origin, iteration coloring |
+| Fix Menger Sponge Generator | 🔜 | BUG-003: Proper recursive algorithm |
+| Adjustable Generator Params | 🔜 | FEAT-001: 2-3 sliders per generator |
+
+### Phase 12: Preset System 🔜
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| Auto-save State | 🔜 | Persist control values in localStorage |
+| Restore on Load | 🔜 | Initialize controls from saved state |
+| Named Presets | 🔜 | Save/load named configurations |
+| Preset UI | 🔜 | Dropdown, Save button, Delete button |
+
+### Phase 13: Optimization (Future)
 
 | Component | Status | Priority |
 |-----------|--------|----------|
@@ -172,14 +229,15 @@ spectraltable/
 | AudioWorklet Underrun Prevention | 🔜 | MEDIUM |
 | Memory Pool Allocation | 🔜 | LOW |
 
-### Phase 10: UX Polish
+### Phase 14: UX Polish (Future)
 
 | Component | Status | Priority |
 |-----------|--------|----------|
 | Keyboard Shortcuts | 🔜 | LOW |
-| Preset System | 🔜 | MEDIUM |
 | Export Audio | 🔜 | LOW |
 | Touch Controls | 🔜 | LOW |
+| Scroll Wheel Zoom | 🔜 | LOW |
+| Camera Reset Button | 🔜 | LOW |
 
 ---
 

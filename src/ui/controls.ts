@@ -1,4 +1,13 @@
-import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, PlaneType } from '../types';
+import {
+    ReadingPathState, VolumeResolution, SynthMode, CarrierType, PlaneType,
+    VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT,
+    VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT,
+    VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT,
+    GeneratorParams, JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
+    defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
+    PresetControls, PresetData
+} from '../types';
+import { PresetManager } from './preset-manager';
 
 // UI control panel with sliders for all parameters
 
@@ -33,6 +42,11 @@ export class ControlPanel {
     private dynamicParamSlider: HTMLInputElement | null = null;
     private dynamicParamContainer: HTMLElement | null = null;
 
+    // Generator parameter sliders
+    private generatorParamsContainer: HTMLElement | null = null;
+    private currentGeneratorParams: GeneratorParams | null = null;
+    private currentDataSet: string = 'blank';
+
     // Callbacks
     private onPathChange: ((state: ReadingPathState) => void) | null = null;
     private onVolumeResolutionChange?: (resolution: VolumeResolution) => void;
@@ -50,10 +64,51 @@ export class ControlPanel {
     private onLFOParamChange: ((index: number, param: string, value: any) => void) | null = null;
     private onModulationRoutingChange: ((target: string, source: string) => void) | null = null;
 
+    // Generator params callback
+    private onGeneratorParamsChange: ((dataSet: string, params: GeneratorParams) => void) | null = null;
+
+    // Preset system
+    private presetManager: PresetManager;
+    private presetSelect: HTMLSelectElement | null = null;
+    private onPresetLoad: ((controls: PresetControls) => void) | null = null;
+
+    // LFO state for serialization
+    private lfoState = [
+        { waveform: 'sine', frequency: 0.5, amplitude: 0.5, offset: 0 },
+        { waveform: 'sine', frequency: 0.5, amplitude: 0.5, offset: 0 }
+    ];
+    private modRoutingState = { pathY: 'none', scanPhase: 'none', shapePhase: 'none' };
+    private octaveValue = 3;
+
+    // Debounce timer for auto-save
+    private autoSaveTimer: number | null = null;
+
+    // LFO UI element references for state restoration
+    private lfoWaveSelects: HTMLSelectElement[] = [];
+    private lfoFreqSliders: HTMLInputElement[] = [];
+    private lfoAmpSliders: HTMLInputElement[] = [];
+    private lfoOffsetSliders: HTMLInputElement[] = [];
+    private lfoFreqDisplays: HTMLSpanElement[] = [];
+    private lfoAmpDisplays: HTMLSpanElement[] = [];
+    private lfoOffsetDisplays: HTMLSpanElement[] = [];
+
+    // Modulation routing selects
+    private pathYSourceSelect: HTMLSelectElement | null = null;
+    private scanPhaseSourceSelect: HTMLSelectElement | null = null;
+    private shapePhaseSourceSelect: HTMLSelectElement | null = null;
+
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
         if (!el) throw new Error(`Container not found: ${containerId}`);
         this.container = el;
+
+        // Initialize preset manager
+        this.presetManager = new PresetManager();
+        this.presetManager.setPresetsChangeCallback(() => this.updatePresetDropdown());
+
+        // Create preset section first
+        this.createSection('Presets');
+        this.createPresetUI();
 
         this.createSection('Wave/Spectral Volume');
         this.spectralDataSelect = this.createSelect('spectral-data-type', 'Data Set', [
@@ -71,6 +126,9 @@ export class ControlPanel {
         // Dynamic parameter slider (shown for certain datasets)
         this.createDynamicParameterSlider();
 
+        // Generator parameter sliders container
+        this.createGeneratorParamsContainer();
+
         // Add WAV upload (multi-select for morphing)
         this.wavUploadInput = this.createFileInput('wav-upload', 'Upload WAV (Multi-select)', '.wav,.mp3,.ogg', true);
 
@@ -82,6 +140,7 @@ export class ControlPanel {
         // Modulatable Sliders
         const pathYControl = this.createModulatableSlider('path-y', 'Position Y (Morph)', -1, 1, 0, 0.01, 'pathY');
         this.pathYSlider = pathYControl.slider;
+        this.pathYSourceSelect = pathYControl.select;
 
         this.planeTypeSelect = this.createSelect('plane-type', 'Plane Type', [
             PlaneType.FLAT,
@@ -111,10 +170,13 @@ export class ControlPanel {
         });
 
         shapePhaseSelect.addEventListener('change', () => {
+            this.modRoutingState.shapePhase = shapePhaseSelect.value;
             if (this.onModulationRoutingChange) {
                 this.onModulationRoutingChange('shapePhase', shapePhaseSelect.value);
             }
+            this.scheduleAutoSave();
         });
+        this.shapePhaseSourceSelect = shapePhaseSelect;
 
         const spLabelRow = document.createElement('div');
         spLabelRow.className = 'label-row';
@@ -128,6 +190,7 @@ export class ControlPanel {
 
         const scanPosControl = this.createModulatableSlider('scan-pos', 'Scan Phase', -1, 1, 0, 0.01, 'scanPhase');
         this.scanPositionSlider = scanPosControl.slider;
+        this.scanPhaseSourceSelect = scanPosControl.select;
 
         // LFO Section
         this.createSection('LFOs');
@@ -282,12 +345,15 @@ export class ControlPanel {
         });
 
         sourceSelect.addEventListener('change', () => {
+            if (targetParam === 'pathY') this.modRoutingState.pathY = sourceSelect.value;
+            if (targetParam === 'scanPhase') this.modRoutingState.scanPhase = sourceSelect.value;
             if (this.onModulationRoutingChange) {
                 this.onModulationRoutingChange(targetParam, sourceSelect.value);
             }
             // Disable slider if modulated?
             slider.disabled = sourceSelect.value !== 'none';
             group.style.opacity = sourceSelect.value !== 'none' ? '0.8' : '1.0';
+            this.scheduleAutoSave();
         });
 
         const valueDisplay = document.createElement('span');
@@ -349,9 +415,12 @@ export class ControlPanel {
             waveSelect.appendChild(opt);
         });
         waveSelect.addEventListener('change', () => {
+            this.lfoState[index].waveform = waveSelect.value;
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'waveform', waveSelect.value);
+            this.scheduleAutoSave();
         });
         wrapper.appendChild(waveSelect);
+        this.lfoWaveSelects[index] = waveSelect;
 
         // Frequency (0 - 1Hz)
         const freqLabel = document.createElement('div');
@@ -368,16 +437,20 @@ export class ControlPanel {
         freqSlider.className = 'slider';
         freqSlider.addEventListener('input', () => {
             freqDisplay.textContent = `${freqSlider.value} Hz`;
+            this.lfoState[index].frequency = parseFloat(freqSlider.value);
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'frequency', parseFloat(freqSlider.value));
+            this.scheduleAutoSave();
         });
         wrapper.appendChild(freqLabel);
         wrapper.appendChild(freqSlider);
+        this.lfoFreqSliders[index] = freqSlider;
+        this.lfoFreqDisplays[index] = freqDisplay;
 
         // Amplitude (0 - 1)
         const ampLabel = document.createElement('div');
         ampLabel.className = 'label-row';
         ampLabel.innerHTML = '<label>Amp</label><span class="value-display">0.5</span>';
-        const ampDisplay = ampLabel.querySelector('span')!; // Fix: defined ampDisplay
+        const ampDisplay = ampLabel.querySelector('span')!;
 
         const ampSlider = document.createElement('input');
         ampSlider.type = 'range';
@@ -388,10 +461,14 @@ export class ControlPanel {
         ampSlider.className = 'slider';
         ampSlider.addEventListener('input', () => {
             ampDisplay.textContent = ampSlider.value;
+            this.lfoState[index].amplitude = parseFloat(ampSlider.value);
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'amplitude', parseFloat(ampSlider.value));
+            this.scheduleAutoSave();
         });
         wrapper.appendChild(ampLabel);
         wrapper.appendChild(ampSlider);
+        this.lfoAmpSliders[index] = ampSlider;
+        this.lfoAmpDisplays[index] = ampDisplay;
 
         // Offset (-1 to 1)
         const offsetLabel = document.createElement('div');
@@ -408,10 +485,14 @@ export class ControlPanel {
         offsetSlider.className = 'slider';
         offsetSlider.addEventListener('input', () => {
             offsetDisplay.textContent = offsetSlider.value;
+            this.lfoState[index].offset = parseFloat(offsetSlider.value);
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'offset', parseFloat(offsetSlider.value));
+            this.scheduleAutoSave();
         });
         wrapper.appendChild(offsetLabel);
         wrapper.appendChild(offsetSlider);
+        this.lfoOffsetSliders[index] = offsetSlider;
+        this.lfoOffsetDisplays[index] = offsetDisplay;
 
         this.appendControl(wrapper);
     }
@@ -590,9 +671,11 @@ export class ControlPanel {
         const select = this.createSelect('octave-select', 'Keyboard Octave', ['0', '1', '2', '3', '4', '5', '6', '7']);
         select.value = '3'; // Default C3
         select.addEventListener('change', () => {
+            this.octaveValue = parseInt(select.value, 10);
             if (this.onOctaveChange) {
-                this.onOctaveChange(parseInt(select.value, 10));
+                this.onOctaveChange(this.octaveValue);
             }
+            this.scheduleAutoSave();
         });
         return select;
     }
@@ -668,21 +751,22 @@ export class ControlPanel {
         const valueDisplay = document.createElement('span');
         valueDisplay.className = 'value-display';
         valueDisplay.id = 'dynamic-param-value';
-        valueDisplay.textContent = '500';
+        valueDisplay.textContent = '0.50';
 
         const slider = document.createElement('input');
         slider.type = 'range';
         slider.id = 'dynamic-param';
         slider.min = '0';
-        slider.max = '1000';
-        slider.value = '500';
-        slider.step = '10';
+        slider.max = '1';
+        slider.value = '0.5';
+        slider.step = '0.01';
         slider.className = 'slider';
 
         // Update value display on change
         slider.addEventListener('input', () => {
             const val = parseFloat(slider.value);
-            valueDisplay.textContent = Math.round(val).toString();
+            const step = parseFloat(slider.step);
+            valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
             if (this.onDynamicParamChange) {
                 this.onDynamicParamChange(val);
             }
@@ -699,6 +783,386 @@ export class ControlPanel {
 
         this.dynamicParamSlider = slider;
         this.dynamicParamContainer = container;
+    }
+
+    private createPresetUI(): void {
+        // Preset dropdown
+        const selectGroup = document.createElement('div');
+        selectGroup.className = 'control-group';
+
+        const selectLabel = document.createElement('label');
+        selectLabel.textContent = 'Load Preset';
+
+        const select = document.createElement('select');
+        select.id = 'preset-select';
+        select.className = 'select';
+
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Select Preset --';
+        select.appendChild(defaultOpt);
+
+        select.addEventListener('change', () => {
+            if (select.value && this.onPresetLoad) {
+                const preset = this.presetManager.getPreset(select.value);
+                if (preset) {
+                    this.onPresetLoad(preset.controls);
+                }
+            }
+        });
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(selectLabel);
+
+        selectGroup.appendChild(labelRow);
+        selectGroup.appendChild(select);
+        this.appendControl(selectGroup);
+
+        this.presetSelect = select;
+        this.updatePresetDropdown();
+
+        // Save / Delete buttons
+        const buttonGroup = document.createElement('div');
+        buttonGroup.className = 'control-group';
+        buttonGroup.style.display = 'flex';
+        buttonGroup.style.gap = '8px';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'reset-button';
+        saveBtn.textContent = '💾 Save';
+        saveBtn.style.flex = '1';
+        saveBtn.addEventListener('click', () => {
+            const name = prompt('Enter preset name:');
+            if (name && name.trim()) {
+                this.presetManager.savePreset(name.trim(), this.getFullState());
+            }
+        });
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'reset-button';
+        deleteBtn.textContent = '🗑 Delete';
+        deleteBtn.style.flex = '1';
+        deleteBtn.addEventListener('click', () => {
+            if (this.presetSelect && this.presetSelect.value) {
+                if (confirm(`Delete preset "${this.presetSelect.value}"?`)) {
+                    this.presetManager.deletePreset(this.presetSelect.value);
+                }
+            }
+        });
+
+        buttonGroup.appendChild(saveBtn);
+        buttonGroup.appendChild(deleteBtn);
+        this.appendControl(buttonGroup);
+    }
+
+    private updatePresetDropdown(): void {
+        if (!this.presetSelect) return;
+
+        const currentValue = this.presetSelect.value;
+        this.presetSelect.innerHTML = '';
+
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Select Preset --';
+        this.presetSelect.appendChild(defaultOpt);
+
+        const presets = this.presetManager.getPresets();
+        for (const preset of presets) {
+            const opt = document.createElement('option');
+            opt.value = preset.name;
+            opt.textContent = preset.name;
+            this.presetSelect.appendChild(opt);
+        }
+
+        // Restore selection if still exists
+        if (presets.some(p => p.name === currentValue)) {
+            this.presetSelect.value = currentValue;
+        }
+    }
+
+    private scheduleAutoSave(): void {
+        if (this.autoSaveTimer) {
+            clearTimeout(this.autoSaveTimer);
+        }
+        this.autoSaveTimer = window.setTimeout(() => {
+            this.presetManager.saveCurrentState(this.getFullState());
+        }, 500);
+    }
+
+    public getFullState(): PresetControls {
+        return {
+            pathY: parseFloat(this.pathYSlider.value),
+            scanPosition: parseFloat(this.scanPositionSlider.value),
+            planeType: this.planeTypeSelect.value,
+            synthMode: this.synthModeSelect.value,
+            frequency: parseFloat(this.frequencySlider.value),
+            carrier: parseInt((document.getElementById('carrier') as HTMLSelectElement)?.value || '0'),
+            feedback: parseFloat((document.getElementById('feedback') as HTMLInputElement)?.value || '0'),
+            densityX: parseFloat(this.densityXSlider.value),
+            densityY: parseFloat(this.densityYSlider.value),
+            densityZ: parseFloat(this.densityZSlider.value),
+            spectralData: this.spectralDataSelect.value,
+            generatorParams: this.currentGeneratorParams || undefined,
+            lfo1: { ...this.lfoState[0] },
+            lfo2: { ...this.lfoState[1] },
+            modRouting: { ...this.modRoutingState },
+            envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.5 }, // Will be updated from AudioEngine
+            octave: this.octaveValue
+        };
+    }
+
+    public setPresetLoadCallback(callback: (controls: PresetControls) => void): void {
+        this.onPresetLoad = callback;
+    }
+
+    public loadSavedState(): PresetControls | null {
+        return this.presetManager.loadCurrentState();
+    }
+
+    public applyState(state: PresetControls): void {
+        // Apply all control values from state
+        this.pathYSlider.value = String(state.pathY);
+        this.scanPositionSlider.value = String(state.scanPosition);
+        this.planeTypeSelect.value = state.planeType;
+        this.synthModeSelect.value = state.synthMode;
+        this.frequencySlider.value = String(state.frequency);
+        this.densityXSlider.value = String(state.densityX);
+        this.densityYSlider.value = String(state.densityY);
+        this.densityZSlider.value = String(state.densityZ);
+        this.spectralDataSelect.value = state.spectralData;
+
+        // Update carrier and feedback
+        const carrierEl = document.getElementById('carrier') as HTMLSelectElement;
+        if (carrierEl) carrierEl.value = String(state.carrier);
+
+        const feedbackEl = document.getElementById('feedback') as HTMLInputElement;
+        if (feedbackEl) feedbackEl.value = String(state.feedback);
+
+        // Update octave
+        const octaveEl = document.getElementById('octave-select') as HTMLSelectElement;
+        if (octaveEl) {
+            octaveEl.value = String(state.octave);
+            this.octaveValue = state.octave;
+        }
+
+        // Store LFO and routing state
+        this.lfoState[0] = { ...state.lfo1 };
+        this.lfoState[1] = { ...state.lfo2 };
+        this.modRoutingState = { ...state.modRouting };
+
+        // Update LFO UI elements
+        this.updateLFOUI(0, state.lfo1);
+        this.updateLFOUI(1, state.lfo2);
+
+        // Update modulation routing UI
+        this.updateModRoutingUI();
+
+        // Store generator params
+        if (state.generatorParams) {
+            this.currentGeneratorParams = state.generatorParams;
+        }
+
+        // Update value displays
+        this.updateAllDisplays();
+    }
+
+    private updateLFOUI(index: number, lfo: { waveform: string; frequency: number; amplitude: number; offset: number }): void {
+        if (this.lfoWaveSelects[index]) {
+            this.lfoWaveSelects[index].value = lfo.waveform;
+        }
+        if (this.lfoFreqSliders[index]) {
+            this.lfoFreqSliders[index].value = String(lfo.frequency);
+            if (this.lfoFreqDisplays[index]) {
+                this.lfoFreqDisplays[index].textContent = `${lfo.frequency} Hz`;
+            }
+        }
+        if (this.lfoAmpSliders[index]) {
+            this.lfoAmpSliders[index].value = String(lfo.amplitude);
+            if (this.lfoAmpDisplays[index]) {
+                this.lfoAmpDisplays[index].textContent = String(lfo.amplitude);
+            }
+        }
+        if (this.lfoOffsetSliders[index]) {
+            this.lfoOffsetSliders[index].value = String(lfo.offset);
+            if (this.lfoOffsetDisplays[index]) {
+                this.lfoOffsetDisplays[index].textContent = String(lfo.offset);
+            }
+        }
+    }
+
+    private updateModRoutingUI(): void {
+        // Update pathY source select
+        if (this.pathYSourceSelect) {
+            this.pathYSourceSelect.value = this.modRoutingState.pathY;
+            this.pathYSlider.disabled = this.modRoutingState.pathY !== 'none';
+        }
+        // Update scanPhase source select
+        if (this.scanPhaseSourceSelect) {
+            this.scanPhaseSourceSelect.value = this.modRoutingState.scanPhase;
+            this.scanPositionSlider.disabled = this.modRoutingState.scanPhase !== 'none';
+        }
+        // Update shapePhase source select
+        if (this.shapePhaseSourceSelect) {
+            this.shapePhaseSourceSelect.value = this.modRoutingState.shapePhase;
+        }
+    }
+
+    private updateAllDisplays(): void {
+        // Update path Y display
+        const pathYDisplay = document.getElementById('path-y-value');
+        if (pathYDisplay) pathYDisplay.textContent = parseFloat(this.pathYSlider.value).toFixed(2);
+
+        // Update scan position display
+        const scanDisplay = document.getElementById('scan-pos-value');
+        if (scanDisplay) scanDisplay.textContent = parseFloat(this.scanPositionSlider.value).toFixed(2);
+
+        // Update frequency display
+        const freqDisplay = document.getElementById('frequency-value');
+        if (freqDisplay) {
+            const freq = parseFloat(this.frequencySlider.value);
+            freqDisplay.textContent = `${Math.round(freq)} Hz (${this.freqToNoteName(freq)})`;
+        }
+
+        // Update feedback display
+        const fbDisplay = document.getElementById('feedback-value');
+        const fbEl = document.getElementById('feedback') as HTMLInputElement;
+        if (fbDisplay && fbEl) {
+            fbDisplay.textContent = Math.round(parseFloat(fbEl.value) * 100) + '%';
+        }
+
+        // Update density displays
+        const dxDisplay = document.getElementById('density-x-value');
+        const dyDisplay = document.getElementById('density-y-value');
+        const dzDisplay = document.getElementById('density-z-value');
+        if (dxDisplay) dxDisplay.textContent = String(Math.round(parseFloat(this.densityXSlider.value)));
+        if (dyDisplay) dyDisplay.textContent = String(Math.round(parseFloat(this.densityYSlider.value)));
+        if (dzDisplay) dzDisplay.textContent = String(Math.round(parseFloat(this.densityZSlider.value)));
+    }
+
+    private createGeneratorParamsContainer(): void {
+        const container = document.createElement('div');
+        container.id = 'generator-params-container';
+        container.style.display = 'none';
+        this.appendControl(container);
+        this.generatorParamsContainer = container;
+    }
+
+    private showGeneratorParams(dataSet: string, initialParams?: GeneratorParams): void {
+        if (!this.generatorParamsContainer) return;
+
+        this.generatorParamsContainer.innerHTML = '';
+        this.currentDataSet = dataSet;
+
+        const createSlider = (label: string, min: number, max: number, value: number, step: number, onChange: (v: number) => void): HTMLInputElement => {
+            const group = document.createElement('div');
+            group.className = 'control-group';
+
+            const labelEl = document.createElement('label');
+            labelEl.textContent = label;
+
+            const valueDisplay = document.createElement('span');
+            valueDisplay.className = 'value-display';
+            valueDisplay.textContent = step >= 1 ? String(Math.round(value)) : value.toFixed(2);
+
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = String(min);
+            slider.max = String(max);
+            slider.value = String(value);
+            slider.step = String(step);
+            slider.className = 'slider';
+
+            slider.addEventListener('input', () => {
+                const val = parseFloat(slider.value);
+                valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
+                onChange(val);
+            });
+
+            const labelRow = document.createElement('div');
+            labelRow.className = 'label-row';
+            labelRow.appendChild(labelEl);
+            labelRow.appendChild(valueDisplay);
+
+            group.appendChild(labelRow);
+            group.appendChild(slider);
+            this.generatorParamsContainer!.appendChild(group);
+
+            return slider;
+        };
+
+        const triggerUpdate = () => {
+            if (this.onGeneratorParamsChange && this.currentGeneratorParams) {
+                this.onGeneratorParamsChange(this.currentDataSet, this.currentGeneratorParams);
+            }
+        };
+
+        switch (dataSet) {
+            case '3d-julia': {
+                const saved = initialParams as JuliaParams | undefined;
+                const params: JuliaParams = saved ? { ...saved } : { ...defaultJuliaParams };
+                this.currentGeneratorParams = params;
+
+                createSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
+                createSlider('C Real', -1, 1, params.cReal, 0.05, (v) => { params.cReal = v; triggerUpdate(); });
+                createSlider('C Imaginary', -1, 1, params.cImag, 0.05, (v) => { params.cImag = v; triggerUpdate(); });
+                break;
+            }
+            case 'mandelbulb': {
+                const saved = initialParams as MandelbulbParams | undefined;
+                const params: MandelbulbParams = saved ? { ...saved } : { ...defaultMandelbulbParams };
+                this.currentGeneratorParams = params;
+
+                createSlider('Power', 2, 12, params.power, 1, (v) => { params.power = v; triggerUpdate(); });
+                createSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
+                createSlider('Iterations', 4, 20, params.iterations, 1, (v) => { params.iterations = v; triggerUpdate(); });
+                break;
+            }
+            case 'menger-sponge': {
+                const saved = initialParams as MengerParams | undefined;
+                const params: MengerParams = saved ? { ...saved } : { ...defaultMengerParams };
+                this.currentGeneratorParams = params;
+
+                createSlider('Iterations', 1, 5, params.iterations, 1, (v) => { params.iterations = v; triggerUpdate(); });
+                createSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
+                createSlider('Hole Size', 0.2, 0.5, params.holeSize, 0.01, (v) => { params.holeSize = v; triggerUpdate(); });
+                break;
+            }
+            case 'sine-plasma': {
+                const saved = initialParams as PlasmaParams | undefined;
+                const params: PlasmaParams = saved ? { ...saved } : { ...defaultPlasmaParams };
+                this.currentGeneratorParams = params;
+
+                createSlider('Frequency', 1, 10, params.frequency, 0.5, (v) => { params.frequency = v; triggerUpdate(); });
+                createSlider('Complexity', 1, 6, params.complexity, 1, (v) => { params.complexity = v; triggerUpdate(); });
+                createSlider('Contrast', 0.5, 3.0, params.contrast, 0.1, (v) => { params.contrast = v; triggerUpdate(); });
+                break;
+            }
+            case 'game-of-life': {
+                const saved = initialParams as GameOfLifeParams | undefined;
+                const params: GameOfLifeParams = saved ? { ...saved } : { ...defaultGameOfLifeParams };
+                this.currentGeneratorParams = params;
+
+                createSlider('Density', 0.1, 0.5, params.density, 0.05, (v) => { params.density = v; triggerUpdate(); });
+                createSlider('Birth Neighbors', 4, 6, params.birthMin, 1, (v) => { params.birthMin = v; triggerUpdate(); });
+                createSlider('Survive Neighbors', 3, 6, params.surviveMin, 1, (v) => { params.surviveMin = v; triggerUpdate(); });
+                break;
+            }
+            default:
+                this.currentGeneratorParams = null;
+                this.generatorParamsContainer.style.display = 'none';
+                return;
+        }
+
+        this.generatorParamsContainer.style.display = 'block';
+    }
+
+    private hideGeneratorParams(): void {
+        if (this.generatorParamsContainer) {
+            this.generatorParamsContainer.style.display = 'none';
+            this.generatorParamsContainer.innerHTML = '';
+        }
+        this.currentGeneratorParams = null;
     }
 
     private createProgressIndicator(): void {
@@ -735,6 +1199,7 @@ export class ControlPanel {
             if (this.onPathChange) {
                 this.onPathChange(this.getState());
             }
+            this.scheduleAutoSave();
         };
 
 
@@ -747,12 +1212,14 @@ export class ControlPanel {
                     z: Math.round(parseFloat(this.densityZSlider.value)),
                 });
             }
+            this.scheduleAutoSave();
         };
 
         const spectralDataUpdate = () => {
             if (this.onSpectralDataChange) {
                 this.onSpectralDataChange(this.spectralDataSelect.value);
             }
+            this.scheduleAutoSave();
         };
 
         this.spectralDataSelect.addEventListener('change', spectralDataUpdate);
@@ -787,6 +1254,7 @@ export class ControlPanel {
             if (this.onSynthModeChange) {
                 this.onSynthModeChange(mode);
             }
+            this.scheduleAutoSave();
         });
 
         // Volume density sliders trigger on change (not input) to avoid too many reinits
@@ -893,6 +1361,22 @@ export class ControlPanel {
 
     public setModulationRoutingChangeCallback(callback: (target: string, source: string) => void): void {
         this.onModulationRoutingChange = callback;
+    }
+
+    public setGeneratorParamsChangeCallback(callback: (dataSet: string, params: GeneratorParams) => void): void {
+        this.onGeneratorParamsChange = callback;
+    }
+
+    public getCurrentGeneratorParams(): GeneratorParams | null {
+        return this.currentGeneratorParams;
+    }
+
+    public updateGeneratorParamsUI(dataSet: string, initialParams?: GeneratorParams): void {
+        if (['3d-julia', 'mandelbulb', 'menger-sponge', 'sine-plasma', 'game-of-life'].includes(dataSet)) {
+            this.showGeneratorParams(dataSet, initialParams);
+        } else {
+            this.hideGeneratorParams();
+        }
     }
 
     public showDynamicParam(label: string, min: number, max: number, value: number, step: number): void {

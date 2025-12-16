@@ -1,5 +1,9 @@
 import { WebGLContext } from './context';
-import { VolumeResolution } from '../types';
+import {
+    VolumeResolution,
+    JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
+    defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams
+} from '../types';
 
 // 3D Spectral Volume - GPU storage for RGBA spectral data
 // Each voxel stores: R=Magnitude, G=Phase, B=Custom1, A=Custom2
@@ -92,122 +96,33 @@ export class SpectralVolume {
         gl.bindTexture(gl.TEXTURE_3D, null);
     }
 
-    public generate3DJulia(): void {
+    public generate3DJulia(params: JuliaParams = defaultJuliaParams): void {
         const { x, y, z } = this.resolution;
         const totalVoxels = x * y * z;
         const data = new Float32Array(totalVoxels * 4);
 
-        // 3D Julia Set - using parameters that create a sparser structure
-        const maxIter = 12;  // More iterations for better detail
+        const { scale, cReal, cImag } = params;
+        const maxIter = 16;
         const power = 8.0;
-        const scale = 2.2;   // Larger scale to sample outside dense core
+
+        // Julia C constant (quaternion-style: real + i*imag + j*0)
+        const cx = cReal;
+        const cy = cImag;
+        const cz = 0.0;
 
         let idx = 0;
         for (let iz = 0; iz < z; iz++) {
             for (let iy = 0; iy < y; iy++) {
                 for (let ix = 0; ix < x; ix++) {
-                    const nx = (ix / x) * 2 - 1;
-                    const ny = (iy / y) * 2 - 1;
-                    const nz = (iz / z) * 2 - 1;
+                    // Map to centered coordinates [-scale, scale]
+                    const px = ((ix / (x - 1)) * 2 - 1) * scale;
+                    const py = ((iy / (y - 1)) * 2 - 1) * scale;
+                    const pz = ((iz / (z - 1)) * 2 - 1) * scale;
 
-                    const shiftedX = (nx + 1) * scale - 1.0;
-                    const shiftedY = ny * scale;
-                    const shiftedZ = nz * scale;
+                    let zx = px;
+                    let zy = py;
+                    let zz = pz;
 
-                    // Different C constant for sparser region
-                    const cx = -0.2;
-                    const cy = 0.6;
-                    const cz = 0.2;
-
-                    let zx = shiftedX;
-                    let zy = shiftedY;
-                    let zz = shiftedZ;
-
-                    let r = 0.0;
-                    let iter = 0;
-
-                    for (; iter < maxIter; iter++) {
-                        r = Math.sqrt(zx * zx + zy * zy + zz * zz);
-                        if (r > 2.0) break;  // Lower threshold
-
-                        let theta = Math.acos(zz / r);
-                        let phi = Math.atan2(zy, zx);
-
-                        const zr = Math.pow(r, power);
-                        theta = theta * power;
-                        phi = phi * power;
-
-                        zx = zr * Math.sin(theta) * Math.cos(phi);
-                        zy = zr * Math.sin(theta) * Math.sin(phi);
-                        zz = zr * Math.cos(theta);
-
-                        zx += cx;
-                        zy += cy;
-                        zz += cz;
-                    }
-
-                    let mag = 0.0;
-
-                    // Only the boundary region (escaped points) will have magnitude
-                    if (iter < maxIter && iter > 2) {
-                        const smoothIter = iter + 1 - Math.log(Math.log(r)) / Math.log(2);
-                        mag = Math.max(0, 1.0 - (smoothIter / maxIter));
-
-                        // Apply power curve to create gaps (more aggressive)
-                        mag = Math.pow(mag, 2.5);
-
-                        // Apply threshold - only keep stronger values
-                        if (mag < 0.25) {
-                            mag = 0.0;
-                        } else {
-                            // Rescale after threshold
-                            mag = (mag - 0.25) / 0.75;
-                        }
-                    }
-
-                    // Boost low frequencies slightly
-                    const freqBoost = 1.0 + (1.0 - (nx + 1) * 0.5) * 0.3;
-                    mag *= freqBoost;
-                    mag = Math.min(1.0, mag);
-
-                    const phase = (iter / maxIter + nx * 0.1) % 1.0;
-                    const custom1 = (ny + 1) * 0.5;  // Generic value (Y-based)
-                    const custom2 = (nz + 1) * 0.5;  // Generic value (Z-based)
-
-                    data[idx++] = mag;
-                    data[idx++] = phase;
-                    data[idx++] = custom1;
-                    data[idx++] = custom2;
-                }
-            }
-        }
-
-        this.setData(data);
-    }
-
-    public generateMandelbulb(): void {
-        const { x, y, z } = this.resolution;
-        const totalVoxels = x * y * z;
-        const data = new Float32Array(totalVoxels * 4);
-
-        const maxIter = 12;
-        const power = 8.0;
-
-        let idx = 0;
-        for (let iz = 0; iz < z; iz++) {
-            for (let iy = 0; iy < y; iy++) {
-                for (let ix = 0; ix < x; ix++) {
-                    const nx = (ix / x) * 2 - 1;
-                    const ny = (iy / y) * 2 - 1;
-                    const nz = (iz / z) * 2 - 1;
-
-                    // Shift to low freq corner
-                    const px = (nx + 1) * 1.2 - 1.0;
-                    const py = ny * 1.2;
-                    const pz = nz * 1.2;
-
-                    let zx = 0, zy = 0, zz = 0;
-                    let dr = 1.0;
                     let r = 0.0;
                     let iter = 0;
 
@@ -215,34 +130,41 @@ export class SpectralVolume {
                         r = Math.sqrt(zx * zx + zy * zy + zz * zz);
                         if (r > 2.0) break;
 
-                        let theta = Math.acos(zz / r);
-                        let phi = Math.atan2(zy, zx);
-                        dr = Math.pow(r, power - 1.0) * power * dr + 1.0;
+                        // Spherical coordinates for 3D power
+                        const theta = Math.acos(zz / (r + 0.0001));
+                        const phi = Math.atan2(zy, zx);
 
                         const zr = Math.pow(r, power);
-                        theta = theta * power;
-                        phi = phi * power;
+                        const newTheta = theta * power;
+                        const newPhi = phi * power;
 
-                        zx = zr * Math.sin(theta) * Math.cos(phi) + px;
-                        zy = zr * Math.sin(theta) * Math.sin(phi) + py;
-                        zz = zr * Math.cos(theta) + pz;
+                        zx = zr * Math.sin(newTheta) * Math.cos(newPhi) + cx;
+                        zy = zr * Math.sin(newTheta) * Math.sin(newPhi) + cy;
+                        zz = zr * Math.cos(newTheta) + cz;
                     }
 
+                    // Interior points (didn't escape) get high magnitude
+                    // This fills the volume better than boundary-only coloring
                     let mag = 0.0;
-                    if (iter < maxIter) {
-                        const dist = 0.5 * Math.log(r) * r / dr;
-                        mag = Math.max(0, 1.0 - dist * 8.0);
+                    if (iter === maxIter) {
+                        // Inside the set - use distance from origin as intensity
+                        mag = 0.8 - r * 0.3;
+                        mag = Math.max(0.2, Math.min(1.0, mag));
+                    } else if (iter > 3) {
+                        // Boundary region - smooth coloring
+                        const smoothVal = iter - Math.log2(Math.log2(r + 1));
+                        mag = (smoothVal / maxIter) * 0.6;
                     }
 
-                    // Apply gamma to create gaps
-                    mag = Math.pow(mag, 1.8);
-
-                    const freqBoost = 1.0 + (1.0 - (nx + 1) * 0.5) * 0.4;
+                    // Frequency-dependent boost (bass emphasis)
+                    const freqPos = ix / x;
+                    const freqBoost = 1.0 + (1.0 - freqPos) * 0.4;
                     mag *= freqBoost;
+                    mag = Math.min(1.0, mag);
 
-                    const phase = (iter / maxIter);
-                    const custom1 = (ny + 1) * 0.5;  // Generic value (Y-based)
-                    const custom2 = (nz + 1) * 0.5;  // Generic value (Z-based)
+                    const phase = (iter / maxIter + px * 0.1) % 1.0;
+                    const custom1 = (py / scale + 1) * 0.5;
+                    const custom2 = (pz / scale + 1) * 0.5;
 
                     data[idx++] = mag;
                     data[idx++] = phase;
@@ -255,68 +177,151 @@ export class SpectralVolume {
         this.setData(data);
     }
 
-    public generateMengerSponge(): void {
+    public generateMandelbulb(params: MandelbulbParams = defaultMandelbulbParams): void {
         const { x, y, z } = this.resolution;
         const totalVoxels = x * y * z;
         const data = new Float32Array(totalVoxels * 4);
+
+        const { power, scale, iterations } = params;
+        const maxIter = Math.round(iterations);
 
         let idx = 0;
         for (let iz = 0; iz < z; iz++) {
             for (let iy = 0; iy < y; iy++) {
                 for (let ix = 0; ix < x; ix++) {
-                    const nx = (ix / x) * 2 - 1;
-                    const ny = (iy / y) * 2 - 1;
-                    const nz = (iz / z) * 2 - 1;
+                    // Map to centered coordinates [-scale, scale]
+                    const px = ((ix / (x - 1)) * 2 - 1) * scale;
+                    const py = ((iy / (y - 1)) * 2 - 1) * scale;
+                    const pz = ((iz / (z - 1)) * 2 - 1) * scale;
 
-                    // Shift to low freq
-                    let px = (nx + 1) * 1.5;
-                    let py = (ny + 1) * 1.5;
-                    let pz = (nz + 1) * 1.5;
+                    // Mandelbulb: z = z^n + c where c is the starting point
+                    let zx = 0, zy = 0, zz = 0;
+                    let r = 0.0;
+                    let iter = 0;
 
-                    let inSponge = true;
-                    let scale = 1.0;
+                    for (; iter < maxIter; iter++) {
+                        r = Math.sqrt(zx * zx + zy * zy + zz * zz);
+                        if (r > 2.0) break;
 
-                    // Iterate sponge subdivisions
-                    for (let i = 0; i < 4; i++) {
-                        px = Math.abs(px);
-                        py = Math.abs(py);
-                        pz = Math.abs(pz);
+                        // Spherical coordinates
+                        const theta = Math.acos(zz / (r + 0.0001));
+                        const phi = Math.atan2(zy, zx);
 
-                        // Check if in center third (hole)
-                        if (px > scale / 3 && px < 2 * scale / 3 &&
-                            py > scale / 3 && py < 2 * scale / 3) {
-                            inSponge = false;
-                            break;
-                        }
-                        if (py > scale / 3 && py < 2 * scale / 3 &&
-                            pz > scale / 3 && pz < 2 * scale / 3) {
-                            inSponge = false;
-                            break;
-                        }
-                        if (pz > scale / 3 && pz < 2 * scale / 3 &&
-                            px > scale / 3 && px < 2 * scale / 3) {
-                            inSponge = false;
-                            break;
-                        }
+                        const zr = Math.pow(r, power);
+                        const newTheta = theta * power;
+                        const newPhi = phi * power;
 
-                        px = px * 3.0 % scale;
-                        py = py * 3.0 % scale;
-                        pz = pz * 3.0 % scale;
-                        scale /= 3.0;
+                        // z^n + c
+                        zx = zr * Math.sin(newTheta) * Math.cos(newPhi) + px;
+                        zy = zr * Math.sin(newTheta) * Math.sin(newPhi) + py;
+                        zz = zr * Math.cos(newTheta) + pz;
                     }
 
-                    let mag = inSponge ? 0.7 : 0.0;
+                    // Interior points get high magnitude
+                    let mag = 0.0;
+                    if (iter === maxIter) {
+                        // Inside the Mandelbulb
+                        mag = 0.9 - r * 0.2;
+                        mag = Math.max(0.3, Math.min(1.0, mag));
+                    } else if (iter > 2) {
+                        // Boundary - iteration-based coloring
+                        mag = (iter / maxIter) * 0.5;
+                    }
 
-                    // Add surface detail
-                    const dist = Math.sqrt(px * px + py * py + pz * pz);
-                    mag *= 0.8 + 0.2 * Math.sin(dist * 20);
-
-                    const freqBoost = 1.0 + (1.0 - (nx + 1) * 0.5) * 0.3;
+                    // Frequency-dependent boost
+                    const freqPos = ix / x;
+                    const freqBoost = 1.0 + (1.0 - freqPos) * 0.4;
                     mag *= freqBoost;
+                    mag = Math.min(1.0, mag);
 
-                    const phase = (px + py + pz) % 1.0;
-                    const custom1 = (ny + 1) * 0.5;  // Generic value (Y-based)
-                    const custom2 = (nz + 1) * 0.5;  // Generic value (Z-based)
+                    const phase = (iter / maxIter);
+                    const custom1 = (py / scale + 1) * 0.5;
+                    const custom2 = (pz / scale + 1) * 0.5;
+
+                    data[idx++] = mag;
+                    data[idx++] = phase;
+                    data[idx++] = custom1;
+                    data[idx++] = custom2;
+                }
+            }
+        }
+
+        this.setData(data);
+    }
+
+    public generateMengerSponge(params: MengerParams = defaultMengerParams): void {
+        const { x, y, z } = this.resolution;
+        const totalVoxels = x * y * z;
+        const data = new Float32Array(totalVoxels * 4);
+
+        const { iterations, scale, holeSize } = params;
+        const maxIter = Math.round(iterations);
+
+        // Menger sponge: at each level, divide into 3x3x3 grid
+        // Remove center cube of each face (cross pattern)
+        const isInSponge = (px: number, py: number, pz: number): boolean => {
+            // Map to [0, 1] range
+            let ux = (px / scale + 1) * 0.5;
+            let uy = (py / scale + 1) * 0.5;
+            let uz = (pz / scale + 1) * 0.5;
+
+            for (let i = 0; i < maxIter; i++) {
+                // Scale up to [0, 3] and get position in 3x3x3 grid
+                ux *= 3;
+                uy *= 3;
+                uz *= 3;
+
+                const gx = Math.floor(ux) % 3;
+                const gy = Math.floor(uy) % 3;
+                const gz = Math.floor(uz) % 3;
+
+                // Check if in hole (middle of any 2 axes)
+                const midX = gx === 1;
+                const midY = gy === 1;
+                const midZ = gz === 1;
+
+                // Hole if at least 2 coordinates are in the middle
+                const holeCount = (midX ? 1 : 0) + (midY ? 1 : 0) + (midZ ? 1 : 0);
+                if (holeCount >= 2) {
+                    return false; // In a hole
+                }
+
+                // Continue to next subdivision level
+                ux = ux % 1;
+                uy = uy % 1;
+                uz = uz % 1;
+            }
+
+            return true; // Solid
+        };
+
+        let idx = 0;
+        for (let iz = 0; iz < z; iz++) {
+            for (let iy = 0; iy < y; iy++) {
+                for (let ix = 0; ix < x; ix++) {
+                    // Map to centered coordinates [-scale, scale]
+                    const px = ((ix / (x - 1)) * 2 - 1) * scale;
+                    const py = ((iy / (y - 1)) * 2 - 1) * scale;
+                    const pz = ((iz / (z - 1)) * 2 - 1) * scale;
+
+                    const inSponge = isInSponge(px, py, pz);
+                    let mag = inSponge ? 0.8 : 0.0;
+
+                    // Add subtle variation based on position
+                    if (inSponge) {
+                        const detail = Math.sin(px * 10) * Math.sin(py * 10) * Math.sin(pz * 10);
+                        mag += detail * 0.1;
+                    }
+
+                    // Frequency-dependent boost
+                    const freqPos = ix / x;
+                    const freqBoost = 1.0 + (1.0 - freqPos) * 0.3;
+                    mag *= freqBoost;
+                    mag = Math.max(0, Math.min(1.0, mag));
+
+                    const phase = ((px + py + pz) / scale + 3) / 6 % 1.0;
+                    const custom1 = (py / scale + 1) * 0.5;
+                    const custom2 = (pz / scale + 1) * 0.5;
 
                     data[idx++] = mag;
                     data[idx++] = phase;
@@ -331,11 +336,15 @@ export class SpectralVolume {
 
     // Sine Plasma state for evolution
     private plasmaTime: number = 0;
+    private plasmaParams: PlasmaParams = defaultPlasmaParams;
 
-    public generateSinePlasma(timeOffset: number = 0): void {
+    public generateSinePlasma(timeOffset: number = 0, params: PlasmaParams = defaultPlasmaParams): void {
+        this.plasmaParams = params;
         const { x, y, z } = this.resolution;
         const totalVoxels = x * y * z;
         const data = new Float32Array(totalVoxels * 4);
+
+        const { frequency, complexity, contrast } = params;
 
         let idx = 0;
         for (let iz = 0; iz < z; iz++) {
@@ -348,45 +357,48 @@ export class SpectralVolume {
 
                     // Demo-scene style plasma: sum of sines
                     let v = 0.0;
+                    const layers = Math.round(complexity);
 
                     // 1. Basic waves along axes
-                    v += Math.sin(nx * 3.0 + timeOffset);
-                    v += Math.sin(ny * 2.5 + timeOffset * 0.8);
-                    v += Math.sin(nz * 2.0 + timeOffset * 1.2);
+                    v += Math.sin(nx * frequency + timeOffset);
+                    v += Math.sin(ny * frequency * 0.8 + timeOffset * 0.8);
+                    v += Math.sin(nz * frequency * 0.6 + timeOffset * 1.2);
 
-                    // 2. Diagonal wave
-                    v += Math.sin((nx + ny + nz) * 2.0 + timeOffset * 0.5);
+                    // 2. Diagonal wave (if complexity > 1)
+                    if (layers > 1) {
+                        v += Math.sin((nx + ny + nz) * frequency * 0.7 + timeOffset * 0.5);
+                    }
 
-                    // 3. Circular pattern (distance from center)
-                    const dist = Math.sqrt(nx * nx + ny * ny + nz * nz);
-                    v += Math.sin(dist * 6.0 - timeOffset * 1.5);
+                    // 3. Circular pattern (if complexity > 2)
+                    if (layers > 2) {
+                        const dist = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                        v += Math.sin(dist * frequency * 2 - timeOffset * 1.5);
+                    }
 
-                    // 4. Spiral twisting
-                    const angle = Math.atan2(ny, nx);
-                    v += Math.sin(angle * 3.0 + nz * 4.0 + timeOffset);
+                    // 4. Spiral twisting (if complexity > 3)
+                    if (layers > 3) {
+                        const angle = Math.atan2(ny, nx);
+                        v += Math.sin(angle * 3.0 + nz * frequency + timeOffset);
+                    }
 
-                    // v ranges roughly -6 to 6, map to 0..1
-                    let mag = (v + 6.0) / 12.0;
+                    // Normalize v roughly to 0..1
+                    const maxV = 3 + Math.min(layers - 1, 3);
+                    let mag = (v + maxV) / (maxV * 2);
 
-                    // Add some "hard" edges or rings (classic demo effect)
-                    // sin(v * constant)
-                    mag = (Math.sin(mag * 15.0) + 1.0) * 0.5;
+                    // Add hard edges (classic demo effect)
+                    mag = (Math.sin(mag * 10 * contrast) + 1.0) * 0.5;
 
-                    // Apply power curve to create gaps/contrast
-                    mag = Math.pow(mag, 2.5);
+                    // Apply contrast curve
+                    mag = Math.pow(mag, contrast);
 
-                    // Boost low frequencies (left side of X axis)
-                    // This makes the bass frequencies more prominent in the plasma
-                    const freqBoost = 1.0 + (1.0 - (nx + 1) * 0.5) * 0.5;
+                    // Frequency-dependent boost
+                    const freqPos = ix / x;
+                    const freqBoost = 1.0 + (1.0 - freqPos) * 0.5;
                     mag *= freqBoost;
 
-                    // Clamp
-                    mag = Math.max(0.0, Math.min(0.9, mag));
+                    mag = Math.max(0.0, Math.min(0.95, mag));
 
-                    // Phase varies with the plasma value itself for complex twisting
                     const phase = (mag + timeOffset * 0.2) % 1.0;
-
-                    // Custom channels follow spatial gradients
                     const custom1 = (Math.sin(nx * Math.PI + timeOffset) + 1.0) * 0.5;
                     const custom2 = (Math.cos(ny * Math.PI + timeOffset) + 1.0) * 0.5;
 
@@ -402,8 +414,8 @@ export class SpectralVolume {
     }
 
     public stepSinePlasma(): void {
-        this.plasmaTime += 0.02;  // Smooth evolution
-        this.generateSinePlasma(this.plasmaTime);
+        this.plasmaTime += 0.02;
+        this.generateSinePlasma(this.plasmaTime, this.plasmaParams);
     }
 
     public clearData(): void {
@@ -512,8 +524,10 @@ export class SpectralVolume {
     }
 
     // ===== 3D Game of Life =====
+    private golParams: GameOfLifeParams = defaultGameOfLifeParams;
 
-    public initGameOfLife(): void {
+    public initGameOfLife(params: GameOfLifeParams = defaultGameOfLifeParams): void {
+        this.golParams = params;
         const { x, y, z } = this.resolution;
         const totalCells = x * y * z;
 
@@ -521,9 +535,9 @@ export class SpectralVolume {
         this.gameOfLifeState = new Uint8Array(totalCells);
         this.gameOfLifeBuffer = new Uint8Array(totalCells);
 
-        // Fill with random blobs (30% density)
+        // Fill with random blobs based on density parameter
         for (let i = 0; i < totalCells; i++) {
-            this.gameOfLifeState[i] = Math.random() < 0.3 ? 1 : 0;
+            this.gameOfLifeState[i] = Math.random() < params.density ? 1 : 0;
         }
 
         // Convert initial state to spectral data
@@ -534,6 +548,7 @@ export class SpectralVolume {
         if (!this.gameOfLifeState || !this.gameOfLifeBuffer) return;
 
         const { x, y, z } = this.resolution;
+        const { birthMin, surviveMin } = this.golParams;
 
         // Helper to get cell index with wrapping (toroidal topology)
         const getIdx = (ix: number, iy: number, iz: number): number => {
@@ -561,15 +576,15 @@ export class SpectralVolume {
                         }
                     }
 
-                    // 3D Game of Life rule: 4-5-5
-                    // Survive if 4 or 5 neighbors
-                    // Born if exactly 5 neighbors
+                    // Configurable 3D Game of Life rules
+                    // Survive if neighbors >= surviveMin and <= surviveMin + 1
+                    // Born if neighbors === birthMin
                     const alive = this.gameOfLifeState[idx] === 1;
 
                     if (alive) {
-                        this.gameOfLifeBuffer[idx] = (neighbors === 4 || neighbors === 5) ? 1 : 0;
+                        this.gameOfLifeBuffer[idx] = (neighbors >= surviveMin && neighbors <= surviveMin + 1) ? 1 : 0;
                     } else {
-                        this.gameOfLifeBuffer[idx] = (neighbors === 5) ? 1 : 0;
+                        this.gameOfLifeBuffer[idx] = (neighbors === birthMin) ? 1 : 0;
                     }
                 }
             }

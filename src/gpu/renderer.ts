@@ -14,7 +14,12 @@ import {
 } from './math';
 import { SpectralVolume } from './spectral-volume';
 import { ReadingPathGeometry } from './reading-path';
-import { VolumeResolution, ReadingPathState, PlaneType } from '../types';
+import {
+    VolumeResolution, ReadingPathState, PlaneType,
+    JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
+    defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
+    GeneratorParams
+} from '../types';
 
 // Renderer for wireframe cube + spectral volume points + reading path
 
@@ -473,18 +478,23 @@ export class Renderer {
         }
     }
 
-    public updateSpectralData(dataSet: string): void {
+    public updateSpectralData(dataSet: string, params?: GeneratorParams): void {
         switch (dataSet) {
             case '3d-julia':
-                this.spectralVolume.generate3DJulia();
+                this.spectralVolume.generate3DJulia(params as JuliaParams);
                 break;
             case 'mandelbulb':
-                this.spectralVolume.generateMandelbulb();
+                this.spectralVolume.generateMandelbulb(params as MandelbulbParams);
                 break;
             case 'menger-sponge':
-                this.spectralVolume.generateMengerSponge();
+                this.spectralVolume.generateMengerSponge(params as MengerParams);
                 break;
-
+            case 'sine-plasma':
+                this.spectralVolume.generateSinePlasma(0, params as PlasmaParams);
+                break;
+            case 'game-of-life':
+                this.spectralVolume.initGameOfLife(params as GameOfLifeParams);
+                break;
             default:
                 this.spectralVolume.clearData();
                 break;
