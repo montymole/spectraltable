@@ -144,21 +144,15 @@ spectraltable/
 
 ## Planned Features (Not Yet Implemented)
 
-### Phase 8: MIDI Integration
+### Phase 8: MIDI Integration ✅ COMPLETE
 
-| Component | Status | Priority |
-|-----------|--------|----------|
-| Web MIDI Access | 🔜 | HIGH |
-| Wavetable Pitch Control | 🔜 | HIGH |
-| Spectral (IFFT) Pitch Strategy | 🔜 | HIGH |
-
-**Proposal for Spectral Pitch:**
-In IFFT mode, the engine sums sines at fixed bin frequencies (0-20kHz). To pitch this "timbre":
-1.  **Fundamental Multiplier:** Introduce a pitch factor `P = TargetFreq / BaseFreq`.
-2.  **Frequency Scaling:** Multiply every bin's calculated frequency by `P`.
-    *   `BinFreq = (BinIndex * Spacing) * P`
-    *   This shifts all formants and harmonics proportionally (sampler-style pitch shifting).
-3.  **Base Frequency:** Define a root frequency (e.g. 440Hz) for the unshifted spectral data.
+| Component | Status | Details |
+|-----------|--------|---------|
+| Web MIDI Access | ✅ | Input port enumeration & selection |
+| Wavetable Pitch Control | ✅ | MIDI Note overrides Frequency Slider |
+| Spectral Pitch Strategy | ✅ | Frequency Multiplier logic |
+| On-screen Piano Keyboard | ✅ | Virtual keyboard with visualization |
+| MIDI Input Selector | ✅ | Dynamic port selection dropdown |
 
 ### Phase 9: GPU Animation
 

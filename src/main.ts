@@ -7,6 +7,7 @@ import { StereoScope } from './ui/scope';
 import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
 import { MidiHandler } from './audio/midi-handler';
+import { PianoKeyboard } from './ui/piano';
 import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT } from './types';
 
 // Main application entry point
@@ -21,6 +22,7 @@ class SpectralTableApp {
     private audioEngine: AudioEngine;
     private audioAnalyzer: AudioAnalyzer;
     private midiHandler: MidiHandler;
+    private piano: PianoKeyboard;
     private canvas: HTMLCanvasElement;
     private animationFrameId: number = 0;
 
@@ -71,7 +73,35 @@ class SpectralTableApp {
         this.midiHandler.setNoteChangeCallback(this.onMidiNote.bind(this));
         this.midiHandler.setConnectionChangeCallback((isConnected) => {
             if (isConnected) console.log('✓ MIDI Device Connected');
+            this.controls.updateMidiInputs(this.midiHandler.getInputs());
         });
+
+        // Initialize Piano
+        this.piano = new PianoKeyboard('piano-container');
+
+        // Piano -> MidiHandler
+        this.piano.setNoteChangeCallback((note, velocity) => {
+            if (velocity > 0) {
+                this.midiHandler.simulateNoteOn(note, velocity);
+            } else {
+                this.midiHandler.simulateNoteOff(note);
+            }
+        });
+
+        // MidiHandler Raw -> Piano Visualization
+        this.midiHandler.setRawNoteCallback((note, velocity) => {
+            this.piano.setVisualizeState(note, velocity > 0);
+        });
+
+        // MIDI Input Selection
+        this.controls.setMidiInputChangeCallback((id) => {
+            this.midiHandler.selectInput(id);
+        });
+
+        // Initial input list population (might be empty initially)
+        setTimeout(() => {
+            this.controls.updateMidiInputs(this.midiHandler.getInputs());
+        }, 500);
 
         // Wire up callbacks
         this.controls.setPathChangeCallback(this.onPathChange.bind(this));

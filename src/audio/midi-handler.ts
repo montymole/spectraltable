@@ -7,6 +7,7 @@ export class MidiHandler {
     // Callbacks
     private onNoteChangeCallback: ((note: number | null) => void) | null = null;
     private onConnectionChangeCallback: ((isConnected: boolean) => void) | null = null;
+    private onRawNoteCallback: ((note: number, velocity: number) => void) | null = null;  // For visualization
 
     constructor() {
         this.initialize();
@@ -61,7 +62,7 @@ export class MidiHandler {
     private handleMessage(message: any) {
         const [status, data1, data2] = message.data;
         const command = status & 0xF0;
-        const channel = status & 0x0F;
+        // const channel = status & 0x0F;
         const note = data1;
         const velocity = data2;
 
@@ -69,11 +70,13 @@ export class MidiHandler {
         if (command === 0x90 && velocity > 0) {
             this.activeNotes.set(note, velocity);
             this.triggerHighestNote();
+            if (this.onRawNoteCallback) this.onRawNoteCallback(note, velocity);
         }
         // Note Off (or Note On with vel 0)
         else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
             this.activeNotes.delete(note);
             this.triggerHighestNote();
+            if (this.onRawNoteCallback) this.onRawNoteCallback(note, 0);
         }
     }
 
@@ -101,7 +104,41 @@ export class MidiHandler {
         this.onNoteChangeCallback = callback;
     }
 
+    public setRawNoteCallback(callback: (note: number, velocity: number) => void) {
+        this.onRawNoteCallback = callback;
+    }
+
     public setConnectionChangeCallback(callback: (isConnected: boolean) => void) {
         this.onConnectionChangeCallback = callback;
+    }
+
+    public getInputs(): { id: string, name: string }[] {
+        if (!this.midiAccess) return [];
+        const inputs: { id: string, name: string }[] = [];
+        this.midiAccess.inputs.forEach((input: any) => {
+            inputs.push({ id: input.id, name: input.name });
+        });
+        return inputs;
+    }
+
+    public selectInput(id: string) {
+        if (!this.midiAccess) return;
+        const input = this.midiAccess.inputs.get(id);
+        if (input) {
+            this.setInput(input);
+        }
+    }
+
+    public simulateNoteOn(note: number, velocity: number) {
+        this.activeNotes.set(note, velocity);
+        this.triggerHighestNote();
+        // Allow visualization update if needed (e.g. if driven by computer keyboard later)
+        if (this.onRawNoteCallback) this.onRawNoteCallback(note, velocity);
+    }
+
+    public simulateNoteOff(note: number) {
+        this.activeNotes.delete(note);
+        this.triggerHighestNote();
+        if (this.onRawNoteCallback) this.onRawNoteCallback(note, 0);
     }
 }

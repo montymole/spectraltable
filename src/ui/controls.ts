@@ -21,6 +21,7 @@ export class ControlPanel {
     private carrierContainer: HTMLElement | null = null;
     private feedbackSlider: HTMLInputElement;
     private feedbackContainer: HTMLElement | null = null;
+    private midiSelect!: HTMLSelectElement;
 
     // Volume density controls
     private densityXSlider: HTMLInputElement;
@@ -33,15 +34,17 @@ export class ControlPanel {
     private dynamicParamSlider: HTMLInputElement | null = null;
     private dynamicParamContainer: HTMLElement | null = null;
 
-    private onPathChange?: (state: ReadingPathState) => void;
+    // Callbacks
+    private onPathChange: ((state: ReadingPathState) => void) | null = null;
     private onVolumeResolutionChange?: (resolution: VolumeResolution) => void;
     private onSpectralDataChange?: (dataSet: string) => void;
     private onWavUpload?: (files: FileList) => void;
     private onDynamicParamChange?: (value: number) => void;
-    private onSynthModeChange?: (mode: SynthMode) => void;
-    private onFrequencyChange?: (freq: number) => void;
-    private onCarrierChange?: (carrier: CarrierType) => void;
-    private onFeedbackChange?: (amount: number) => void;
+    private onSynthModeChange: ((mode: SynthMode) => void) | null = null;
+    private onFrequencyChange: ((freq: number) => void) | null = null;
+    private onCarrierChange: ((carrier: CarrierType) => void) | null = null;
+    private onFeedbackChange: ((amount: number) => void) | null = null;
+    private onMidiInputChange: ((id: string) => void) | null = null;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
@@ -83,17 +86,18 @@ export class ControlPanel {
         this.speedSlider = this.createSlider('speed', 'Scrub Speed', -1, 1, 0, 0.01);
         this.scanPositionSlider = this.createSlider('scan-pos', 'Scan Phase', -1, 1, 0, 0.01);
 
-        // Synthesis mode section
-        this.createSection('Synthesis');
+        // Initialize controls
+        this.createSection('Audio Synthesis');
         this.synthModeSelect = this.createSelect('synth-mode', 'Mode', [
             SynthMode.WAVETABLE,
             SynthMode.SPECTRAL,
         ]);
-        this.carrierSelect = this.createCarrierSelect();
         this.frequencySlider = this.createFrequencySlider();
+        this.carrierSelect = this.createCarrierSelect();
         this.feedbackSlider = this.createFeedbackSlider();
+        this.midiSelect = this.createMidiSelect();
 
-        this.createSection('Volume Density');
+        this.createSection('Visualization');
         this.densityXSlider = this.createSlider('density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1);
         this.densityYSlider = this.createSlider('density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1);
         this.densityZSlider = this.createSlider('density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1);
@@ -327,6 +331,41 @@ export class ControlPanel {
         return slider;
     }
 
+    private createMidiSelect(): HTMLSelectElement {
+        const group = document.createElement('div');
+        group.className = 'control-group';
+
+        const labelEl = document.createElement('label');
+        labelEl.htmlFor = 'midi-input';
+        labelEl.textContent = 'MIDI Input';
+
+        const select = document.createElement('select');
+        select.id = 'midi-input';
+        select.className = 'select';
+
+        // Default option
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'No Devices Found';
+        select.appendChild(defaultOpt);
+
+        select.addEventListener('change', () => {
+            if (this.onMidiInputChange) {
+                this.onMidiInputChange(select.value);
+            }
+        });
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+
+        group.appendChild(labelRow);
+        group.appendChild(select);
+        this.container.appendChild(group);
+
+        return select;
+    }
+
     private freqToNoteName(freq: number): string {
         // A4 = 440Hz = MIDI 69
         const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -555,6 +594,47 @@ export class ControlPanel {
 
     public setFeedbackChangeCallback(callback: (amount: number) => void): void {
         this.onFeedbackChange = callback;
+    }
+
+    public setMidiInputChangeCallback(callback: (id: string) => void): void {
+        this.onMidiInputChange = callback;
+    }
+
+    public updateMidiInputs(inputs: { id: string, name: string }[]): void {
+        // Save current selection
+        const currentSelection = this.midiSelect.value;
+
+        this.midiSelect.innerHTML = '';
+
+        if (inputs.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No Devices Found';
+            this.midiSelect.appendChild(opt);
+            this.midiSelect.disabled = true;
+        } else {
+            this.midiSelect.disabled = false;
+
+            // Add "None" or placeholder? User probably wants to select one.
+            // Let's rely on logic to select first one if not selected
+
+            for (const input of inputs) {
+                const opt = document.createElement('option');
+                opt.value = input.id;
+                opt.textContent = input.name;
+                this.midiSelect.appendChild(opt);
+            }
+
+            // Restore selection if still exists, or select first
+            if (inputs.some(i => i.id === currentSelection)) {
+                this.midiSelect.value = currentSelection;
+            } else if (inputs.length > 0) {
+                this.midiSelect.selectedIndex = 0;
+                if (this.onMidiInputChange) {
+                    this.onMidiInputChange(this.midiSelect.value);
+                }
+            }
+        }
     }
 
     public setVolumeResolutionChangeCallback(callback: (resolution: VolumeResolution) => void): void {
