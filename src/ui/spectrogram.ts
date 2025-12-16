@@ -141,28 +141,7 @@ export class Spectrogram {
         }
 
         this.ctx.putImageData(row, 0, y);
-
-        // Draw label
-        this.drawLabel();
     }
 
-    private drawLabel(): void {
-        this.ctx.save();
-        this.ctx.font = 'bold 12px Inter, sans-serif';
-        this.ctx.textAlign = 'left';
-        this.ctx.textBaseline = 'top';
 
-        const label = this.mode === 'SCANLINE' ? 'SCANLINE' : 'AUDIO OUT';
-        const x = 10;
-        const y = 10;
-
-        // Shadow/Outline
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        this.ctx.fillText(label, x + 1, y + 1);
-
-        // Text
-        this.ctx.fillStyle = '#0ff'; // Cyan matches theme
-        this.ctx.fillText(label, x, y);
-        this.ctx.restore();
-    }
 }

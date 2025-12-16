@@ -4,6 +4,7 @@ import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENS
 
 export class ControlPanel {
     private container: HTMLElement;
+    private currentSectionContainer: HTMLElement | null = null;
 
     // Path controls
     private pathYSlider: HTMLInputElement;
@@ -53,7 +54,7 @@ export class ControlPanel {
         if (!el) throw new Error(`Container not found: ${containerId}`);
         this.container = el;
 
-        this.createSection('Spectral Data');
+        this.createSection('Wave/Spectral Volume');
         this.spectralDataSelect = this.createSelect('spectral-data-type', 'Data Set', [
             'blank',
             '3d-julia',
@@ -111,10 +112,20 @@ export class ControlPanel {
     // ... (createSection, createSlider, createSelect methods remain same)
 
     private createSection(title: string): void {
-        const section = document.createElement('div');
-        section.className = 'control-section-title';
-        section.textContent = title;
-        this.container.appendChild(section);
+        const card = document.createElement('div');
+        card.className = 'control-card';
+
+        const header = document.createElement('div');
+        header.className = 'control-section-title';
+        header.textContent = title;
+
+        card.appendChild(header);
+        this.container.appendChild(card);
+        this.currentSectionContainer = card;
+    }
+
+    private appendControl(element: HTMLElement): void {
+        (this.currentSectionContainer || this.container).appendChild(element);
     }
 
     private createSlider(
@@ -159,7 +170,7 @@ export class ControlPanel {
 
         group.appendChild(labelRow);
         group.appendChild(slider);
-        this.container.appendChild(group);
+        this.appendControl(group);
 
         return slider;
     }
@@ -189,7 +200,7 @@ export class ControlPanel {
 
         group.appendChild(labelRow);
         group.appendChild(select);
-        this.container.appendChild(group);
+        this.appendControl(group);
 
         return select;
     }
@@ -236,7 +247,7 @@ export class ControlPanel {
 
         group.appendChild(labelRow);
         group.appendChild(slider);
-        this.container.appendChild(group);
+        this.appendControl(group);
 
         this.frequencyContainer = group;
         this.frequencySlider = slider;
@@ -282,7 +293,7 @@ export class ControlPanel {
 
         group.appendChild(labelRow);
         group.appendChild(select);
-        this.container.appendChild(group);
+        this.appendControl(group);
 
         this.carrierContainer = group;
         this.carrierSelect = select;
@@ -327,7 +338,7 @@ export class ControlPanel {
 
         group.appendChild(labelRow);
         group.appendChild(slider);
-        this.container.appendChild(group);
+        this.appendControl(group);
 
         this.feedbackContainer = group;
         this.feedbackSlider = slider;
@@ -364,7 +375,7 @@ export class ControlPanel {
 
         group.appendChild(labelRow);
         group.appendChild(select);
-        this.container.appendChild(group);
+        this.appendControl(group);
 
         return select;
     }
@@ -411,7 +422,7 @@ export class ControlPanel {
 
         group.appendChild(labelRow);
         group.appendChild(input);
-        this.container.appendChild(group);
+        this.appendControl(group);
 
         return input;
     }
@@ -434,7 +445,7 @@ export class ControlPanel {
         });
 
         group.appendChild(button);
-        this.container.appendChild(group);
+        this.appendControl(group);
     }
 
     private createDynamicParameterSlider(): void {
@@ -478,7 +489,7 @@ export class ControlPanel {
 
         container.appendChild(labelRow);
         container.appendChild(slider);
-        this.container.appendChild(container);
+        this.appendControl(container);
 
         this.dynamicParamSlider = slider;
         this.dynamicParamContainer = container;
@@ -510,7 +521,7 @@ export class ControlPanel {
         progressContainer.appendChild(progressBar);
         progressContainer.appendChild(progressText);
 
-        this.container.appendChild(progressContainer);
+        this.appendControl(progressContainer);
     }
 
     private wireUpEvents(): void {

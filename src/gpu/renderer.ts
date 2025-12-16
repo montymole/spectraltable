@@ -336,7 +336,7 @@ export class Renderer {
         // Calculate Camera MVP
         const aspect = gl.canvas.width / gl.canvas.height;
         const projection = mat4Perspective(Math.PI / 4, aspect, 0.1, 100.0);
-        const view = mat4LookAt([0, 0, 5], [0, 0, 0], [0, 1, 0]);
+        const view = mat4LookAt([0, 0, 6.5], [0, 0, 0], [0, 1, 0]);
 
         const rotX = mat4RotateX(this.rotationX);
         const rotY = mat4RotateY(this.rotationY);
@@ -478,9 +478,7 @@ export class Renderer {
             case 'menger-sponge':
                 this.spectralVolume.generateMengerSponge();
                 break;
-            case 'perlin-noise':
-                this.spectralVolume.generatePerlinNoise();
-                break;
+
             default:
                 this.spectralVolume.clearData();
                 break;

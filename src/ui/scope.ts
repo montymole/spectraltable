@@ -114,23 +114,6 @@ export class StereoScope {
             this.ctx.stroke();
         }
 
-        // Draw label
-        this.ctx.save();
-        this.ctx.font = 'bold 12px Inter, sans-serif';
-        this.ctx.textAlign = 'left';
-        this.ctx.textBaseline = 'top';
 
-        const label = this.mode === 'lissajous' ? 'LISSAJOUS' : 'CHANNELS';
-        const x = 10;
-        const y = 10;
-
-        // Shadow/Outline
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        this.ctx.fillText(label, x + 1, y + 1);
-
-        // Text
-        this.ctx.fillStyle = '#0ff'; // Cyan matches theme
-        this.ctx.fillText(label, x, y);
-        this.ctx.restore();
     }
 }
