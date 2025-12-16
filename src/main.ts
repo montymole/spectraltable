@@ -30,9 +30,9 @@ class SpectralTableApp {
     private gameOfLifeSpeed = 0.5; // 0-1 range
     private gameOfLifeLastUpdate = 0;
 
-    private perlinNoiseActive = false;
-    private perlinNoiseSpeed = 0.5; // 0-1 range
-    private perlinNoiseLastUpdate = 0;
+    private sinePlasmaActive = false;
+    private sinePlasmaSpeed = 0.5; // 0-1 range
+    private sinePlasmaLastUpdate = 0;
 
     constructor() {
         console.log('Spectra Table Synthesis - Initializing...');
@@ -134,10 +134,10 @@ class SpectralTableApp {
             this.renderer.getSpectralVolume().initGameOfLife();
             this.gameOfLifeLastUpdate = performance.now();
             console.log('✓ Game of Life reinitialized with new density');
-        } else if (currentData === 'perlin-noise' && this.perlinNoiseActive) {
-            this.renderer.getSpectralVolume().generatePerlinNoise(0);
-            this.perlinNoiseLastUpdate = performance.now();
-            console.log('✓ Perlin noise reinitialized with new density');
+        } else if (currentData === 'sine-plasma' && this.sinePlasmaActive) {
+            this.renderer.getSpectralVolume().generateSinePlasma(0);
+            this.sinePlasmaLastUpdate = performance.now();
+            console.log('✓ Sine Plasma reinitialized with new density');
         } else if (!this.uploadedVolumes.has(currentData)) {
             // Regenerate other built-in datasets
             this.renderer.updateSpectralData(currentData);
@@ -150,7 +150,7 @@ class SpectralTableApp {
 
         // Stop any active animations
         this.gameOfLifeActive = false;
-        this.perlinNoiseActive = false;
+        this.sinePlasmaActive = false;
 
         // Check if it's an uploaded volume
         if (this.uploadedVolumes.has(dataSet)) {
@@ -166,15 +166,15 @@ class SpectralTableApp {
             // Show dynamic parameter slider for evolution speed (0-1)
             this.controls.showDynamicParam('Evolution Speed', 0, 1, 0.5, 0.01);
             console.log('✓ Game of Life initialized');
-        } else if (dataSet === 'perlin-noise') {
-            // Initialize Perlin noise
-            this.renderer.getSpectralVolume().generatePerlinNoise(0);
-            this.perlinNoiseActive = true;
-            this.perlinNoiseLastUpdate = performance.now();
+        } else if (dataSet === 'sine-plasma') {
+            // Initialize Sine Plasma
+            this.renderer.getSpectralVolume().generateSinePlasma(0);
+            this.sinePlasmaActive = true;
+            this.sinePlasmaLastUpdate = performance.now();
 
             // Show dynamic parameter slider for evolution speed (0-1)
             this.controls.showDynamicParam('Evolution Speed', 0, 1, 0.5, 0.01);
-            console.log('✓ Perlin Noise initialized with evolution');
+            console.log('✓ Sine Plasma initialized with evolution');
         } else {
             // Built-in data sets
             this.renderer.updateSpectralData(dataSet);
@@ -190,9 +190,9 @@ class SpectralTableApp {
         if (this.gameOfLifeActive) {
             this.gameOfLifeSpeed = value;
             console.log(`Game of Life speed: ${value.toFixed(2)} (0=pause, 1=instant)`);
-        } else if (this.perlinNoiseActive) {
-            this.perlinNoiseSpeed = value;
-            console.log(`Perlin noise speed: ${value.toFixed(2)} (0=static, 1=fast)`);
+        } else if (this.sinePlasmaActive) {
+            this.sinePlasmaSpeed = value;
+            console.log(`Sine plasma speed: ${value.toFixed(2)} (0=static, 1=fast)`);
         }
     }
 
@@ -307,17 +307,17 @@ class SpectralTableApp {
                 }
             }
 
-            // Update Perlin noise animation
-            if (this.perlinNoiseActive && this.perlinNoiseSpeed > 0) {
+            // Update Sine Plasma animation
+            if (this.sinePlasmaActive && this.sinePlasmaSpeed > 0) {
                 // Speed 0 = static
                 // Speed 1 = fast evolution (every frame)
                 // Speed controls frequency of updates
-                const delay = (1.0 - this.perlinNoiseSpeed) * 100; // Max 100ms between updates
-                const timeSinceLastUpdate = time - this.perlinNoiseLastUpdate;
+                const delay = (1.0 - this.sinePlasmaSpeed) * 100; // Max 100ms between updates
+                const timeSinceLastUpdate = time - this.sinePlasmaLastUpdate;
 
                 if (timeSinceLastUpdate >= delay) {
-                    this.renderer.getSpectralVolume().stepPerlinNoise();
-                    this.perlinNoiseLastUpdate = time;
+                    this.renderer.getSpectralVolume().stepSinePlasma();
+                    this.sinePlasmaLastUpdate = time;
                 }
             }
 

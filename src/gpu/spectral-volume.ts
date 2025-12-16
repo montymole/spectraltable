@@ -329,194 +329,71 @@ export class SpectralVolume {
         this.setData(data);
     }
 
-    // Perlin noise state for evolution
-    private perlinNoiseTime: number = 0;
+    // Sine Plasma state for evolution
+    private plasmaTime: number = 0;
 
-    public generatePerlinNoise(timeOffset: number = 0): void {
+    public generateSinePlasma(timeOffset: number = 0): void {
         const { x, y, z } = this.resolution;
         const totalVoxels = x * y * z;
         const data = new Float32Array(totalVoxels * 4);
 
-        // Noise function for cloud-like blobs
-        const noise = (x: number, y: number, z: number): number => {
-            // Pseudo-random hash
-            const hash = (x: number, y: number, z: number) => {
-                let h = (x * 374761393 + y * 668265263 + z * 1610612741) >>> 0;
-                h = (h ^ (h >>> 13)) * 1274126177 >>> 0;
-                return (h ^ (h >>> 16)) / 4294967296;
-            };
-
-            const fx = Math.floor(x);
-            const fy = Math.floor(y);
-            const fz = Math.floor(z);
-
-            const tx = x - fx;
-            const ty = y - fy;
-            const tz = z - fz;
-
-            // Smooth interpolation
-            const sx = tx * tx * (3 - 2 * tx);
-            const sy = ty * ty * (3 - 2 * ty);
-            const sz = tz * tz * (3 - 2 * tz);
-
-            // 3D interpolation
-            const c000 = hash(fx, fy, fz);
-            const c100 = hash(fx + 1, fy, fz);
-            const c010 = hash(fx, fy + 1, fz);
-            const c110 = hash(fx + 1, fy + 1, fz);
-            const c001 = hash(fx, fy, fz + 1);
-            const c101 = hash(fx + 1, fy, fz + 1);
-            const c011 = hash(fx, fy + 1, fz + 1);
-            const c111 = hash(fx + 1, fy + 1, fz + 1);
-
-            const c00 = c000 * (1 - sx) + c100 * sx;
-            const c10 = c010 * (1 - sx) + c110 * sx;
-            const c01 = c001 * (1 - sx) + c101 * sx;
-            const c11 = c011 * (1 - sx) + c111 * sx;
-
-            const c0 = c00 * (1 - sy) + c10 * sy;
-            const c1 = c01 * (1 - sy) + c11 * sy;
-
-            return c0 * (1 - sz) + c1 * sz;
-        };
-
-        // Temporary buffer for generating sparse dots
-        const tempData = new Float32Array(totalVoxels);
-        const blurred = new Float32Array(totalVoxels);
-
-        // First pass: Generate sparse "hot spots" using noise
         let idx = 0;
         for (let iz = 0; iz < z; iz++) {
             for (let iy = 0; iy < y; iy++) {
                 for (let ix = 0; ix < x; ix++) {
+                    // Normalized coordinates -1 to 1
                     const nx = (ix / x) * 2 - 1;
                     const ny = (iy / y) * 2 - 1;
                     const nz = (iz / z) * 2 - 1;
 
-                    // Smaller scale for tighter features
-                    const scale = 1.2;
-                    const px = (nx + 1) * scale + timeOffset * 0.3;
-                    const py = (ny + 1) * scale + timeOffset * 0.2;
-                    const pz = (nz + 1) * scale + timeOffset * 0.1;
+                    // Demo-scene style plasma: sum of sines
+                    let v = 0.0;
 
-                    // High frequency noise for sparse dots
-                    let mag = 0;
-                    mag += noise(px * 2.0, py * 2.0, pz * 2.0) * 0.4;
-                    mag += noise(px * 4.0, py * 4.0, pz * 4.0) * 0.3;
-                    mag += noise(px * 8.0, py * 8.0, pz * 8.0) * 0.3;
+                    // 1. Basic waves along axes
+                    v += Math.sin(nx * 3.0 + timeOffset);
+                    v += Math.sin(ny * 2.5 + timeOffset * 0.8);
+                    v += Math.sin(nz * 2.0 + timeOffset * 1.2);
 
-                    // Create sparse hot spots - only keep strong peaks
-                    if (mag > 0.65) {
-                        // This is a hot spot - boost it significantly
-                        mag = 0.5 + (mag - 0.65) * 2.0;  // Map 0.65-1.0 to 0.5-1.2
-                        mag = Math.min(1.0, mag);
-                    } else {
-                        // Everything else becomes very weak or zero
-                        mag = Math.pow(mag / 0.65, 3.0) * 0.2;  // Compress to 0-0.2 range
-                    }
+                    // 2. Diagonal wave
+                    v += Math.sin((nx + ny + nz) * 2.0 + timeOffset * 0.5);
 
-                    tempData[idx++] = mag;
-                }
-            }
-        }
+                    // 3. Circular pattern (distance from center)
+                    const dist = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                    v += Math.sin(dist * 6.0 - timeOffset * 1.5);
 
-        // Second pass: Blur to create halos around hot spots
-        idx = 0;
-        for (let iz = 0; iz < z; iz++) {
-            for (let iy = 0; iy < y; iy++) {
-                for (let ix = 0; ix < x; ix++) {
-                    let sum = 0;
-                    let count = 0;
+                    // 4. Spiral twisting
+                    const angle = Math.atan2(ny, nx);
+                    v += Math.sin(angle * 3.0 + nz * 4.0 + timeOffset);
 
-                    // 3x3x3 blur
-                    for (let dz = -1; dz <= 1; dz++) {
-                        for (let dy = -1; dy <= 1; dy++) {
-                            for (let dx = -1; dx <= 1; dx++) {
-                                const sx = ix + dx;
-                                const sy = iy + dy;
-                                const sz = iz + dz;
+                    // v ranges roughly -6 to 6, map to 0..1
+                    let mag = (v + 6.0) / 12.0;
 
-                                if (sx >= 0 && sx < x && sy >= 0 && sy < y && sz >= 0 && sz < z) {
-                                    const sampleIdx = sz * y * x + sy * x + sx;
-                                    const weight = (dx === 0 && dy === 0 && dz === 0) ? 8.0 : 1.0;
-                                    sum += tempData[sampleIdx] * weight;
-                                    count += weight;
-                                }
-                            }
-                        }
-                    }
+                    // Add some "hard" edges or rings (classic demo effect)
+                    // sin(v * constant)
+                    mag = (Math.sin(mag * 15.0) + 1.0) * 0.5;
 
-                    blurred[idx++] = sum / count;
-                }
-            }
-        }
+                    // Apply power curve to create gaps/contrast
+                    mag = Math.pow(mag, 2.5);
 
-        // Third pass: Second blur for very soft edges
-        idx = 0;
-        for (let iz = 0; iz < z; iz++) {
-            for (let iy = 0; iy < y; iy++) {
-                for (let ix = 0; ix < x; ix++) {
-                    let sum = 0;
-                    let count = 0;
-
-                    for (let dz = -1; dz <= 1; dz++) {
-                        for (let dy = -1; dy <= 1; dy++) {
-                            for (let dx = -1; dx <= 1; dx++) {
-                                const sx = ix + dx;
-                                const sy = iy + dy;
-                                const sz = iz + dz;
-
-                                if (sx >= 0 && sx < x && sy >= 0 && sy < y && sz >= 0 && sz < z) {
-                                    const sampleIdx = sz * y * x + sy * x + sx;
-                                    const weight = (dx === 0 && dy === 0 && dz === 0) ? 6.0 : 1.0;
-                                    sum += blurred[sampleIdx] * weight;
-                                    count += weight;
-                                }
-                            }
-                        }
-                    }
-
-                    tempData[idx++] = sum / count;
-                }
-            }
-        }
-
-        // Fourth pass: Final processing
-        idx = 0;
-        for (let iz = 0; iz < z; iz++) {
-            for (let iy = 0; iy < y; iy++) {
-                for (let ix = 0; ix < x; ix++) {
-                    const nx = (ix / x) * 2 - 1;
-                    const ny = (iy / y) * 2 - 1;
-                    const nz = (iz / z) * 2 - 1;
-
-                    let mag = tempData[idx];
-
-                    // Gentle threshold to remove near-zero values
-                    if (mag < 0.08) {
-                        mag = 0.0;
-                    } else {
-                        // Scale to usable range
-                        mag = (mag - 0.08) * 1.1;  // Slight boost
-                    }
-
-                    // Boost low frequencies moderately
+                    // Boost low frequencies (left side of X axis)
+                    // This makes the bass frequencies more prominent in the plasma
                     const freqBoost = 1.0 + (1.0 - (nx + 1) * 0.5) * 0.5;
                     mag *= freqBoost;
 
-                    // Cap at reasonable level for audio
-                    mag = Math.min(0.7, mag);
+                    // Clamp
+                    mag = Math.max(0.0, Math.min(0.9, mag));
 
-                    // Phase varies spatially for interesting interference patterns
-                    const phase = (ix / x * 0.3 + iy / y * 0.4 + iz / z * 0.3 + timeOffset * 0.1) % 1.0;
-                    const custom1 = (ny + 1) * 0.5;
-                    const custom2 = (nz + 1) * 0.5;
+                    // Phase varies with the plasma value itself for complex twisting
+                    const phase = (mag + timeOffset * 0.2) % 1.0;
 
-                    data[idx * 4] = mag;
-                    data[idx * 4 + 1] = phase;
-                    data[idx * 4 + 2] = custom1;
-                    data[idx * 4 + 3] = custom2;
-                    idx++;
+                    // Custom channels follow spatial gradients
+                    const custom1 = (Math.sin(nx * Math.PI + timeOffset) + 1.0) * 0.5;
+                    const custom2 = (Math.cos(ny * Math.PI + timeOffset) + 1.0) * 0.5;
+
+                    data[idx++] = mag;
+                    data[idx++] = phase;
+                    data[idx++] = custom1;
+                    data[idx++] = custom2;
                 }
             }
         }
@@ -524,9 +401,9 @@ export class SpectralVolume {
         this.setData(data);
     }
 
-    public stepPerlinNoise(): void {
-        this.perlinNoiseTime += 0.05;  // Evolution speed
-        this.generatePerlinNoise(this.perlinNoiseTime);
+    public stepSinePlasma(): void {
+        this.plasmaTime += 0.02;  // Smooth evolution
+        this.generateSinePlasma(this.plasmaTime);
     }
 
     public clearData(): void {

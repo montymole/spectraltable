@@ -54,7 +54,7 @@ export class ControlPanel {
             '3d-julia',
             'mandelbulb',
             'menger-sponge',
-            'perlin-noise',
+            'sine-plasma',
             'game-of-life'
         ]);
 
