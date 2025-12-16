@@ -345,11 +345,14 @@ class SpectralTableApp {
             // Get spectral data (RGBA)
             const spectralData = this.renderer.getReadingLineSpectralData();
 
-            // Update Visualizations
-            this.spectrogram.addData(spectralData);
-
             // Update Audio
             this.audioEngine.updateSpectralData(spectralData);
+
+            // Get Audio FFT data
+            const audioSpectralData = this.audioEngine.getAudioSpectralData();
+
+            // Update Visualizations
+            this.spectrogram.update(spectralData, audioSpectralData.left);
 
             // Update Scope
             const scopeData = this.audioEngine.getScopeData();

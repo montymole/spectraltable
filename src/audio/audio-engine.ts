@@ -200,6 +200,8 @@ export class AudioEngine {
     // Buffers for visualization
     private timeDomainDataL: Float32Array;
     private timeDomainDataR: Float32Array;
+    private frequencyDataL: Float32Array;
+    private frequencyDataR: Float32Array;
     private splitNode: ChannelSplitterNode;
     private analyserL: AnalyserNode;
     private analyserR: AnalyserNode;
@@ -226,6 +228,8 @@ export class AudioEngine {
 
         this.timeDomainDataL = new Float32Array(this.analyserL.fftSize);
         this.timeDomainDataR = new Float32Array(this.analyserR.fftSize);
+        this.frequencyDataL = new Float32Array(this.analyserL.frequencyBinCount);
+        this.frequencyDataR = new Float32Array(this.analyserR.frequencyBinCount);
 
         this.splitNode.connect(this.analyserL, 0);
         this.splitNode.connect(this.analyserR, 1);
@@ -367,6 +371,15 @@ export class AudioEngine {
         return {
             left: this.timeDomainDataL,
             right: this.timeDomainDataR
+        };
+    }
+
+    public getAudioSpectralData(): { left: Float32Array, right: Float32Array } {
+        this.analyserL.getFloatFrequencyData(this.frequencyDataL as any);
+        this.analyserR.getFloatFrequencyData(this.frequencyDataR as any);
+        return {
+            left: this.frequencyDataL,
+            right: this.frequencyDataR
         };
     }
 
