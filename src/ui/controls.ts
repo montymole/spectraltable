@@ -11,19 +11,16 @@ export class ControlPanel {
     // Rotation sliders removed - now controlled by mouse
     private planeTypeSelect: HTMLSelectElement;
 
-    private speedSlider: HTMLInputElement;
     private scanPositionSlider: HTMLInputElement;
 
     // Synth mode controls
     private synthModeSelect: HTMLSelectElement;
     private frequencySlider: HTMLInputElement;
     private frequencyContainer: HTMLElement | null = null;
-    private carrierSelect: HTMLSelectElement;
     private carrierContainer: HTMLElement | null = null;
-    private feedbackSlider: HTMLInputElement;
     private feedbackContainer: HTMLElement | null = null;
-    private midiSelect!: HTMLSelectElement;
-    private octaveSelect!: HTMLSelectElement;
+
+    private midiSelect: HTMLSelectElement;
 
     // Volume density controls
     private densityXSlider: HTMLInputElement;
@@ -48,6 +45,10 @@ export class ControlPanel {
     private onFeedbackChange: ((amount: number) => void) | null = null;
     private onMidiInputChange: ((id: string) => void) | null = null;
     private onOctaveChange: ((octave: number) => void) | null = null;
+
+    // LFO Callbacks
+    private onLFOParamChange: ((index: number, param: string, value: any) => void) | null = null;
+    private onModulationRoutingChange: ((target: string, source: string) => void) | null = null;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
@@ -78,16 +79,60 @@ export class ControlPanel {
 
         // Create section headers
         this.createSection('Reading Path');
-        this.pathYSlider = this.createSlider('path-y', 'Position Y (Morph)', -1, 1, 0, 0.01);
-        // Rotation is now controlled by mouse - removed sliders
+        // Modulatable Sliders
+        const pathYControl = this.createModulatableSlider('path-y', 'Position Y (Morph)', -1, 1, 0, 0.01, 'pathY');
+        this.pathYSlider = pathYControl.slider;
+
         this.planeTypeSelect = this.createSelect('plane-type', 'Plane Type', [
             PlaneType.FLAT,
             PlaneType.SINCOS,
             PlaneType.WAVE,
             PlaneType.RIPPLE,
         ]);
-        this.speedSlider = this.createSlider('speed', 'Scrub Speed', -1, 1, 0, 0.01);
-        this.scanPositionSlider = this.createSlider('scan-pos', 'Scan Phase', -1, 1, 0, 0.01);
+
+        // Add Shape Phase Modulation Selector
+        const shapePhaseGroup = document.createElement('div');
+        shapePhaseGroup.className = 'control-group';
+
+        const shapePhaseLabel = document.createElement('label');
+        shapePhaseLabel.textContent = 'Shape Phase';
+        shapePhaseLabel.style.fontSize = '0.8rem';
+
+        const shapePhaseSelect = document.createElement('select');
+        shapePhaseSelect.className = 'source-select';
+        shapePhaseSelect.style.marginLeft = 'auto';
+        shapePhaseSelect.style.fontSize = '0.7rem';
+
+        ['None', 'LFO 1', 'LFO 2'].forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.toLowerCase().replace(' ', '');
+            option.textContent = opt;
+            shapePhaseSelect.appendChild(option);
+        });
+
+        shapePhaseSelect.addEventListener('change', () => {
+            if (this.onModulationRoutingChange) {
+                this.onModulationRoutingChange('shapePhase', shapePhaseSelect.value);
+            }
+        });
+
+        const spLabelRow = document.createElement('div');
+        spLabelRow.className = 'label-row';
+        spLabelRow.appendChild(shapePhaseLabel);
+        spLabelRow.appendChild(shapePhaseSelect);
+
+        shapePhaseGroup.appendChild(spLabelRow);
+        this.appendControl(shapePhaseGroup);
+
+        // Speed slider removed
+
+        const scanPosControl = this.createModulatableSlider('scan-pos', 'Scan Phase', -1, 1, 0, 0.01, 'scanPhase');
+        this.scanPositionSlider = scanPosControl.slider;
+
+        // LFO Section
+        this.createSection('LFOs');
+        this.createLFOUnit(0);
+        this.createLFOUnit(1);
 
         // Initialize controls
         this.createSection('Audio Synthesis');
@@ -96,10 +141,10 @@ export class ControlPanel {
             SynthMode.SPECTRAL,
         ]);
         this.frequencySlider = this.createFrequencySlider();
-        this.carrierSelect = this.createCarrierSelect();
-        this.feedbackSlider = this.createFeedbackSlider();
+        this.createCarrierSelect();
+        this.createFeedbackSlider();
         this.midiSelect = this.createMidiSelect();
-        this.octaveSelect = this.createOctaveSelect();
+        this.createOctaveSelect();
 
         this.createSection('Visualization');
         this.densityXSlider = this.createSlider('density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1);
@@ -205,6 +250,172 @@ export class ControlPanel {
         return select;
     }
 
+    private createModulatableSlider(
+        id: string,
+        label: string,
+        min: number,
+        max: number,
+        value: number,
+        step: number,
+        targetParam: string
+    ): { slider: HTMLInputElement, select: HTMLSelectElement } {
+        const group = document.createElement('div');
+        group.className = 'control-group';
+
+        const labelEl = document.createElement('label');
+        labelEl.htmlFor = id;
+        labelEl.textContent = label;
+
+        // Source Selector (None, LFO1, LFO2)
+        const sourceSelect = document.createElement('select');
+        sourceSelect.className = 'source-select';
+        sourceSelect.style.marginLeft = 'auto';
+        sourceSelect.style.fontSize = '0.7rem';
+        sourceSelect.style.padding = '2px';
+
+        ['None', 'LFO 1', 'LFO 2'].forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.toLowerCase().replace(' ', ''); // none, lfo1, lfo2
+            option.textContent = opt;
+            if (opt === 'None') option.selected = true;
+            sourceSelect.appendChild(option);
+        });
+
+        sourceSelect.addEventListener('change', () => {
+            if (this.onModulationRoutingChange) {
+                this.onModulationRoutingChange(targetParam, sourceSelect.value);
+            }
+            // Disable slider if modulated?
+            slider.disabled = sourceSelect.value !== 'none';
+            group.style.opacity = sourceSelect.value !== 'none' ? '0.8' : '1.0';
+        });
+
+        const valueDisplay = document.createElement('span');
+        valueDisplay.className = 'value-display';
+        valueDisplay.textContent = step >= 1 ? String(Math.round(value)) : value.toFixed(2);
+        valueDisplay.id = `${id}-value`;
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.id = id;
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.value = String(value);
+        slider.step = String(step);
+        slider.className = 'slider';
+
+        slider.addEventListener('input', () => {
+            const val = parseFloat(slider.value);
+            valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
+        });
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+        labelRow.appendChild(sourceSelect);
+
+        const valueRow = document.createElement('div');
+        valueRow.className = 'label-row';
+        valueRow.style.justifyContent = 'flex-end';
+        valueRow.appendChild(valueDisplay);
+
+        group.appendChild(labelRow);
+        group.appendChild(valueRow);
+        group.appendChild(slider);
+        this.appendControl(group);
+
+        return { slider, select: sourceSelect };
+    }
+
+    private createLFOUnit(index: number): void {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'lfo-unit';
+        wrapper.style.marginBottom = '10px';
+        wrapper.style.padding = '5px';
+        wrapper.style.borderLeft = '2px solid #333';
+
+        const title = document.createElement('div');
+        title.className = 'label-row';
+        title.innerHTML = `<label>LFO ${index + 1}</label>`;
+        wrapper.appendChild(title);
+
+        // Waveform
+        const waveSelect = document.createElement('select');
+        waveSelect.className = 'select';
+        ['Sine', 'Square', 'Saw', 'Triangle'].forEach(w => {
+            const opt = document.createElement('option');
+            opt.value = w.toLowerCase();
+            opt.textContent = w;
+            waveSelect.appendChild(opt);
+        });
+        waveSelect.addEventListener('change', () => {
+            if (this.onLFOParamChange) this.onLFOParamChange(index, 'waveform', waveSelect.value);
+        });
+        wrapper.appendChild(waveSelect);
+
+        // Frequency (0 - 1Hz)
+        const freqLabel = document.createElement('div');
+        freqLabel.className = 'label-row';
+        freqLabel.innerHTML = '<label>Freq</label><span class="value-display">0.5 Hz</span>';
+        const freqDisplay = freqLabel.querySelector('span')!;
+
+        const freqSlider = document.createElement('input');
+        freqSlider.type = 'range';
+        freqSlider.min = '0';
+        freqSlider.max = '1';
+        freqSlider.step = '0.01';
+        freqSlider.value = '0.5';
+        freqSlider.className = 'slider';
+        freqSlider.addEventListener('input', () => {
+            freqDisplay.textContent = `${freqSlider.value} Hz`;
+            if (this.onLFOParamChange) this.onLFOParamChange(index, 'frequency', parseFloat(freqSlider.value));
+        });
+        wrapper.appendChild(freqLabel);
+        wrapper.appendChild(freqSlider);
+
+        // Amplitude (0 - 1)
+        const ampLabel = document.createElement('div');
+        ampLabel.className = 'label-row';
+        ampLabel.innerHTML = '<label>Amp</label><span class="value-display">0.5</span>';
+        const ampDisplay = ampLabel.querySelector('span')!; // Fix: defined ampDisplay
+
+        const ampSlider = document.createElement('input');
+        ampSlider.type = 'range';
+        ampSlider.min = '0';
+        ampSlider.max = '1';
+        ampSlider.step = '0.01';
+        ampSlider.value = '0.5';
+        ampSlider.className = 'slider';
+        ampSlider.addEventListener('input', () => {
+            ampDisplay.textContent = ampSlider.value;
+            if (this.onLFOParamChange) this.onLFOParamChange(index, 'amplitude', parseFloat(ampSlider.value));
+        });
+        wrapper.appendChild(ampLabel);
+        wrapper.appendChild(ampSlider);
+
+        // Offset (-1 to 1)
+        const offsetLabel = document.createElement('div');
+        offsetLabel.className = 'label-row';
+        offsetLabel.innerHTML = '<label>Offset</label><span class="value-display">0.0</span>';
+        const offsetDisplay = offsetLabel.querySelector('span')!;
+
+        const offsetSlider = document.createElement('input');
+        offsetSlider.type = 'range';
+        offsetSlider.min = '-1';
+        offsetSlider.max = '1';
+        offsetSlider.step = '0.01';
+        offsetSlider.value = '0.0';
+        offsetSlider.className = 'slider';
+        offsetSlider.addEventListener('input', () => {
+            offsetDisplay.textContent = offsetSlider.value;
+            if (this.onLFOParamChange) this.onLFOParamChange(index, 'offset', parseFloat(offsetSlider.value));
+        });
+        wrapper.appendChild(offsetLabel);
+        wrapper.appendChild(offsetSlider);
+
+        this.appendControl(wrapper);
+    }
+
     private createFrequencySlider(): HTMLInputElement {
         // Frequency slider with note name display
         // Range: 20Hz to 2000Hz, default 220Hz (A3)
@@ -249,7 +460,6 @@ export class ControlPanel {
         group.appendChild(slider);
         this.appendControl(group);
 
-        this.frequencyContainer = group;
         this.frequencySlider = slider;
         return slider;
     }
@@ -295,8 +505,6 @@ export class ControlPanel {
         group.appendChild(select);
         this.appendControl(group);
 
-        this.carrierContainer = group;
-        this.carrierSelect = select;
         return select;
     }
 
@@ -340,8 +548,6 @@ export class ControlPanel {
         group.appendChild(slider);
         this.appendControl(group);
 
-        this.feedbackContainer = group;
-        this.feedbackSlider = slider;
         return slider;
     }
 
@@ -562,7 +768,6 @@ export class ControlPanel {
         this.pathYSlider.addEventListener('input', pathUpdate);
         // Rotation sliders removed - controlled by mouse
         this.planeTypeSelect.addEventListener('change', pathUpdate);
-        this.speedSlider.addEventListener('input', pathUpdate);
         this.scanPositionSlider.addEventListener('input', pathUpdate);
 
         // Synth mode change
@@ -682,6 +887,14 @@ export class ControlPanel {
         this.onDynamicParamChange = callback;
     }
 
+    public setLFOParamChangeCallback(callback: (index: number, param: string, value: any) => void): void {
+        this.onLFOParamChange = callback;
+    }
+
+    public setModulationRoutingChangeCallback(callback: (target: string, source: string) => void): void {
+        this.onModulationRoutingChange = callback;
+    }
+
     public showDynamicParam(label: string, min: number, max: number, value: number, step: number): void {
         if (!this.dynamicParamSlider || !this.dynamicParamContainer) return;
 
@@ -708,10 +921,6 @@ export class ControlPanel {
         }
     }
 
-    public getSpeed(): number {
-        return parseFloat(this.speedSlider.value);
-    }
-
     public getState(): ReadingPathState {
         return {
             position: {
@@ -724,17 +933,30 @@ export class ControlPanel {
                 y: 0, // Not used
                 z: 0, // Controlled by mouse
             },
-            speed: parseFloat(this.speedSlider.value),
             scanPosition: parseFloat(this.scanPositionSlider.value),
             planeType: this.planeTypeSelect.value as PlaneType,
+            shapePhase: 0,
         };
     }
+
+    // getSpeed Removed
 
     public updateScanPosition(pos: number): void {
         this.scanPositionSlider.value = String(pos);
         // Update display
         const display = document.getElementById('scan-pos-value');
         if (display) display.textContent = pos.toFixed(2);
+
+        // Trigger callback manually
+        if (this.onPathChange) {
+            this.onPathChange(this.getState());
+        }
+    }
+
+    public updatePathY(y: number): void {
+        this.pathYSlider.value = String(y);
+        const display = document.getElementById('path-y-value');
+        if (display) display.textContent = y.toFixed(2);
 
         // Trigger callback manually
         if (this.onPathChange) {

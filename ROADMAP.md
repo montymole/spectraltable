@@ -154,15 +154,16 @@ spectraltable/
 | On-screen Piano Keyboard | ✅ | Virtual keyboard with visualization |
 | MIDI Input Selector | ✅ | Dynamic port selection dropdown |
 
-### Phase 9: GPU Animation
+### Phase 9: Modulation System (LFOs) 🚀
 
-| Component | Status | Priority |
-|-----------|--------|----------|
-| Compute Shader Morphing | 🔜 | MEDIUM |
-| LFO-driven Spectral Animation | 🔜 | MEDIUM |
-| Audio Clock Sync | 🔜 | LOW |
+| Component | Status | Details |
+|-----------|--------|---------|
+| LFO Logic | ✅ | 2 Units (Sine, Square, Saw, Tri) |
+| LFO UI Controls | ✅ | Wave, Freq (0-1Hz), Amp (0-1) |
+| Modulation Routing | ✅ | Assign LFOs to Scan Phase & Morph Y |
+| Visualization Control | ✅ | Render loop modulation logic |
 
-### Phase 9: Optimization
+### Phase 10: Optimization
 
 | Component | Status | Priority |
 |-----------|--------|----------|

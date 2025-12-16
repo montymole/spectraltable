@@ -56,9 +56,9 @@ export class Renderer {
     private pathState: ReadingPathState = {
         position: { x: 0, y: 0, z: 0 },
         rotation: { x: 0, y: 0, z: 0 },
-        speed: 0.5,
         scanPosition: 0,
-        planeType: PlaneType.FLAT
+        planeType: PlaneType.FLAT,
+        shapePhase: 0
     };
 
     // Camera state
@@ -263,7 +263,11 @@ export class Renderer {
         // 1. Update Plane Geometry
         if (this.planeVAO) gl.deleteVertexArray(this.planeVAO);
 
-        const { positions, indices } = ReadingPathGeometry.generatePlane(this.pathState.planeType);
+        const { positions, indices } = ReadingPathGeometry.generatePlane(
+            this.pathState.planeType,
+            32,
+            this.pathState.shapePhase
+        );
         this.planeIndexCount = indices.length;
 
         const planeVAO = gl.createVertexArray();
@@ -299,7 +303,8 @@ export class Renderer {
         const linePositions = ReadingPathGeometry.generateReadingLine(
             this.pathState.planeType,
             resolutionX,
-            this.pathState.scanPosition
+            this.pathState.scanPosition,
+            this.pathState.shapePhase
         );
 
         this.lineVertexCount = linePositions.length / 3;
@@ -446,6 +451,7 @@ export class Renderer {
     public updateReadingPath(state: ReadingPathState): void {
         const typeChanged = state.planeType !== this.pathState.planeType;
         const scanChanged = state.scanPosition !== this.pathState.scanPosition;
+        const phaseChanged = state.shapePhase !== this.pathState.shapePhase;
 
         // Always preserve mouse-controlled rotation (x and z)
         // Since rotation sliders were removed, controls always return 0 for rotation
@@ -459,7 +465,7 @@ export class Renderer {
             }
         };
 
-        if (typeChanged) {
+        if (typeChanged || phaseChanged) {
             this.updateReadingPathGeometry();
         } else if (scanChanged) {
             const resolution = this.spectralVolume.getResolution();
@@ -491,7 +497,8 @@ export class Renderer {
         const linePositions = ReadingPathGeometry.generateReadingLine(
             this.pathState.planeType,
             resolution.x, // Use X resolution for sampling density
-            this.pathState.scanPosition
+            this.pathState.scanPosition,
+            this.pathState.shapePhase
         );
 
         // 2. Calculate plane transform matrix

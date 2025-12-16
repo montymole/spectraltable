@@ -10,6 +10,7 @@ import { MidiHandler } from './audio/midi-handler';
 import { EnvelopeEditor } from './ui/envelope-editor';
 import { PianoKeyboard } from './ui/piano';
 import { ReadingPathState, VolumeResolution, SynthMode, CarrierType, VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT } from './types';
+import { LFO, LFOWaveform } from './modulators/lfo';
 
 // Main application entry point
 // Initializes WebGL, UI, and wires up event handling
@@ -24,7 +25,6 @@ class SpectralTableApp {
     private audioAnalyzer: AudioAnalyzer;
     private midiHandler: MidiHandler;
     private piano: PianoKeyboard;
-    private envelopeEditor: EnvelopeEditor;
     private canvas: HTMLCanvasElement;
     private currentNote: number | null = null;
     private animationFrameId: number = 0;
@@ -40,6 +40,13 @@ class SpectralTableApp {
     private sinePlasmaActive = false;
     private sinePlasmaSpeed = 0.5; // 0-1 range
     private sinePlasmaLastUpdate = 0;
+
+    // Modulation Logic
+    private lfo1: LFO;
+    private lfo2: LFO;
+    private pathYSource: string = 'none'; // 'none', 'lfo1', 'lfo2'
+    private scanPhaseSource: string = 'none';
+    private shapePhaseSource: string = 'none';
 
     constructor() {
         console.log('Spectra Table Synthesis - Initializing...');
@@ -68,8 +75,12 @@ class SpectralTableApp {
         // Initialize Audio Engine
         this.audioEngine = new AudioEngine();
 
-        // Initialize Envelope Editor
-        this.envelopeEditor = new EnvelopeEditor('envelope-canvas', this.audioEngine);
+        // Initialize LFOs
+        this.lfo1 = new LFO(0.5);
+        this.lfo2 = new LFO(0.5);
+
+        // Initialize envelope editor logic
+        new EnvelopeEditor('envelope-canvas', this.audioEngine);
 
         // Initialize Audio Analyzer
         this.audioAnalyzer = new AudioAnalyzer();
@@ -123,6 +134,21 @@ class SpectralTableApp {
         this.controls.setFrequencyChangeCallback(this.onFrequencyChange.bind(this));
         this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
         this.controls.setFeedbackChangeCallback(this.onFeedbackChange.bind(this));
+
+        // LFO Wiring
+        this.controls.setLFOParamChangeCallback((index, param, value) => {
+            const lfo = index === 0 ? this.lfo1 : this.lfo2;
+            if (param === 'waveform') lfo.setWaveform(value as LFOWaveform);
+            if (param === 'frequency') lfo.setFrequency(value);
+            if (param === 'amplitude') lfo.setAmplitude(value);
+            if (param === 'offset') lfo.setOffset(value);
+        });
+
+        this.controls.setModulationRoutingChangeCallback((target, source) => {
+            if (target === 'pathY') this.pathYSource = source;
+            if (target === 'scanPhase') this.scanPhaseSource = source;
+            if (target === 'shapePhase') this.shapePhaseSource = source;
+        });
 
         // Handle window resize
         window.addEventListener('resize', this.onResize.bind(this));
@@ -417,23 +443,28 @@ class SpectralTableApp {
                 }
             }
 
-            // Animate reading position (Scrub)
-            // Speed range: -1 (backwards) to +1 (forwards), 0 = stationary
-            const speed = this.controls.getSpeed();
+            // LFO Updates
+            const lfo1Out = this.lfo1.update(deltaTime);
+            const lfo2Out = this.lfo2.update(deltaTime);
 
-            if (speed !== 0) {
-                const currentState = this.controls.getState();
-                // Use speed directly - negative values move backwards
-                let newScanPos = currentState.scanPosition + (speed * 0.5 * deltaTime);
+            // Modulation
+            if (this.pathYSource !== 'none') {
+                const val = this.pathYSource === 'lfo1' ? lfo1Out : lfo2Out;
+                this.controls.updatePathY(val);
+            }
 
-                // Wrap around in both directions
-                if (newScanPos > 1) {
-                    newScanPos = -1 + (newScanPos - 1);
-                } else if (newScanPos < -1) {
-                    newScanPos = 1 + (newScanPos + 1);
-                }
+            if (this.scanPhaseSource !== 'none') {
+                const val = this.scanPhaseSource === 'lfo1' ? lfo1Out : lfo2Out;
+                this.controls.updateScanPosition(val);
+            }
 
-                this.controls.updateScanPosition(newScanPos);
+            if (this.shapePhaseSource !== 'none') {
+                const val = this.shapePhaseSource === 'lfo1' ? lfo1Out : lfo2Out;
+                // Since we don't have a slider for shape phase, we update renderer directly
+                // We merge with current controls state to prevent overwriting other params
+                const state = this.controls.getState();
+                state.shapePhase = val;
+                this.renderer.updateReadingPath(state);
             }
 
             this.renderer.render(deltaTime);

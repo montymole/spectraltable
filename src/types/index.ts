@@ -9,9 +9,9 @@ export interface Vec3 {
 export interface ReadingPathState {
     position: Vec3;     // Current XYZ position in spectral cube
     rotation: Vec3;     // Rotation of the reading plane (euler angles)
-    speed: number;      // Scrub rate (0-1)
     scanPosition: number; // Position of reading line on plane (-1 to 1)
     planeType: PlaneType;
+    shapePhase: number; // Phase offset for plane shape modulation
 }
 
 export interface SpatialState {
