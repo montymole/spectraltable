@@ -17,33 +17,32 @@
   <div id="app">
     <div id="canvas-container">
       <div id="left-panel">
-        <div class="vis-group" style="flex: 0 0 auto;">
-          <div class="vis-header">Spectral Volume</div>
+        <div class="vis-group">
+          <div class="vis-header">Spectral Cube</div>
           <div class="vis-content">
             <canvas id="gl-canvas"></canvas>
           </div>
         </div>
-        <div id="spectrogram-container">
-          <div class="vis-group" style="flex: 1;">
-            <div class="vis-header">Spectrogram</div>
-            <div class="vis-content">
-              <canvas id="spectrogram-canvas"></canvas>
-            </div>
-          </div>
-          <div class="vis-group" style="flex: 1;">
-            <div class="vis-header">Scope</div>
-            <div class="vis-content">
-              <canvas id="scope-canvas"></canvas>
-            </div>
+        <div class="vis-group">
+          <div class="vis-header">Spectrogram</div>
+          <div class="vis-content">
+            <canvas id="spectrogram-canvas"></canvas>
           </div>
         </div>
+        <div class="vis-group">
+          <div class="vis-header">Scope</div>
+          <div class="vis-content">
+            <canvas id="scope-canvas"></canvas>
+          </div>
+        </div>
+      </div>
 
-      </div>
-      <div id="right-panel">
-        <div id="controls"></div>
-      </div>
     </div>
-    <div id="piano-container"></div>
+    <div id="right-panel">
+      <div id="controls"></div>
+    </div>
+  </div>
+  <div id="piano-container"></div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

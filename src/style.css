@@ -52,7 +52,8 @@ body {
 }
 
 #left-panel {
-  width: 33%;
+  width: 30vh;
+  /* (100vh - 10vh piano) / 3 = 30vh for squares */
   height: 100%;
   position: relative;
   border-right: 1px solid var(--border-subtle);
@@ -61,7 +62,8 @@ body {
 }
 
 #right-panel {
-  width: 67%;
+  flex: 1;
+  /* Take remaining width */
   display: flex;
   flex-direction: column;
 }
@@ -69,25 +71,12 @@ body {
 /* Visualization Canvas */
 #gl-canvas {
   width: 100%;
-  aspect-ratio: 1 / 1;
+  height: 100%;
   display: block;
   background: radial-gradient(circle at center, #14141c 0%, #050508 100%);
-  min-height: 0;
-  flex: none;
-  /* Do not grow, strictly square based on width */
 }
 
-#spectrogram-container {
-  flex: 1;
-  /* Take remaining height */
-  height: auto;
-  /* Override fixed height */
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border-subtle);
-  background: #08080c;
-  flex-shrink: 0;
-}
+/* Removed #spectrogram-container */
 
 #spectrogram-canvas,
 #scope-canvas {
@@ -101,8 +90,12 @@ body {
   display: flex;
   flex-direction: column;
   width: 100%;
-  min-height: 100px;
+  flex: 1;
+  /* Equal height */
+  min-height: 0;
+  /* Allow shrinking */
   border-bottom: 1px solid var(--border-subtle);
+  overflow: hidden;
 }
 
 .vis-group:last-child {
