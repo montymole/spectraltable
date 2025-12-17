@@ -2,8 +2,8 @@
 export class StereoScope {
     private canvas: HTMLCanvasElement;
     private ctx: CanvasRenderingContext2D;
-    private width: number;
-    private height: number;
+    private width: number = 320;
+    private height: number = 320;
 
     public mode: 'lissajous' | 'channels' = 'channels';
     private titleElement: HTMLElement | null = null;
@@ -31,8 +31,6 @@ export class StereoScope {
             this.updateTitle();
         });
 
-        this.width = 320;
-        this.height = 160;
         this.resize();
 
         window.addEventListener('resize', () => this.resize());
@@ -48,7 +46,7 @@ export class StereoScope {
     private resize(): void {
         // Get the display size from the canvas element (set by CSS)
         const width = this.canvas.clientWidth;
-        const height = this.canvas.clientHeight;
+        const height = this.canvas.clientWidth;
 
         // Handle high DPI displays
         const dpr = window.devicePixelRatio || 1;

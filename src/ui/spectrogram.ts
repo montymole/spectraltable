@@ -2,11 +2,11 @@
 export class Spectrogram {
     private canvas: HTMLCanvasElement;
     private ctx: CanvasRenderingContext2D;
-    private width: number;
-    private height: number;
     private tempCanvas: HTMLCanvasElement;
     private tempCtx: CanvasRenderingContext2D;
     private titleElement: HTMLElement | null = null;
+    private width: number = 320;
+    private height: number = 320;
 
     private mode: 'SCANLINE' | 'AUDIO_OUTPUT' = 'AUDIO_OUTPUT'; // Default to spectrogram
 
@@ -33,8 +33,6 @@ export class Spectrogram {
         if (!tempCtx) throw new Error('Failed to get temp 2D context');
         this.tempCtx = tempCtx;
 
-        this.width = 320;
-        this.height = 160;
         this.resize();
 
         window.addEventListener('resize', () => this.resize());
@@ -56,7 +54,7 @@ export class Spectrogram {
     private resize(): void {
         // Get the display size from the canvas element (set by CSS)
         const width = this.canvas.clientWidth;
-        const height = this.canvas.clientHeight;
+        const height = this.canvas.clientWidth;
 
         // Handle high DPI displays
         const dpr = window.devicePixelRatio || 1;
