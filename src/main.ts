@@ -537,13 +537,14 @@ class SpectralTableApp {
             // LFO modulation update
             this.lfos.forEach((lfo, index) => {
                 const lfoOut = lfo.update(deltaTime);
-                if (this.pathYSource === `lfo${index + 1}`) {
+                const sourceName = `lfo${index + 1}`;
+                if (this.pathYSource === sourceName) {
                     this.controls.updatePathY(lfoOut);
                 }
-                if (this.scanPhaseSource === `lfo${index + 1}`) {
+                if (this.scanPhaseSource === sourceName) {
                     this.controls.updateScanPosition(lfoOut);
                 }
-                if (this.shapePhaseSource === `lfo${index + 1}`) {
+                if (this.shapePhaseSource === sourceName) {
                     const state = this.controls.getState();
                     state.shapePhase = lfoOut;
                     this.renderer.updateReadingPath(state);

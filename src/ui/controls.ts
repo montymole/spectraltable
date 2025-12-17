@@ -165,7 +165,7 @@ export class ControlPanel {
 
         const shapePhaseLabel = document.createElement('label');
         shapePhaseLabel.textContent = 'Shape Phase';
-        shapePhaseLabel.style.fontSize = '0.8rem';
+        shapePhaseLabel.style.fontSize = '0.6rem';
 
         const shapePhaseSelect = document.createElement('select');
         shapePhaseSelect.className = 'source-select';
