@@ -404,6 +404,28 @@ body {
   transform: scaleY(0.98);
 }
 
+/* Keyboard shortcut hints on piano keys */
+.key-hint {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  font-family: var(--font-sans);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0.6;
+  line-height: 1;
+}
+
+.piano-key.white .key-hint {
+  color: #333;
+}
+
+.piano-key.black .key-hint {
+  color: #fff;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
