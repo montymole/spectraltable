@@ -84,7 +84,12 @@ class SpectralTableApp {
         this.lfo2 = new LFO(0.5);
 
         // Initialize envelope editor logic
-        new EnvelopeEditor('envelope-canvas', this.audioEngine);
+        const envCanvas = this.controls.envelopeCanvas;
+        if (envCanvas) {
+            new EnvelopeEditor(envCanvas, this.audioEngine);
+        } else {
+            console.error('Envelope canvas not created in controls');
+        }
 
         // Initialize Audio Analyzer
         this.audioAnalyzer = new AudioAnalyzer();
@@ -256,7 +261,7 @@ class SpectralTableApp {
         this.controls.updateGeneratorParamsUI(state.spectralData, state.generatorParams);
 
         // Trigger spectral data change (will use generator params if available)
-        this.onSpectralDataChange(state.spectralData);
+        this.onSpectralDataChange(state.spectralData, state.generatorParams);
 
         // Update path
         this.onPathChange(this.controls.getState());
@@ -293,7 +298,7 @@ class SpectralTableApp {
         // Note: Uploaded volumes maintain their data across resolution changes
     }
 
-    private onSpectralDataChange(dataSet: string): void {
+    private onSpectralDataChange(dataSet: string, initialParams?: GeneratorParams): void {
         console.log('Spectral data changed:', dataSet);
 
         // Stop any active animations
@@ -301,7 +306,7 @@ class SpectralTableApp {
         this.sinePlasmaActive = false;
 
         // Show generator params UI for supported generators
-        this.controls.updateGeneratorParamsUI(dataSet);
+        this.controls.updateGeneratorParamsUI(dataSet, initialParams);
 
         // Check if it's an uploaded volume
         if (this.uploadedVolumes.has(dataSet)) {

@@ -6,24 +6,43 @@ export class StereoScope {
     private height: number;
 
     public mode: 'lissajous' | 'channels' = 'channels';
+    private titleElement: HTMLElement | null = null;
 
     constructor(containerId: string) {
         this.canvas = document.getElementById(containerId) as HTMLCanvasElement;
 
-        // Add click handler to toggle mode
-        this.canvas.addEventListener('click', () => {
-            this.mode = this.mode === 'lissajous' ? 'channels' : 'lissajous';
-        });
-
         const ctx = this.canvas.getContext('2d');
         if (!ctx) throw new Error('Failed to get 2D context');
         this.ctx = ctx;
+
+        // Find the parent vis-group and its header element
+        const visContent = this.canvas.closest('.vis-content');
+        if (visContent) {
+            const visGroup = visContent.closest('.vis-group');
+            if (visGroup) {
+                this.titleElement = visGroup.querySelector('.vis-header');
+            }
+        }
+        this.updateTitle();
+
+        // Add click handler to toggle mode
+        this.canvas.addEventListener('click', () => {
+            this.mode = this.mode === 'lissajous' ? 'channels' : 'lissajous';
+            this.updateTitle();
+        });
 
         this.width = 320;
         this.height = 160;
         this.resize();
 
         window.addEventListener('resize', () => this.resize());
+    }
+
+    private updateTitle(): void {
+        if (!this.titleElement) return;
+        this.titleElement.textContent = this.mode === 'lissajous'
+            ? 'Vectorscope'
+            : 'Stereo Scope';
     }
 
     private resize(): void {

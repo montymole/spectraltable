@@ -20,9 +20,15 @@ export class EnvelopeEditor {
     // Visual Sustain Duration
     private sustainVisualDuration = 0.5;
 
-    constructor(containerId: string, engine: AudioEngine) {
-        const el = document.getElementById(containerId) as HTMLCanvasElement;
-        if (!el) throw new Error(`Canvas ${containerId} not found`);
+    constructor(containerOrId: string | HTMLCanvasElement, engine: AudioEngine) {
+        let el: HTMLCanvasElement | null = null;
+        if (typeof containerOrId === 'string') {
+            el = document.getElementById(containerOrId) as HTMLCanvasElement;
+        } else {
+            el = containerOrId;
+        }
+
+        if (!el) throw new Error(`Canvas not found`);
         this.canvas = el;
         this.ctx = this.canvas.getContext('2d')!;
         this.engine = engine;

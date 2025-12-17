@@ -197,6 +197,10 @@ export class ControlPanel {
         this.createLFOUnit(0);
         this.createLFOUnit(1);
 
+        // Envelopes Section
+        this.createSection('Envelopes');
+        this.createEnvelopeUI();
+
         // Initialize controls
         this.createSection('Audio Synthesis');
         this.synthModeSelect = this.createSelect('synth-mode', 'Mode', [
@@ -495,6 +499,27 @@ export class ControlPanel {
         this.lfoOffsetDisplays[index] = offsetDisplay;
 
         this.appendControl(wrapper);
+    }
+
+    public envelopeCanvas: HTMLCanvasElement | null = null;
+
+    private createEnvelopeUI(): void {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'control-group';
+        wrapper.style.height = '150px';
+
+        const canvas = document.createElement('canvas');
+        canvas.id = 'envelope-canvas-control';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.style.display = 'block';
+        canvas.style.background = '#08080c';
+        canvas.style.borderRadius = '4px';
+        canvas.style.border = '1px solid var(--border-subtle)';
+
+        wrapper.appendChild(canvas);
+        this.appendControl(wrapper);
+        this.envelopeCanvas = canvas;
     }
 
     private createFrequencySlider(): HTMLInputElement {
