@@ -6,6 +6,43 @@ import { SynthMode } from '../types';
 
 // Processor code for spectral (additive/iFFT) synthesis
 const SPECTRAL_PROCESSOR_CODE = `
+// Band-limiting constants
+const NYQUIST_LIMIT = 0.45;  // 0.45 = 45% of Nyquist (conservative margin)
+const ROLLOFF_MODE = 1;       // 0=hard, 1=smoothstep, 2=cosine, 3=hann
+
+// Rolloff functions: t in [0,1], returns attenuation factor [0,1]
+// t=0 means at limit edge (full signal), t=1 means at Nyquist (zero signal)
+function rolloffHard(t) {
+    return t < 0.001 ? 1.0 : 0.0;
+}
+function rolloffSmoothstep(t) {
+    const x = 1.0 - t;
+    return x * x * (3.0 - 2.0 * x);
+}
+function rolloffCosine(t) {
+    return 0.5 * (1.0 + Math.cos(t * Math.PI));
+}
+function rolloffHann(t) {
+    return 0.5 * (1.0 - Math.cos((1.0 - t) * Math.PI));
+}
+
+function computeRolloff(normalizedFreq, mode) {
+    // normalizedFreq = freq / nyquist, range [0, 1+]
+    if (normalizedFreq <= NYQUIST_LIMIT) return 1.0;
+    if (normalizedFreq >= 1.0) return 0.0;
+    
+    // t: 0 at limit, 1 at nyquist
+    const t = (normalizedFreq - NYQUIST_LIMIT) / (1.0 - NYQUIST_LIMIT);
+    
+    switch (mode) {
+        case 0: return rolloffHard(t);
+        case 1: return rolloffSmoothstep(t);
+        case 2: return rolloffCosine(t);
+        case 3: return rolloffHann(t);
+        default: return rolloffSmoothstep(t);
+    }
+}
+
 class SpectralProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
@@ -27,6 +64,7 @@ class SpectralProcessor extends AudioWorkletProcessor {
         const channelR = output[1];
         
         const numPoints = this.spectralData.length / 4;
+        const nyquist = sampleRate * 0.5;
         
         for (let i = 0; i < channelL.length; i++) {
             let sumL = 0;
@@ -46,8 +84,15 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 const baseFreq = minFreq + (maxFreq - minFreq) * normalizedBin;
                 const freq = baseFreq * this.frequencyMultiplier;
                 
+                // Band-limiting: skip or attenuate bins above Nyquist threshold
+                const normalizedFreq = freq / nyquist;
+                if (normalizedFreq >= 1.0) continue;  // Hard cutoff at Nyquist
+                
+                const rolloffGain = computeRolloff(normalizedFreq, ROLLOFF_MODE);
+                if (rolloffGain < 0.001) continue;  // Skip negligible contributions
+                
                 const db = mag * 60 - 60;
-                const linearMag = Math.pow(10, db / 20);
+                const linearMag = Math.pow(10, db / 20) * rolloffGain;
                 
                 const phaseInc = (freq * 2 * Math.PI) / sampleRate;
                 this.phaseAccumulators[bin] += phaseInc;
