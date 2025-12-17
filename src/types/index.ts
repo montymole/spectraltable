@@ -66,6 +66,13 @@ export enum CarrierType {
     TRIANGLE = 3,
 }
 
+export interface LFOState {
+    waveform: string;
+    frequency: number;
+    amplitude: number;
+    offset: number;
+}
+
 // Generator parameter interfaces
 export interface JuliaParams {
     scale: number;      // 0.5 - 2.0, default 1.2
@@ -100,7 +107,7 @@ export interface GameOfLifeParams {
 export type GeneratorParams = JuliaParams | MandelbulbParams | MengerParams | PlasmaParams | GameOfLifeParams;
 
 // Default generator parameters
-export const defaultJuliaParams: JuliaParams = { scale: 1.2, cReal: -0.4, cImag: 0.6 };
+export const defaultJuliaParams: JuliaParams = { scale: 1.0, cReal: -0.4, cImag: 0.6 };
 export const defaultMandelbulbParams: MandelbulbParams = { power: 8, scale: 1.2, iterations: 12 };
 export const defaultMengerParams: MengerParams = { iterations: 4, scale: 1.0, holeSize: 0.33 };
 export const defaultPlasmaParams: PlasmaParams = { frequency: 3, complexity: 4, contrast: 2.0 };
@@ -120,10 +127,9 @@ export interface PresetControls {
     densityZ: number;
     spectralData: string;
     generatorParams?: GeneratorParams;
-    lfo1: { waveform: string; frequency: number; amplitude: number; offset: number };
-    lfo2: { waveform: string; frequency: number; amplitude: number; offset: number };
+    lfos: { waveform: string; frequency: number; amplitude: number; offset: number }[];
+    envelopes: { attack: number; decay: number; sustain: number; release: number }[];
     modRouting: { pathY: string; scanPhase: string; shapePhase: string };
-    envelope: { attack: number; decay: number; sustain: number; release: number };
     octave: number;
 }
 

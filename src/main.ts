@@ -46,8 +46,11 @@ class SpectralTableApp {
     private sinePlasmaLastUpdate = 0;
 
     // Modulation Logic
-    private lfo1: LFO;
-    private lfo2: LFO;
+    private lfos: LFO[] = [
+        new LFO(0.5),
+        new LFO(0.5),
+        new LFO(0.5)
+    ];
     private pathYSource: string = 'none'; // 'none', 'lfo1', 'lfo2'
     private scanPhaseSource: string = 'none';
     private shapePhaseSource: string = 'none';
@@ -70,7 +73,9 @@ class SpectralTableApp {
         this.renderer = new Renderer(this.glContext, defaultResolution);
 
         // Initialize UI controls
-        this.controls = new ControlPanel('controls');
+        this.controls = new ControlPanel('controls', {
+            lfos: this.lfos,
+        });
 
         // Create Spectrogram and Scope
         this.spectrogram = new Spectrogram('spectrogram-canvas');
@@ -78,10 +83,6 @@ class SpectralTableApp {
 
         // Initialize Audio Engine
         this.audioEngine = new AudioEngine();
-
-        // Initialize LFOs
-        this.lfo1 = new LFO(0.5);
-        this.lfo2 = new LFO(0.5);
 
         // Initialize envelope editor logic
         const envCanvas = this.controls.envelopeCanvas;
@@ -148,7 +149,8 @@ class SpectralTableApp {
 
         // LFO Wiring
         this.controls.setLFOParamChangeCallback((index, param, value) => {
-            const lfo = index === 0 ? this.lfo1 : this.lfo2;
+            const lfo = this.lfos[index];
+            if (!lfo) return;   // Invalid index
             if (param === 'waveform') lfo.setWaveform(value as LFOWaveform);
             if (param === 'frequency') lfo.setFrequency(value);
             if (param === 'amplitude') lfo.setAmplitude(value);
@@ -223,15 +225,13 @@ class SpectralTableApp {
         this.controls.applyState(state);
 
         // Apply to LFOs
-        this.lfo1.setWaveform(state.lfo1.waveform as any);
-        this.lfo1.setFrequency(state.lfo1.frequency);
-        this.lfo1.setAmplitude(state.lfo1.amplitude);
-        this.lfo1.setOffset(state.lfo1.offset);
-
-        this.lfo2.setWaveform(state.lfo2.waveform as any);
-        this.lfo2.setFrequency(state.lfo2.frequency);
-        this.lfo2.setAmplitude(state.lfo2.amplitude);
-        this.lfo2.setOffset(state.lfo2.offset);
+        this.lfos.forEach((lfo, index) => {
+            if (!state.lfos || index >= state.lfos.length) return;
+            lfo.setWaveform(state.lfos[index].waveform as any);
+            lfo.setFrequency(state.lfos[index].frequency);
+            lfo.setAmplitude(state.lfos[index].amplitude);
+            lfo.setOffset(state.lfos[index].offset);
+        });
 
         // Apply modulation routing
         this.pathYSource = state.modRouting.pathY;
@@ -244,11 +244,13 @@ class SpectralTableApp {
         this.audioEngine.setCarrier(state.carrier);
         this.audioEngine.setFeedback(state.feedback);
 
-        // Apply envelope
-        this.audioEngine.attack = state.envelope.attack;
-        this.audioEngine.decay = state.envelope.decay;
-        this.audioEngine.sustain = state.envelope.sustain;
-        this.audioEngine.release = state.envelope.release;
+        // Apply amp envelope (always first envelope)
+        if (state.envelopes?.[0]) {
+            this.audioEngine.attack = state.envelopes[0].attack;
+            this.audioEngine.decay = state.envelopes[0].decay;
+            this.audioEngine.sustain = state.envelopes[0].sustain;
+            this.audioEngine.release = state.envelopes[0].release;
+        }
 
         // Apply piano octave
         this.piano.setBaseOctave(state.octave);
@@ -532,29 +534,21 @@ class SpectralTableApp {
                 }
             }
 
-            // LFO Updates
-            const lfo1Out = this.lfo1.update(deltaTime);
-            const lfo2Out = this.lfo2.update(deltaTime);
-
-            // Modulation
-            if (this.pathYSource !== 'none') {
-                const val = this.pathYSource === 'lfo1' ? lfo1Out : lfo2Out;
-                this.controls.updatePathY(val);
-            }
-
-            if (this.scanPhaseSource !== 'none') {
-                const val = this.scanPhaseSource === 'lfo1' ? lfo1Out : lfo2Out;
-                this.controls.updateScanPosition(val);
-            }
-
-            if (this.shapePhaseSource !== 'none') {
-                const val = this.shapePhaseSource === 'lfo1' ? lfo1Out : lfo2Out;
-                // Since we don't have a slider for shape phase, we update renderer directly
-                // We merge with current controls state to prevent overwriting other params
-                const state = this.controls.getState();
-                state.shapePhase = val;
-                this.renderer.updateReadingPath(state);
-            }
+            // LFO modulation update
+            this.lfos.forEach((lfo, index) => {
+                const lfoOut = lfo.update(deltaTime);
+                if (this.pathYSource === `lfo${index + 1}`) {
+                    this.controls.updatePathY(lfoOut);
+                }
+                if (this.scanPhaseSource === `lfo${index + 1}`) {
+                    this.controls.updateScanPosition(lfoOut);
+                }
+                if (this.shapePhaseSource === `lfo${index + 1}`) {
+                    const state = this.controls.getState();
+                    state.shapePhase = lfoOut;
+                    this.renderer.updateReadingPath(state);
+                }
+            });
 
             this.renderer.render(deltaTime);
 

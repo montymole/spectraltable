@@ -1,3 +1,4 @@
+import { LFO } from '../modulators/lfo';
 import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType, PlaneType,
     VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT,
@@ -5,7 +6,7 @@ import {
     VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
     defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
-    PresetControls, PresetData
+    PresetControls, LFOState
 } from '../types';
 import { PresetManager } from './preset-manager';
 
@@ -73,10 +74,13 @@ export class ControlPanel {
     private onPresetLoad: ((controls: PresetControls) => void) | null = null;
 
     // LFO state for serialization
-    private lfoState = [
+    private lfoLabels: string[] = ['None'];
+    private lfoState: LFOState[] = []
+    /*
+        { waveform: 'sine', frequency: 0.5, amplitude: 0.5, offset: 0 },
         { waveform: 'sine', frequency: 0.5, amplitude: 0.5, offset: 0 },
         { waveform: 'sine', frequency: 0.5, amplitude: 0.5, offset: 0 }
-    ];
+    ];*/
     private modRoutingState = { pathY: 'none', scanPhase: 'none', shapePhase: 'none' };
     private octaveValue = 3;
 
@@ -97,8 +101,18 @@ export class ControlPanel {
     private scanPhaseSourceSelect: HTMLSelectElement | null = null;
     private shapePhaseSourceSelect: HTMLSelectElement | null = null;
 
-    constructor(containerId: string) {
+    constructor(containerId: string, options: { lfos: LFO[] }) {
         const el = document.getElementById(containerId);
+        this.lfoState = options.lfos.map((lfo, index) => {
+            const label = `LFO ${index + 1}`;
+            this.lfoLabels.push(label);
+            return {
+                waveform: lfo.waveform,
+                frequency: lfo.frequency,
+                amplitude: lfo.amplitude,
+                offset: lfo.offset
+            };
+        });
         if (!el) throw new Error(`Container not found: ${containerId}`);
         this.container = el;
 
@@ -162,10 +176,10 @@ export class ControlPanel {
         shapePhaseSelect.style.marginLeft = 'auto';
         shapePhaseSelect.style.fontSize = '0.7rem';
 
-        ['None', 'LFO 1', 'LFO 2'].forEach(opt => {
+        this.lfoLabels.forEach((label) => {
             const option = document.createElement('option');
-            option.value = opt.toLowerCase().replace(' ', '');
-            option.textContent = opt;
+            option.value = label.toLowerCase().replace(' ', '');
+            option.textContent = label;
             shapePhaseSelect.appendChild(option);
         });
 
@@ -194,8 +208,9 @@ export class ControlPanel {
 
         // LFO Section
         this.createSection('LFOs');
-        this.createLFOUnit(0);
-        this.createLFOUnit(1);
+        this.lfoState.forEach((lfo, index) => {
+            this.createLFOUnit(index);
+        })
 
         // Envelopes Section
         this.createSection('Envelopes');
@@ -340,9 +355,9 @@ export class ControlPanel {
         sourceSelect.style.fontSize = '0.7rem';
         sourceSelect.style.padding = '2px';
 
-        ['None', 'LFO 1', 'LFO 2'].forEach(opt => {
+        this.lfoLabels.forEach(opt => {
             const option = document.createElement('option');
-            option.value = opt.toLowerCase().replace(' ', ''); // none, lfo1, lfo2
+            option.value = opt.toLowerCase().replace(' ', '');
             option.textContent = opt;
             if (opt === 'None') option.selected = true;
             sourceSelect.appendChild(option);
