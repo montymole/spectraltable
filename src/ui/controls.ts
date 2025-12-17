@@ -586,6 +586,7 @@ export class ControlPanel {
         group.appendChild(select);
         this.appendControl(group);
 
+        this.carrierContainer = group;
         return select;
     }
 
@@ -629,6 +630,7 @@ export class ControlPanel {
         group.appendChild(slider);
         this.appendControl(group);
 
+        this.feedbackContainer = group;
         return slider;
     }
 

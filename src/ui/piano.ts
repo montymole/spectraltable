@@ -7,8 +7,8 @@ export class PianoKeyboard {
     // Callbacks
     private onNoteChange: ((note: number, velocity: number) => void) | null = null;
 
-    // Range: Defaults to 3 Octaves
-    private numOctaves = 3;
+    // Range: Defaults to 5 Octaves
+    private numOctaves = 5;
     private baseOctave = 3; // Starts at C3
     private startNote = 36;
     private endNote = 72;
