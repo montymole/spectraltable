@@ -479,7 +479,7 @@ class SpectralTableApp {
 
     private onResize(): void {
         const rect = this.canvas.getBoundingClientRect();
-        this.renderer.resize(rect.width, rect.height);
+        this.renderer.resize(rect.width, rect.width);
     }
 
     private onMouseDown(event: MouseEvent): void {

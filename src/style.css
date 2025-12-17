@@ -35,93 +35,61 @@ body {
 
 #app {
   width: 100vw;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
+  height: 90vh;
+  overflow: hidden;
 }
 
 /* --- Layout --- */
 
 /* Main canvas container (GL + Spectrograms) */
 #canvas-container {
-  display: flex;
-  flex-direction: row;
   height: 90vh;
-  /* Leave 10vh for piano */
-  width: 100%;
 }
 
 #left-panel {
   width: 30vh;
-  /* (100vh - 10vh piano) / 3 = 30vh for squares */
-  height: 100%;
-  position: relative;
-  border-right: 1px solid var(--border-subtle);
-  display: flex;
-  flex-direction: column;
 }
 
 #right-panel {
-  flex: 1;
-  /* Take remaining width */
+  position: absolute;
+  left: 30vh;
+  top: 0;
+  overflow: scroll;
+  height: 90vh;
+  width: calc(100% - 30vh);
   display: flex;
-  flex-direction: column;
-}
-
-/* Visualization Canvas */
-#gl-canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-  background: radial-gradient(circle at center, #14141c 0%, #050508 100%);
-}
-
-/* Removed #spectrogram-container */
-
-#spectrogram-canvas,
-#scope-canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
 }
 
 /* Visualization Grouping */
 .vis-group {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  flex: 1;
-  /* Equal height */
-  min-height: 0;
-  /* Allow shrinking */
-  border-bottom: 1px solid var(--border-subtle);
-  overflow: hidden;
+  width: 30vh;
+  height: 30vh;
+  display: block;
+  position: relative;
 }
 
-.vis-group:last-child {
-  border-bottom: none;
+.vis-group canvas {
+  width: 100%;
+  height: 100%;
 }
 
 .vis-header {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 1rem;
   font-family: var(--font-header);
-  font-size: 0.7rem;
+  transform: rotate(-90deg);
+  transform-origin: center left;
+  font-size: 1rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--text-tertiary);
-  padding: 0.75rem 1rem 0.25rem 1rem;
-  background: #08080c;
-  /* Match container */
+  color: var(--text-secondary);
+  text-shadow: 0 0 4px var(--bg-primary);
 }
 
 .vis-content {
-  padding: 0;
-  /* Removed padding for tighter fit */
-  width: 100%;
-  position: relative;
-  flex: 1;
-  display: flex;
-  /* Ensure canvas fills it */
+  border: 1px solid var(--border-subtle);
 }
 
 /* Update GL Canvas radius */
@@ -145,18 +113,6 @@ body {
 }
 
 /* --- Controls Styling --- */
-
-/* Control Card */
-.control-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 1rem;
-  /* margin-bottom removed for grid gap */
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
 
 /* Section Titles */
 .control-section-title {
@@ -344,8 +300,9 @@ body {
 #piano-container {
   width: 100%;
   height: 10vh;
+  bottom: 0;
   background: #111;
-  position: relative;
+  position: fixed;
   z-index: 100;
   border-top: 1px solid var(--border-subtle);
   box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.5);
