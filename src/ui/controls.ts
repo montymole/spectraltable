@@ -120,10 +120,6 @@ export class ControlPanel {
         this.presetManager = new PresetManager();
         this.presetManager.setPresetsChangeCallback(() => this.updatePresetDropdown());
 
-        // Create preset section first
-        this.createSection('Presets');
-        this.createPresetUI();
-
         this.createSection('Wave/Spectral Volume');
         this.spectralDataSelect = this.createSelect('spectral-data-type', 'Data Set', [
             'blank',
@@ -200,21 +196,10 @@ export class ControlPanel {
         shapePhaseGroup.appendChild(spLabelRow);
         this.appendControl(shapePhaseGroup);
 
-        // Speed slider removed
 
         const scanPosControl = this.createModulatableSlider('scan-pos', 'Scan Phase', -1, 1, 0, 0.01, 'scanPhase');
         this.scanPositionSlider = scanPosControl.slider;
         this.scanPhaseSourceSelect = scanPosControl.select;
-
-        // LFO Section
-        this.createSection('LFOs');
-        this.lfoState.forEach((lfo, index) => {
-            this.createLFOUnit(index);
-        })
-
-        // Envelopes Section
-        this.createSection('Envelopes');
-        this.createEnvelopeUI();
 
         // Initialize controls
         this.createSection('Audio Synthesis');
@@ -228,10 +213,24 @@ export class ControlPanel {
         this.midiSelect = this.createMidiSelect();
         this.createOctaveSelect();
 
+        // LFO Section
+        this.createSection('LFOs');
+        this.lfoState.forEach((lfo, index) => {
+            this.createLFOUnit(index);
+        })
+
+        // Envelopes Section
+        this.createSection('Envelopes');
+        this.createEnvelopeUI();
+
         this.createSection('Visualization');
         this.densityXSlider = this.createSlider('density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1);
         this.densityYSlider = this.createSlider('density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1);
         this.densityZSlider = this.createSlider('density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1);
+
+        // Create preset section first
+        this.createSection('Presets');
+        this.createPresetUI();
 
         this.wireUpEvents();
     }
@@ -252,7 +251,7 @@ export class ControlPanel {
     }
 
     private appendControl(element: HTMLElement): void {
-        (this.currentSectionContainer || this.container).appendChild(element);
+        (this.currentSectionContainer || this.container).prepend(element);
     }
 
     private createSlider(

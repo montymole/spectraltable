@@ -17,7 +17,6 @@ import { ReadingPathGeometry } from './reading-path';
 import {
     VolumeResolution, ReadingPathState, PlaneType,
     JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
-    defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
     GeneratorParams
 } from '../types';
 
@@ -56,6 +55,12 @@ export class Renderer {
     private lineUColor: WebGLUniformLocation;
     private lineVertexCount = 0; // Added this property
 
+    // Axes rendering
+    private axesVAO: WebGLVertexArrayObject | null = null;
+    private axesCounts: [number, number, number] = [0, 0, 0]; // Vertex counts for X, Y, Z axes
+    private axesUMVP: WebGLUniformLocation;
+    private axesUColor: WebGLUniformLocation;
+
     // State
     private spectralVolume: SpectralVolume;
     private pathState: ReadingPathState = {
@@ -88,6 +93,11 @@ export class Renderer {
         this.wireframeUMVP = wireMVP;
         this.wireframeUColor = wireColor;
         this.wireframeVAO = this.createWireframeCube();
+
+        // Axes shaders (reuse wireframe)
+        this.axesUMVP = wireMVP;
+        this.axesUColor = wireColor;
+        this.updateAxesGeometry();
 
         // Compile point cloud shaders
         this.pointProgram = this.createProgram(pointVertexShader, pointFragmentShader);
@@ -131,6 +141,212 @@ export class Renderer {
         this.updateReadingPathGeometry();
 
         console.log('✓ Renderer initialized');
+    }
+
+    private generateCharGeometry(char: string, x: number, y: number, z: number, scale: number): number[] {
+        // Simple vector font
+        // Returns [x1, y1, z1, x2, y2, z2, ...]
+        const lines: number[] = [];
+        const s = scale;
+
+        // Helper to add line
+        const l = (x1: number, y1: number, x2: number, y2: number) => {
+            lines.push(x + x1 * s, y + y1 * s, z);
+            lines.push(x + x2 * s, y + y2 * s, z);
+        };
+
+        // 5x7 grid concept (approx)
+        switch (char.toUpperCase()) {
+            case 'T':
+                l(0, 2, 2, 2); // Top bar
+                l(1, 2, 1, 0); // Vertical
+                break;
+            case 'I':
+                l(1, 2, 1, 0);
+                break;
+            case 'M':
+                l(0, 0, 0, 2); // Left
+                l(2, 0, 2, 2); // Right
+                l(0, 2, 1, 1); // Diag
+                l(1, 1, 2, 2); // Diag
+                break;
+            case 'E':
+                l(0, 2, 2, 2); // Top
+                l(0, 1, 1.5, 1); // Mid
+                l(0, 0, 2, 0); // Bot
+                l(0, 0, 0, 2); // Vert
+                break;
+            case 'O':
+                l(0, 0, 2, 0); l(2, 0, 2, 2); l(2, 2, 0, 2); l(0, 2, 0, 0);
+                break;
+            case 'R':
+                l(0, 0, 0, 2); // Vert
+                l(0, 2, 2, 2); l(2, 2, 2, 1); l(2, 1, 0, 1); // Head
+                l(0, 1, 2, 0); // Leg
+                break;
+            case 'P':
+                l(0, 0, 0, 2);
+                l(0, 2, 2, 2); l(2, 2, 2, 1); l(2, 1, 0, 1);
+                break;
+            case 'H':
+                l(0, 0, 0, 2); l(2, 0, 2, 2); l(0, 1, 2, 1);
+                break;
+            case 'A':
+                l(0, 0, 0, 1.5); // Right leg (bottom to mid)
+                l(2, 0, 2, 1.5); // Left leg
+                l(0, 1.5, 1, 2); // Left slope
+                l(2, 1.5, 1, 2); // Right slope
+                l(0, 1, 2, 1);   // Crossbar
+                break;
+            case 'B':
+                l(0, 0, 0, 2);
+                l(0, 2, 1.5, 2); l(1.5, 2, 2, 1.5); l(2, 1.5, 1.5, 1); l(1.5, 1, 0, 1); // Top loop
+                l(0, 1, 1.5, 1); l(1.5, 1, 2, 0.5); l(2, 0.5, 1.5, 0); l(1.5, 0, 0, 0); // Bot loop
+                break;
+            case 'N':
+                l(0, 0, 0, 2); l(2, 0, 2, 2); l(0, 2, 2, 0);
+                break;
+            case 'S':
+                l(2, 2, 0, 2); l(0, 2, 0, 1); l(0, 1, 2, 1); l(2, 1, 2, 0); l(2, 0, 0, 0);
+                break;
+        }
+        return lines;
+    }
+
+    // Generate text geometry on a specific plane alignment
+    private generateTextString(text: string, startX: number, startY: number, startZ: number, scale: number, axis: 'x' | 'y' | 'z'): number[] {
+        const vertices: number[] = [];
+        let cursor = 0;
+
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+
+            // Adjust cursor mapping based on axis
+            let lx = startX, ly = startY, lz = startZ;
+
+            if (axis === 'x') {
+                lx += cursor;
+                // For X axis label, we want it reading from left to right along X?
+                // Or facing the camera? Let's just lay it flat next to the axis.
+                // Text along X, Up is Y.
+                // generateCharGeometry assumes X is horizontal char width, Y is vertical char height.
+                // So default works for X.
+                const newVerts = this.generateCharGeometry(char, lx, ly, lz, scale);
+                vertices.push(...newVerts);
+                cursor += scale * 3.0; // Spacing
+            } else if (axis === 'y') {
+                // Vertical text?
+                // Let's stack letters.
+                ly += cursor;
+                const newVerts = this.generateCharGeometry(char, lx, ly, lz, scale);
+                vertices.push(...newVerts);
+                cursor += scale * 3.0; // Up
+            } else {
+                lz += cursor;
+                // On Z axis
+                // Need to rotate logic of char gen, but let's cheat by swapping coords in buffer
+                const charPoints = this.generateCharGeometry(char, 0, ly, 0, scale);
+                // Swap X (char horizontal) to Z
+                for (let k = 0; k < charPoints.length; k += 3) {
+                    vertices.push(
+                        lx,                 // X fixed
+                        charPoints[k + 1],    // Y same
+                        lz + charPoints[k]  // X maps to Z
+                    );
+                }
+                cursor += scale * 3.0;
+            }
+        }
+        return vertices;
+    }
+
+    private updateAxesGeometry(): void {
+        const gl = this.ctx.gl;
+        if (this.axesVAO) gl.deleteVertexArray(this.axesVAO);
+
+        const vertices: number[] = [];
+
+        // Define origins and lengths
+        const origin = -1.2;
+        const length = 1.0;
+        const arrowSize = 0.05;
+
+        // --- X AXIS (BINS) ---
+        // Line
+        const xStart = vertices.length / 3;
+        vertices.push(origin, origin, origin); // Start
+        vertices.push(origin + length, origin, origin); // End
+
+        // Arrowhead
+        const tipX = origin + length;
+        vertices.push(tipX, origin, origin, tipX - arrowSize, origin + arrowSize, origin);
+        vertices.push(tipX, origin, origin, tipX - arrowSize, origin - arrowSize, origin);
+        vertices.push(tipX, origin, origin, tipX - arrowSize, origin, origin + arrowSize);
+        vertices.push(tipX, origin, origin, tipX - arrowSize, origin, origin - arrowSize);
+
+        // Label "BINS"
+        // Place along X, slightly below
+        const labelX = this.generateTextString("BINS", origin + 0.2, origin - 0.2, origin, 0.05, 'x');
+        vertices.push(...labelX);
+
+        const xCount = (vertices.length / 3) - xStart;
+
+        // --- Y AXIS (MORPH) ---
+        const yStart = vertices.length / 3;
+        // Line
+        vertices.push(origin, origin, origin);
+        vertices.push(origin, origin + length, origin);
+
+        // Arrowhead
+        const tipY = origin + length;
+        vertices.push(origin, tipY, origin, origin + arrowSize, tipY - arrowSize, origin);
+        vertices.push(origin, tipY, origin, origin - arrowSize, tipY - arrowSize, origin);
+        vertices.push(origin, tipY, origin, origin, tipY - arrowSize, origin + arrowSize);
+        vertices.push(origin, tipY, origin, origin, tipY - arrowSize, origin - arrowSize);
+
+        // Label "MORPH"
+        // Place along Y
+        const labelY = this.generateTextString("MORPH", origin - 0.2, origin + 0.2, origin, 0.05, 'y');
+        vertices.push(...labelY);
+
+        const yCount = (vertices.length / 3) - yStart;
+
+        // --- Z AXIS (TIME) ---
+        const zStart = vertices.length / 3;
+        // Line
+        vertices.push(origin, origin, origin);
+        vertices.push(origin, origin, origin + length);
+
+        // Arrowhead
+        const tipZ = origin + length;
+        vertices.push(origin, origin, tipZ, origin + arrowSize, origin, tipZ - arrowSize);
+        vertices.push(origin, origin, tipZ, origin - arrowSize, origin, tipZ - arrowSize);
+        vertices.push(origin, origin, tipZ, origin, origin + arrowSize, tipZ - arrowSize);
+        vertices.push(origin, origin, tipZ, origin, origin - arrowSize, tipZ - arrowSize);
+
+        // Label "PHASE"
+        const labelZ = this.generateTextString("PHASE", origin - 0.2, origin, origin + 0.2, 0.05, 'z');
+        vertices.push(...labelZ);
+
+        const zCount = (vertices.length / 3) - zStart;
+
+        this.axesCounts = [xCount, yCount, zCount];
+
+        // Create buffers
+        const vao = gl.createVertexArray();
+        if (!vao) throw new Error("Failed axes VAO");
+        gl.bindVertexArray(vao);
+
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+        const posLoc = gl.getAttribLocation(this.wireframeProgram, 'aPosition');
+        gl.enableVertexAttribArray(posLoc);
+        gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindVertexArray(null);
+        this.axesVAO = vao;
     }
 
     private createProgram(vertexSrc: string, fragmentSrc: string): WebGLProgram {
@@ -354,6 +570,33 @@ export class Renderer {
 
         const viewModel = mat4Multiply(view, model);
         const cameraMVP = mat4Multiply(projection, viewModel);
+
+        // 1. Draw Axis Explanations (Time, Morph, Bins)
+        // These share the same MVP as the cube so they rotate with it
+        if (this.axesVAO) {
+            gl.useProgram(this.wireframeProgram);
+            gl.uniformMatrix4fv(this.axesUMVP, false, cameraMVP);
+            gl.bindVertexArray(this.axesVAO);
+
+            let offset = 0;
+            const [cx, cy, cz] = this.axesCounts;
+
+            // X (Bins) - Cyan/Red
+            gl.uniform3f(this.axesUColor, 1.0, 0.3, 0.3); // Red
+            gl.drawArrays(gl.LINES, offset, cx);
+            offset += cx;
+
+            // Y (Morph) - Green
+            gl.uniform3f(this.axesUColor, 0.3, 1.0, 0.3); // Green
+            gl.drawArrays(gl.LINES, offset, cy);
+            offset += cy;
+
+            // Z (Time) - Blue
+            gl.uniform3f(this.axesUColor, 0.4, 0.4, 1.0); // Blue
+            gl.drawArrays(gl.LINES, offset, cz);
+
+            gl.bindVertexArray(null);
+        }
 
         // 1. Draw Point Cloud
         if (this.pointVAO) {
