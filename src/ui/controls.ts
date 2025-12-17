@@ -311,7 +311,6 @@ export class ControlPanel {
 
         const select = document.createElement('select');
         select.id = id;
-        select.className = 'select';
 
         for (const option of options) {
             const optEl = document.createElement('option');
@@ -425,7 +424,6 @@ export class ControlPanel {
 
         // Waveform
         const waveSelect = document.createElement('select');
-        waveSelect.className = 'select';
         ['Sine', 'Square', 'Saw', 'Triangle'].forEach(w => {
             const opt = document.createElement('option');
             opt.value = w.toLowerCase();
@@ -595,7 +593,6 @@ export class ControlPanel {
 
         const select = document.createElement('select');
         select.id = 'carrier';
-        select.className = 'select';
 
         const options = [
             { value: '0', label: 'Sine' },
@@ -683,7 +680,6 @@ export class ControlPanel {
 
         const select = document.createElement('select');
         select.id = 'midi-input';
-        select.className = 'select';
 
         // Default option
         const defaultOpt = document.createElement('option');
@@ -836,7 +832,6 @@ export class ControlPanel {
 
         const select = document.createElement('select');
         select.id = 'preset-select';
-        select.className = 'select';
 
         const defaultOpt = document.createElement('option');
         defaultOpt.value = '';

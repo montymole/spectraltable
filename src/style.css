@@ -154,6 +154,7 @@ body {
   align-items: baseline;
 }
 
+.lfo-unit label,
 .control-group label {
   font-size: 0.6rem;
   font-weight: 500;
@@ -208,11 +209,13 @@ body {
 }
 
 /* Selects */
-.select {
+select {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
-  padding: 8px 10px;
+  padding: 4px 8px;
   background: rgba(255, 255, 255, 0.03);
-  color: var(--text-primary);
+  color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   font-family: var(--font-sans);
@@ -222,12 +225,12 @@ body {
   transition: all 0.2s;
 }
 
-.select:hover {
+select:hover {
   border-color: rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.06);
 }
 
-.select:focus {
+select:focus {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
