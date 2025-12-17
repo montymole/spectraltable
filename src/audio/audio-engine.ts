@@ -43,15 +43,44 @@ function computeRolloff(normalizedFreq, mode) {
     }
 }
 
+// Interpolation: intermediate samples between spectral frame transitions
+// 0 = OFF (instant update, may cause rattling on sudden changes)
+// 1 = 1 intermediate sample, 2 = 2 intermediate samples, etc.
+// 128 ≈ 2.9ms at 44.1kHz, good balance for most use cases
+const INTERP_SAMPLES = 128;
+
 class SpectralProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
-        this.spectralData = new Float32Array(1024 * 4); // RGBA
-        this.phaseAccumulators = new Float32Array(1024); // For oscillator bank
+        // Current working spectral data (interpolated)
+        this.spectralData = new Float32Array(1024 * 4);
+        // Previous frame (start of interpolation)
+        this.prevData = new Float32Array(1024 * 4);
+        // Target frame (end of interpolation)  
+        this.targetData = new Float32Array(1024 * 4);
+        
+        this.phaseAccumulators = new Float32Array(1024);
         this.frequencyMultiplier = 1.0;
+        
+        // Interpolation state: 0 = at prev, 1 = at target
+        this.interpT = 1.0;
+        // N intermediate samples means N+1 total steps to reach target
+        this.interpStep = INTERP_SAMPLES > 0 ? 1.0 / (INTERP_SAMPLES + 1) : 1.0;
+        
         this.port.onmessage = (e) => {
             if (e.data.type === 'spectral-data') {
-                this.spectralData = e.data.data;
+                if (INTERP_SAMPLES === 0) {
+                    // No interpolation - instant update
+                    this.spectralData.set(e.data.data);
+                    this.targetData.set(e.data.data);
+                } else {
+                    // Snapshot current state as previous
+                    this.prevData.set(this.spectralData);
+                    // New incoming data is target
+                    this.targetData.set(e.data.data);
+                    // Reset interpolation
+                    this.interpT = 0.0;
+                }
             } else if (e.data.type === 'frequency-multiplier') {
                 this.frequencyMultiplier = e.data.value;
             }
@@ -67,6 +96,19 @@ class SpectralProcessor extends AudioWorkletProcessor {
         const nyquist = sampleRate * 0.5;
         
         for (let i = 0; i < channelL.length; i++) {
+            // Per-sample interpolation advance (skip if disabled)
+            if (INTERP_SAMPLES > 0 && this.interpT < 1.0) {
+                this.interpT += this.interpStep;
+                if (this.interpT > 1.0) this.interpT = 1.0;
+                
+                // Lerp all spectral data values
+                const t = this.interpT;
+                const invT = 1.0 - t;
+                for (let j = 0; j < this.spectralData.length; j++) {
+                    this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
+                }
+            }
+            
             let sumL = 0;
             let sumR = 0;
             
@@ -127,10 +169,16 @@ registerProcessor('spectral-processor', SpectralProcessor);
 // Magnitude 0 = silence, Magnitude 1 = full carrier amplitude
 // Feedback: previous output mixed back into carrier for evolving timbres
 const WAVETABLE_PROCESSOR_CODE = `
+// Same interpolation setting as SpectralProcessor
+// 0 = OFF (instant), N = N intermediate samples between frames
+const INTERP_SAMPLES = 128;
+
 class WavetableProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
-        this.envelope = new Float32Array(1024); // Amplitude envelope from reading line
+        this.envelope = new Float32Array(1024);     // Current interpolated envelope
+        this.prevEnvelope = new Float32Array(1024); // Previous envelope
+        this.targetEnvelope = new Float32Array(1024); // Target envelope
         this.envelopeSize = 64;
         this.phase = 0;           // Carrier phase (0-1)
         this.envPhase = 0;        // Envelope read position (0-1)
@@ -138,6 +186,10 @@ class WavetableProcessor extends AudioWorkletProcessor {
         this.carrierType = 0;     // 0=sine, 1=saw, 2=square, 3=triangle
         this.feedback = 0;        // Feedback amount 0-1
         this.lastSample = 0;      // Previous output for feedback
+        
+        // Interpolation state
+        this.interpT = 1.0;
+        this.interpStep = INTERP_SAMPLES > 0 ? 1.0 / (INTERP_SAMPLES + 1) : 1.0;
         
         this.port.onmessage = (e) => {
             if (e.data.type === 'spectral-data') {
@@ -152,8 +204,23 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 }
                 
                 const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
-                for (let i = 0; i < numPoints; i++) {
-                    this.envelope[i] = data[i * 4] * scale;
+                
+                if (INTERP_SAMPLES === 0) {
+                    // No interpolation - instant update
+                    for (let i = 0; i < numPoints; i++) {
+                        this.envelope[i] = data[i * 4] * scale;
+                        this.targetEnvelope[i] = this.envelope[i];
+                    }
+                } else {
+                    // Snapshot current envelope as previous
+                    this.prevEnvelope.set(this.envelope);
+                    
+                    for (let i = 0; i < numPoints; i++) {
+                        this.targetEnvelope[i] = data[i * 4] * scale;
+                    }
+                    
+                    // Reset interpolation
+                    this.interpT = 0.0;
                 }
             } else if (e.data.type === 'frequency') {
                 this.frequency = e.data.value;
@@ -200,6 +267,18 @@ class WavetableProcessor extends AudioWorkletProcessor {
         const envPhaseInc = carrierPhaseInc;
         
         for (let i = 0; i < channelL.length; i++) {
+            // Per-sample interpolation advance (skip if disabled)
+            if (INTERP_SAMPLES > 0 && this.interpT < 1.0) {
+                this.interpT += this.interpStep;
+                if (this.interpT > 1.0) this.interpT = 1.0;
+                
+                const t = this.interpT;
+                const invT = 1.0 - t;
+                for (let j = 0; j < this.envelopeSize; j++) {
+                    this.envelope[j] = this.prevEnvelope[j] * invT + this.targetEnvelope[j] * t;
+                }
+            }
+            
             // Get base carrier sample
             let carrierSample = this.carrier(this.phase, this.carrierType);
             
