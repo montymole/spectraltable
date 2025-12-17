@@ -8,7 +8,7 @@ import { SynthMode } from '../types';
 const SPECTRAL_PROCESSOR_CODE = `
 // Band-limiting constants
 const NYQUIST_LIMIT = 0.45;  // 0.45 = 45% of Nyquist (conservative margin)
-const ROLLOFF_MODE = 1;       // 0=hard, 1=smoothstep, 2=cosine, 3=hann
+const ROLLOFF_MODE = 2;       // 0=hard, 1=smoothstep, 2=cosine, 3=hann
 
 // Rolloff functions: t in [0,1], returns attenuation factor [0,1]
 // t=0 means at limit edge (full signal), t=1 means at Nyquist (zero signal)
@@ -46,7 +46,7 @@ function computeRolloff(normalizedFreq, mode) {
 // Interpolation: intermediate samples between spectral frame transitions
 // 0 = OFF (instant update, may cause rattling on sudden changes)
 // 1 = 1 intermediate sample, 2 = 2 intermediate samples, etc.
-const INTERP_SAMPLES = 32;
+const INTERP_SAMPLES = 64;
 
 class SpectralProcessor extends AudioWorkletProcessor {
     constructor() {
