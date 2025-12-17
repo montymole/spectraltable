@@ -8,7 +8,7 @@ import { SynthMode } from '../types';
 const SPECTRAL_PROCESSOR_CODE = `
 // Band-limiting constants
 const NYQUIST_LIMIT = 0.45;  // 0.45 = 45% of Nyquist (conservative margin)
-const ROLLOFF_MODE = 1;       // 0=hard, 1=smoothstep, 2=cosine, 3=hann
+const ROLLOFF_MODE = 2;       // 0=hard, 1=smoothstep, 2=cosine, 3=hann
 
 // Rolloff functions: t in [0,1], returns attenuation factor [0,1]
 // t=0 means at limit edge (full signal), t=1 means at Nyquist (zero signal)
@@ -46,8 +46,7 @@ function computeRolloff(normalizedFreq, mode) {
 // Interpolation: intermediate samples between spectral frame transitions
 // 0 = OFF (instant update, may cause rattling on sudden changes)
 // 1 = 1 intermediate sample, 2 = 2 intermediate samples, etc.
-// 128 ≈ 2.9ms at 44.1kHz, good balance for most use cases
-const INTERP_SAMPLES = 128;
+const INTERP_SAMPLES = 64;
 
 class SpectralProcessor extends AudioWorkletProcessor {
     constructor() {
@@ -59,7 +58,15 @@ class SpectralProcessor extends AudioWorkletProcessor {
         // Target frame (end of interpolation)  
         this.targetData = new Float32Array(1024 * 4);
         
+        // Phase accumulator per bin - runs continuously, never reset
         this.phaseAccumulators = new Float32Array(1024);
+        
+        // Per-bin phase offset targets (from spectral data)
+        // We interpolate toward these to avoid discontinuities
+        this.prevPhaseOffsets = new Float32Array(1024);
+        this.targetPhaseOffsets = new Float32Array(1024);
+        this.currentPhaseOffsets = new Float32Array(1024);
+        
         this.frequencyMultiplier = 1.0;
         
         // Interpolation state: 0 = at prev, 1 = at target
@@ -69,15 +76,30 @@ class SpectralProcessor extends AudioWorkletProcessor {
         
         this.port.onmessage = (e) => {
             if (e.data.type === 'spectral-data') {
+                const data = e.data.data;
+                const numPoints = data.length / 4;
+                
                 if (INTERP_SAMPLES === 0) {
                     // No interpolation - instant update
-                    this.spectralData.set(e.data.data);
-                    this.targetData.set(e.data.data);
+                    this.spectralData.set(data);
+                    this.targetData.set(data);
+                    // Extract phase offsets
+                    for (let bin = 0; bin < numPoints; bin++) {
+                        const offset = data[bin * 4 + 1];
+                        this.currentPhaseOffsets[bin] = offset;
+                        this.targetPhaseOffsets[bin] = offset;
+                    }
                 } else {
                     // Snapshot current state as previous
                     this.prevData.set(this.spectralData);
+                    this.prevPhaseOffsets.set(this.currentPhaseOffsets);
+                    
                     // New incoming data is target
-                    this.targetData.set(e.data.data);
+                    this.targetData.set(data);
+                    for (let bin = 0; bin < numPoints; bin++) {
+                        this.targetPhaseOffsets[bin] = data[bin * 4 + 1];
+                    }
+                    
                     // Reset interpolation
                     this.interpT = 0.0;
                 }
@@ -101,11 +123,18 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 this.interpT += this.interpStep;
                 if (this.interpT > 1.0) this.interpT = 1.0;
                 
-                // Lerp all spectral data values
                 const t = this.interpT;
                 const invT = 1.0 - t;
+                
+                // Lerp all spectral data values (mag, custom1, custom2 - not phase offset)
                 for (let j = 0; j < this.spectralData.length; j++) {
                     this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
+                }
+                
+                // Lerp phase offsets separately for phase continuity
+                for (let bin = 0; bin < numPoints; bin++) {
+                    this.currentPhaseOffsets[bin] = 
+                        this.prevPhaseOffsets[bin] * invT + this.targetPhaseOffsets[bin] * t;
                 }
             }
             
@@ -115,7 +144,8 @@ class SpectralProcessor extends AudioWorkletProcessor {
             for (let bin = 0; bin < numPoints; bin++) {
                 const idx = bin * 4;
                 const mag = this.spectralData[idx];
-                const phaseOffset = this.spectralData[idx + 1];
+                // Phase offset is now read from interpolated array, not spectralData
+                const phaseOffset = this.currentPhaseOffsets[bin];
                 const custom1 = this.spectralData[idx + 2];
                 
                 if (mag < 0.001) continue;
@@ -136,12 +166,19 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 const db = mag * 60 - 60;
                 const linearMag = Math.pow(10, db / 20) * rolloffGain;
                 
+                // Phase increment from instantaneous frequency
+                // This changes smoothly because freq comes from interpolated data
                 const phaseInc = (freq * 2 * Math.PI) / sampleRate;
+                
+                // Advance phase accumulator continuously - never reset
                 this.phaseAccumulators[bin] += phaseInc;
+                
+                // Wrap phase to prevent floating point precision loss
                 if (this.phaseAccumulators[bin] > 2 * Math.PI) {
                     this.phaseAccumulators[bin] -= 2 * Math.PI;
                 }
                 
+                // Apply phase offset (now smoothly interpolated)
                 const currentPhase = this.phaseAccumulators[bin] + (phaseOffset * 2 * Math.PI);
                 const sample = Math.sin(currentPhase);
                 
