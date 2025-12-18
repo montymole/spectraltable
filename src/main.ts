@@ -147,6 +147,7 @@ class SpectralTableApp {
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
 
+
         // LFO Wiring
         this.controls.setLFOParamChangeCallback((index, param, value) => {
             const lfo = this.lfos[index];
@@ -177,6 +178,7 @@ class SpectralTableApp {
         this.canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
         this.canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
         this.canvas.addEventListener('mouseleave', this.onMouseUp.bind(this));
+        this.canvas.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
 
         // Prevent context menu on right-click
         this.canvas.addEventListener('contextmenu', (e) => {
@@ -497,6 +499,11 @@ class SpectralTableApp {
 
     private onMouseUp(): void {
         this.renderer.onMouseUp();
+    }
+
+    private onWheel(event: WheelEvent): void {
+        event.preventDefault();
+        this.renderer.zoom(event.deltaY);
     }
 
     private startRenderLoop(): void {
