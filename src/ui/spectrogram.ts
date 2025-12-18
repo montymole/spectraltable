@@ -163,8 +163,11 @@ export class Spectrogram {
             // Logarithmic mapping for audio visualization looks better
             let readIndex: number;
             if (isAudioData) {
-                // Log scale: buffer index ~ exp(x)
-                const logX = Math.pow(normalizedX, 2.0);
+                // Logarithmic frequency scale (Audio)
+                // Maps x axis (screen) to frequency index (data) logarithmically
+                // normalizedX [0..1] -> logX [0..1]
+                const factor = 100.0;
+                const logX = (Math.pow(factor, normalizedX) - 1) / (factor - 1);
                 readIndex = Math.floor(logX * (numPoints - 1));
             } else {
                 // Linear for scanline

@@ -60,6 +60,7 @@ export class ControlPanel {
     private onFeedbackChange: ((amount: number) => void) | null = null;
     private onMidiInputChange: ((id: string) => void) | null = null;
     private onOctaveChange: ((octave: number) => void) | null = null;
+    private onResetView: (() => void) | null = null;
 
     // LFO Callbacks
     private onLFOParamChange: ((index: number, param: string, value: any) => void) | null = null;
@@ -227,6 +228,7 @@ export class ControlPanel {
         this.densityXSlider = this.createSlider('density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1);
         this.densityYSlider = this.createSlider('density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1);
         this.densityZSlider = this.createSlider('density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1);
+        this.createResetViewButton();
 
         // Create preset section first
         this.createSection('Presets');
@@ -251,7 +253,7 @@ export class ControlPanel {
     }
 
     private appendControl(element: HTMLElement): void {
-        (this.currentSectionContainer || this.container).prepend(element);
+        (this.currentSectionContainer || this.container).appendChild(element);
     }
 
     private createSlider(
@@ -774,6 +776,26 @@ export class ControlPanel {
         this.appendControl(group);
     }
 
+    private createResetViewButton(): void {
+        const group = document.createElement('div');
+        group.className = 'control-group';
+
+        const button = document.createElement('button');
+        button.id = 'reset-view-btn';
+        button.textContent = '⟲ Reset Camera View';
+        button.className = 'reset-button';
+        button.style.marginTop = '10px';
+
+        button.addEventListener('click', () => {
+            if (this.onResetView) {
+                this.onResetView();
+            }
+        });
+
+        group.appendChild(button);
+        this.appendControl(group);
+    }
+
     private createDynamicParameterSlider(): void {
         const container = document.createElement('div');
         container.id = 'dynamic-param-container';
@@ -940,10 +962,9 @@ export class ControlPanel {
             densityZ: parseFloat(this.densityZSlider.value),
             spectralData: this.spectralDataSelect.value,
             generatorParams: this.currentGeneratorParams || undefined,
-            lfo1: { ...this.lfoState[0] },
-            lfo2: { ...this.lfoState[1] },
+            lfos: this.lfoState.map(lfo => ({ ...lfo })),
             modRouting: { ...this.modRoutingState },
-            envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.5 }, // Will be updated from AudioEngine
+            envelopes: [{ attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.5 }], // Will be updated from AudioEngine
             octave: this.octaveValue
         };
     }
@@ -983,13 +1004,15 @@ export class ControlPanel {
         }
 
         // Store LFO and routing state
-        this.lfoState[0] = { ...state.lfo1 };
-        this.lfoState[1] = { ...state.lfo2 };
+        if (state.lfos) {
+            state.lfos.forEach((lfoData, index) => {
+                if (this.lfoState[index]) {
+                    this.lfoState[index] = { ...lfoData };
+                    this.updateLFOUI(index, lfoData);
+                }
+            });
+        }
         this.modRoutingState = { ...state.modRouting };
-
-        // Update LFO UI elements
-        this.updateLFOUI(0, state.lfo1);
-        this.updateLFOUI(1, state.lfo2);
 
         // Update modulation routing UI
         this.updateModRoutingUI();
@@ -1537,5 +1560,9 @@ export class ControlPanel {
 
         if (fill) fill.style.width = `${percent}%`;
         if (text) text.textContent = `${Math.round(percent)}%`;
+    }
+
+    public setResetViewCallback(callback: () => void): void {
+        this.onResetView = callback;
     }
 }

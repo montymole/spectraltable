@@ -9,7 +9,15 @@ This document tracks all features with their implementation status.
 
 ---
 
-## Core Infrastructure
+## GPU / Visualization
+
+### Visual Aids
+
+- [x] **Rotating Axis Explanations** `COMPLETE`
+  - Dynamic arrows for Time/Morph/Bins
+  - Labels rotate with cube orientation
+
+### WebGL Rendering
 
 - [x] **Vite + TypeScript Setup** `COMPLETE`
   - TypeScript strict mode enabled
@@ -63,11 +71,11 @@ This document tracks all features with their implementation status.
   - Left-click orbit
   - Smooth interpolation
 
-- [ ] **Zoom Control** `INCOMPLETE`
-  - Scroll wheel zoom not implemented
+- [x] **Zoom Control** `COMPLETE`
+  - Scroll wheel zoom
 
-- [ ] **Reset View Button** `INCOMPLETE`
-  - No camera reset functionality
+- [x] **Reset View Button** `COMPLETE`
+  - Reset camera to default position
 
 ---
 
@@ -107,7 +115,7 @@ This document tracks all features with their implementation status.
   - Step-by-step animation
 
 - [x] **LFO Modulation** `COMPLETE`
-  - 2 LFO units with sine, square, saw, triangle waveforms
+  - 3 LFO units with sine, square, saw, triangle waveforms
   - Modulation routing to Scan Phase, Path Y (Morph), Shape Phase
   - Frequency (0-1Hz), Amplitude, Offset controls
 
@@ -132,6 +140,16 @@ This document tracks all features with their implementation status.
 - [x] **Stereo Spatialization** `COMPLETE`
   - Pan per frequency bin
   - Width/spread control
+
+### Signal Quality
+
+- [x] **Smooth Spectral Transitions** `COMPLETE`
+  - Sample-level interpolation between frames
+  - Prevents "rattling" artifacts during fast movement
+
+- [x] **Anti-Aliasing** `COMPLETE`
+  - Nyquist frequency rolloff
+  - Prevents high-frequency folding artifacts
 
 - [ ] **Double Buffering** `INCOMPLETE`
   - No explicit double-buffer for GPU readback
@@ -198,7 +216,7 @@ This document tracks all features with their implementation status.
 ## LFO / Modulation
 
 - [x] **LFO Units** `COMPLETE`
-  - 2 independent LFO units
+  - 3 independent LFO units
   - Waveforms: Sine, Square, Saw, Triangle
 
 - [x] **LFO Parameters** `COMPLETE`
@@ -209,7 +227,7 @@ This document tracks all features with their implementation status.
 - [x] **Modulation Routing** `COMPLETE`
   - Path Y (Morph position)
   - Scan Phase (reading line position)
-  - Shape Phase (plane geometry offset)
+  - Shape Phase (plane geometry animation)
 
 - [x] **UI Integration** `COMPLETE`
   - Collapsible LFO control sections

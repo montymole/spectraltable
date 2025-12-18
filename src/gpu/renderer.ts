@@ -74,6 +74,7 @@ export class Renderer {
     // Camera state
     private rotationX = 0.3;
     private rotationY = 0.4;
+    private cameraDistance = 6.5;
     private isDragging = false;
     private lastMouseX = 0;
     private lastMouseY = 0;
@@ -562,7 +563,7 @@ export class Renderer {
         // Calculate Camera MVP
         const aspect = gl.canvas.width / gl.canvas.height;
         const projection = mat4Perspective(Math.PI / 4, aspect, 0.1, 100.0);
-        const view = mat4LookAt([0, 0, 6.5], [0, 0, 0], [0, 1, 0]);
+        const view = mat4LookAt([0, 0, this.cameraDistance], [0, 0, 0], [0, 1, 0]);
 
         const rotX = mat4RotateX(this.rotationX);
         const rotY = mat4RotateY(this.rotationY);
@@ -841,6 +842,19 @@ export class Renderer {
     public onMouseUp(): void {
         this.isDragging = false;
         this.activeMouseButton = -1;
+    }
+
+    public zoom(delta: number): void {
+        const zoomSpeed = 0.005;
+        this.cameraDistance += delta * zoomSpeed;
+        // Clamp distance
+        this.cameraDistance = Math.max(2.0, Math.min(20.0, this.cameraDistance));
+    }
+
+    public resetView(): void {
+        this.rotationX = 0.3;
+        this.rotationY = 0.4;
+        this.cameraDistance = 6.5;
     }
 
     public update(deltaTime: number): void {

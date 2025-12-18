@@ -87,6 +87,7 @@ spectraltable/
 | Reading Line | ✅ | Animated scan line across plane |
 | Mouse Orbit | ✅ | Drag to rotate, scroll to zoom |
 | Camera Controls | ✅ | Orbit camera with smooth transitions |
+| Axis Explanations | ✅ | Rotating arrows for Time/Morph/Bins |
 
 ### Phase 3: Audio Engine ✅ COMPLETE
 
@@ -96,6 +97,8 @@ spectraltable/
 | AudioWorklet Processor | ✅ | Inline worklet with iFFT |
 | iFFT Implementation | ✅ | Cooley-Tukey radix-2 |
 | Stereo Panning | ✅ | Pan/width from spectral data |
+| Smooth Initializer | ✅ | Sample-level interpolation |
+| Anti-Aliasing | ✅ | Nyquist rolloff filter |
 | Scope Visualizer | ✅ | Lissajous + dual-channel modes |
 | Spectrogram Display | ✅ | Scrolling frequency visualization |
 
@@ -184,7 +187,7 @@ See [CHECKLIST.md](./CHECKLIST.md#known-bugs--issues) for implementation details
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| LFO Logic | ✅ | 2 Units (Sine, Square, Saw, Tri) |
+| LFO Logic | ✅ | 3 Units (Sine, Square, Saw, Tri) |
 | LFO UI Controls | ✅ | Wave, Freq (0-1Hz), Amp (0-1), Offset (-1 to 1) |
 | Modulation Routing | ✅ | Assign LFOs to Scan Phase, Morph Y, Shape Phase |
 | Visualization Control | ✅ | Render loop modulation logic |
@@ -206,19 +209,19 @@ See [CHECKLIST.md](./CHECKLIST.md#known-bugs--issues) for implementation details
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| Fix Julia Generator | 🔜 | BUG-001: Better centering, scale, C constant |
-| Fix Mandelbulb Generator | 🔜 | BUG-002: Center at origin, iteration coloring |
-| Fix Menger Sponge Generator | 🔜 | BUG-003: Proper recursive algorithm |
-| Adjustable Generator Params | 🔜 | FEAT-001: 2-3 sliders per generator |
+| Fix Julia Generator | ✅ | BUG-001 Fixed |
+| Fix Mandelbulb Generator | ✅ | BUG-002 Fixed |
+| Fix Menger Sponge Generator | ✅ | BUG-003 Fixed |
+| Adjustable Generator Params | ✅ | FEAT-001 Complete |
 
 ### Phase 12: Preset System 🔜
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| Auto-save State | 🔜 | Persist control values in localStorage |
-| Restore on Load | 🔜 | Initialize controls from saved state |
-| Named Presets | 🔜 | Save/load named configurations |
-| Preset UI | 🔜 | Dropdown, Save button, Delete button |
+| Auto-save State | ✅ | Persist control values in localStorage |
+| Restore on Load | ✅ | Initialize controls from saved state |
+| Named Presets | ✅ | Save/load named configurations |
+| Preset UI | ✅ | Dropdown, Save button, Delete button |
 
 ### Phase 13: Optimization (Future)
 
