@@ -104,6 +104,10 @@ export class ControlPanel {
     private lfoAmpDisplays: HTMLSpanElement[] = [];
     private lfoOffsetDisplays: HTMLSpanElement[] = [];
 
+    // Waveform Icon containers
+    private carrierIconContainer: HTMLElement | null = null;
+    private lfoIconContainers: HTMLElement[] = [];
+
     // Modulation routing selects
     private pathYSourceSelect: HTMLSelectElement | null = null;
     private scanPhaseSourceSelect: HTMLSelectElement | null = null;
@@ -437,6 +441,7 @@ export class ControlPanel {
         const iconContainer = document.createElement('div');
         iconContainer.className = 'waveform-icon';
         iconContainer.innerHTML = WAVEFORM_ICONS[this.lfoState[index].waveform] || WAVEFORM_ICONS['sine'];
+        this.lfoIconContainers[index] = iconContainer;
 
         ['Sine', 'Square', 'Saw', 'Triangle'].forEach(w => {
             const opt = document.createElement('option');
@@ -622,6 +627,7 @@ export class ControlPanel {
         const iconContainer = document.createElement('div');
         iconContainer.className = 'waveform-icon';
         iconContainer.innerHTML = WAVEFORM_ICONS['sine'];
+        this.carrierIconContainer = iconContainer;
 
         const options = [
             { value: '0', label: 'Sine', key: 'sine' },
@@ -1022,7 +1028,19 @@ export class ControlPanel {
 
         // Update carrier and feedback
         const carrierEl = document.getElementById('carrier') as HTMLSelectElement;
-        if (carrierEl) carrierEl.value = String(state.carrier);
+        if (carrierEl) {
+            carrierEl.value = String(state.carrier);
+            if (this.carrierIconContainer) {
+                const options = [
+                    { value: '0', key: 'sine' },
+                    { value: '1', key: 'saw' },
+                    { value: '2', key: 'square' },
+                    { value: '3', key: 'triangle' },
+                ];
+                const key = options.find(o => o.value === carrierEl.value)?.key || 'sine';
+                this.carrierIconContainer.innerHTML = WAVEFORM_ICONS[key];
+            }
+        }
 
         const feedbackEl = document.getElementById('feedback') as HTMLInputElement;
         if (feedbackEl) feedbackEl.value = String(state.feedback);
@@ -1060,6 +1078,9 @@ export class ControlPanel {
     private updateLFOUI(index: number, lfo: { waveform: string; frequency: number; amplitude: number; offset: number }): void {
         if (this.lfoWaveSelects[index]) {
             this.lfoWaveSelects[index].value = lfo.waveform;
+            if (this.lfoIconContainers[index]) {
+                this.lfoIconContainers[index].innerHTML = WAVEFORM_ICONS[lfo.waveform] || WAVEFORM_ICONS['sine'];
+            }
         }
         if (this.lfoFreqSliders[index]) {
             this.lfoFreqSliders[index].value = String(lfo.frequency);
