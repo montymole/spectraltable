@@ -114,6 +114,11 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
     valueArc.setAttribute('class', 'knob-value');
     svg.appendChild(valueArc);
 
+    // Modulation range arc
+    const modArc = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    modArc.setAttribute('class', 'knob-mod-range');
+    svg.appendChild(modArc);
+
     // Center circle
     const center = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     center.setAttribute('class', 'knob-center');
@@ -139,6 +144,32 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
         // Update value arc
         const endAngle = 225 + percent * 270;
         valueArc.setAttribute('d', describeArc(24, 24, 18, 225, endAngle));
+
+        // Update modulation range arc
+        const inputAny = input as any;
+        if (inputAny.hasModulation) {
+            const offset = typeof inputAny.modOffset === 'number' ? inputAny.modOffset : 0;
+            const amp = typeof inputAny.modAmplitude === 'number' ? inputAny.modAmplitude : 0;
+
+            // start = offset - 0.5 * amp, end = offset + 0.5 * amp
+            const startVal = offset - amp;
+            const endVal = offset + amp;
+
+            const startP = (startVal - min) / (max - min);
+            const endP = (endVal - min) / (max - min);
+
+            const sAngle = 225 + Math.max(0, Math.min(1, startP)) * 270;
+            const eAngle = 225 + Math.max(0, Math.min(1, endP)) * 270;
+
+            if (Math.abs(eAngle - sAngle) > 0.1) {
+                modArc.setAttribute('d', describeArc(24, 24, 21.5, sAngle, eAngle));
+                modArc.style.display = 'block';
+            } else {
+                modArc.style.display = 'none';
+            }
+        } else {
+            modArc.style.display = 'none';
+        }
 
         // Update pointer
         const rad = (endAngle - 90) * (Math.PI / 180);
@@ -208,6 +239,7 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
         });
     }
 
+    (input as any).updateKnob = updateKnob;
     updateKnob();
     return container;
 }

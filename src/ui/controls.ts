@@ -143,7 +143,7 @@ export class ControlPanel {
             s.populate(container);
         });
 
-
+        this.updateModulationRanges();
     }
 
     private populateVolumeSection(container: HTMLElement): void {
@@ -174,18 +174,17 @@ export class ControlPanel {
             value: l.toLowerCase().replace(' ', ''),
             label: l
         }));
-
         const pathYControl = createModulatableSlider(container, 'path-y', 'Position Y (Morph)', -1, 1, 0, 0.01, lfoOptions,
             (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
             (source) => {
                 this.modRoutingState.pathY = source;
                 if (this.onModulationRoutingChange) this.onModulationRoutingChange('pathY', source);
                 this.scheduleAutoSave();
+                this.updateModulationRanges();
             }
         );
         this.pathYSlider = pathYControl.slider;
         this.pathYSourceSelect = pathYControl.select;
-
         this.planeTypeSelect = createSelect(container, 'plane-type', 'Plane Type', [
             PlaneType.FLAT, PlaneType.SINCOS, PlaneType.WAVE, PlaneType.RIPPLE
         ], (_val) => {
@@ -211,6 +210,7 @@ export class ControlPanel {
                 this.modRoutingState.scanPhase = source;
                 if (this.onModulationRoutingChange) this.onModulationRoutingChange('scanPhase', source);
                 this.scheduleAutoSave();
+                this.updateModulationRanges();
             }
         );
         this.scanPositionSlider = scanControl.slider;
@@ -316,12 +316,14 @@ export class ControlPanel {
             this.lfoState[index].amplitude = val;
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'amplitude', val);
             this.scheduleAutoSave();
+            this.updateModulationRanges();
         });
 
         this.lfoOffsetSliders[index] = createSlider(wrapper, `lfo-${index}-offset`, 'Offset', -1, 1, this.lfoState[index].offset, 0.01, (val) => {
             this.lfoState[index].offset = val;
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'offset', val);
             this.scheduleAutoSave();
+            this.updateModulationRanges();
         });
 
         this.appendControl(container, wrapper);
@@ -606,6 +608,7 @@ export class ControlPanel {
 
         // Update value displays
         this.updateAllDisplays();
+        this.updateModulationRanges();
     }
 
     private updateLFOUI(index: number, lfo: { waveform: string; frequency: number; amplitude: number; offset: number }): void {
@@ -650,6 +653,7 @@ export class ControlPanel {
         if (this.shapePhaseSourceSelect) {
             this.shapePhaseSourceSelect.value = this.modRoutingState.shapePhase;
         }
+        this.updateModulationRanges();
     }
 
     private updateAllDisplays(): void {
@@ -682,6 +686,30 @@ export class ControlPanel {
         if (dxDisplay) dxDisplay.textContent = String(Math.round(parseFloat(this.densityXSlider.value)));
         if (dyDisplay) dyDisplay.textContent = String(Math.round(parseFloat(this.densityYSlider.value)));
         if (dzDisplay) dzDisplay.textContent = String(Math.round(parseFloat(this.densityZSlider.value)));
+    }
+
+    private updateModulationRanges(): void {
+        const syncMod = (slider: HTMLInputElement, source: string) => {
+            if (!slider) return;
+            const inputAny = slider as any;
+            if (source === 'none') {
+                inputAny.hasModulation = false;
+            } else {
+                const lfoIdx = parseInt(source.replace('lfo', '')) - 1;
+                const lfo = this.lfoState[lfoIdx];
+                if (lfo) {
+                    inputAny.hasModulation = true;
+                    inputAny.modOffset = lfo.offset;
+                    inputAny.modAmplitude = lfo.amplitude;
+                } else {
+                    inputAny.hasModulation = false;
+                }
+            }
+            if (inputAny.updateKnob) inputAny.updateKnob();
+        };
+
+        syncMod(this.pathYSlider, this.modRoutingState.pathY);
+        syncMod(this.scanPositionSlider, this.modRoutingState.scanPhase);
     }
 
     private createGeneratorParamsContainer(container: HTMLElement): void {
