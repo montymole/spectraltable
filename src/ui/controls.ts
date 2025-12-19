@@ -68,7 +68,6 @@ export class ControlPanel {
     private onFeedbackChange: ((amount: number) => void) | null = null;
     private onMidiInputChange: ((id: string) => void) | null = null;
     private onOctaveChange: ((octave: number) => void) | null = null;
-    private onResetView: (() => void) | null = null;
 
     // LFO Callbacks
     private onLFOParamChange: ((index: number, param: string, value: any) => void) | null = null;
@@ -696,20 +695,16 @@ export class ControlPanel {
 
     private showGeneratorParams(dataSet: string, initialParams?: GeneratorParams): void {
         if (!this.generatorParamsContainer) return;
-
         this.generatorParamsContainer.innerHTML = '';
         this.currentDataSet = dataSet;
-
         const triggerUpdate = () => {
             if (this.onGeneratorParamsChange && this.currentGeneratorParams) {
                 this.onGeneratorParamsChange(this.currentDataSet, this.currentGeneratorParams);
             }
         };
-
         const createParamSlider = (label: string, min: number, max: number, value: number, step: number, onChange: (v: number) => void) => {
             return createSlider(this.generatorParamsContainer!, `gen-param-${label}`, label, min, max, value, step, onChange);
         };
-
         switch (dataSet) {
             case '3d-julia': {
                 const params = { ...(initialParams as JuliaParams || defaultJuliaParams) };
