@@ -133,9 +133,7 @@ export class ControlPanel {
             { title: 'Reading Path', populate: (c) => this.populatePathSection(c) },
             { title: 'Audio Synthesis', populate: (c) => this.populateSynthesisSection(c) },
             { title: 'LFOs', populate: (c) => this.populateLFOSection(c) },
-            { title: 'Envelopes', populate: (c) => this.populateEnvelopeSection(c) },
-            { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c) },
-            { title: 'Presets', populate: (c) => this.populatePresetSection(c) },
+            { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c) }
         ];
 
         sections.forEach(s => {
@@ -167,6 +165,33 @@ export class ControlPanel {
             if (files && files.length > 0 && this.onWavUpload) this.onWavUpload(files);
         });
         this.createProgressIndicator(subGroup2);
+        this.presetSelect = createSelect(subGroup2, 'preset-select', 'Load Preset', [], (val) => {
+            if (val && this.onPresetLoad) {
+                const preset = this.presetManager.getPreset(val);
+                if (preset) this.onPresetLoad(preset.controls);
+            }
+        });
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Select Preset --';
+        this.presetSelect.insertBefore(defaultOpt, this.presetSelect.firstChild);
+        this.updatePresetDropdown();
+        const buttonGroup = document.createElement('div');
+        buttonGroup.className = 'control-group';
+        buttonGroup.style.display = 'flex';
+        buttonGroup.style.gap = '8px';
+        createButton(buttonGroup, 'save-preset-btn', '💾 Save', () => {
+            const name = prompt('Enter preset name:');
+            if (name && name.trim()) this.presetManager.savePreset(name.trim(), this.getFullState());
+        });
+        createButton(buttonGroup, 'delete-preset-btn', '🗑 Delete', () => {
+            if (this.presetSelect && this.presetSelect.value) {
+                if (confirm(`Delete preset "${this.presetSelect.value}"?`)) {
+                    this.presetManager.deletePreset(this.presetSelect.value);
+                }
+            }
+        });
+        subGroup2.appendChild(buttonGroup);
     }
 
     private populatePathSection(container: HTMLElement): void {
@@ -174,7 +199,24 @@ export class ControlPanel {
             value: l.toLowerCase().replace(' ', ''),
             label: l
         }));
-        const pathYControl = createModulatableSlider(container, 'path-y', 'Position Y (Morph)', -1, 1, 0, 0.01, lfoOptions,
+        const spGroup = document.createElement('div');
+        spGroup.className = 'control-group';
+        container.appendChild(spGroup);
+        this.planeTypeSelect = createSelect(spGroup, 'plane-type', 'Plane Type', [
+            PlaneType.FLAT, PlaneType.SINCOS, PlaneType.WAVE, PlaneType.RIPPLE
+        ], (_val) => {
+            if (this.onPathChange) this.onPathChange(this.getState());
+            this.scheduleAutoSave();
+        });
+        this.shapePhaseSourceSelect = createSelect(spGroup, 'shape-phase-source', 'Shape Phase Source', lfoOptions, (source) => {
+            this.modRoutingState.shapePhase = source;
+            if (this.onModulationRoutingChange) this.onModulationRoutingChange('shapePhase', source);
+            this.scheduleAutoSave();
+        });
+        const nGroup = document.createElement('div');
+        nGroup.className = 'control-group';
+        container.appendChild(nGroup);
+        const pathYControl = createModulatableSlider(nGroup, 'path-y', 'Position Y (Morph)', -1, 1, 0, 0.01, lfoOptions,
             (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
             (source) => {
                 this.modRoutingState.pathY = source;
@@ -185,26 +227,7 @@ export class ControlPanel {
         );
         this.pathYSlider = pathYControl.slider;
         this.pathYSourceSelect = pathYControl.select;
-        this.planeTypeSelect = createSelect(container, 'plane-type', 'Plane Type', [
-            PlaneType.FLAT, PlaneType.SINCOS, PlaneType.WAVE, PlaneType.RIPPLE
-        ], (_val) => {
-            if (this.onPathChange) this.onPathChange(this.getState());
-            this.scheduleAutoSave();
-        });
-
-        // Shape Phase Modulation
-        const spGroup = document.createElement('div');
-        spGroup.className = 'control-group';
-
-        this.shapePhaseSourceSelect = createSelect(spGroup, 'shape-phase-source', 'Shape Phase Source', lfoOptions, (source) => {
-            this.modRoutingState.shapePhase = source;
-            if (this.onModulationRoutingChange) this.onModulationRoutingChange('shapePhase', source);
-            this.scheduleAutoSave();
-        });
-
-        container.appendChild(spGroup);
-
-        const scanControl = createModulatableSlider(container, 'scan-pos', 'Scan Phase', -1, 1, 0, 0.01, lfoOptions as any,
+        const scanControl = createModulatableSlider(nGroup, 'scan-pos', 'Scan Phase', -1, 1, 0, 0.01, lfoOptions as any,
             (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
             (source) => {
                 this.modRoutingState.scanPhase = source;
@@ -231,6 +254,7 @@ export class ControlPanel {
             if (this.onSynthModeChange) this.onSynthModeChange(mode);
             this.scheduleAutoSave();
         });
+        this.createEnvelopeUI(subGroup);
         this.midiSelect = this.createMidiSelect(subGroup);
         this.createOctaveSelect(subGroup);
         const subGroup2 = document.createElement('div');
@@ -243,10 +267,6 @@ export class ControlPanel {
 
     private populateLFOSection(container: HTMLElement): void {
         this.lfoState.forEach((_, index) => this.createLFOUnit(container, index));
-    }
-
-    private populateEnvelopeSection(container: HTMLElement): void {
-        this.createEnvelopeUI(container);
     }
 
     private populateVisualizationSection(container: HTMLElement): void {
@@ -264,12 +284,6 @@ export class ControlPanel {
         this.densityYSlider = createSlider(container, 'density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1, volUpdate);
         this.densityZSlider = createSlider(container, 'density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1, volUpdate);
     }
-
-    private populatePresetSection(container: HTMLElement): void {
-        this.createPresetUI(container);
-    }
-
-    // ... (createSection, createSlider, createSelect methods remain same)
 
     private appendControl(container: HTMLElement, element: HTMLElement): void {
         container.appendChild(element);
@@ -444,46 +458,6 @@ export class ControlPanel {
         const octave = Math.floor(roundedMidi / 12) - 1;
         const noteIndex = roundedMidi % 12;
         return `${noteNames[noteIndex]}${octave}`;
-    }
-
-    private createPresetUI(container: HTMLElement): void {
-        const selectGroup = document.createElement('div');
-        selectGroup.className = 'control-group';
-
-        this.presetSelect = createSelect(selectGroup, 'preset-select', 'Load Preset', [], (val) => {
-            if (val && this.onPresetLoad) {
-                const preset = this.presetManager.getPreset(val);
-                if (preset) this.onPresetLoad(preset.controls);
-            }
-        });
-
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = '';
-        defaultOpt.textContent = '-- Select Preset --';
-        this.presetSelect.insertBefore(defaultOpt, this.presetSelect.firstChild);
-
-        this.appendControl(container, selectGroup);
-        this.updatePresetDropdown();
-
-        const buttonGroup = document.createElement('div');
-        buttonGroup.className = 'control-group';
-        buttonGroup.style.display = 'flex';
-        buttonGroup.style.gap = '8px';
-
-        createButton(buttonGroup, 'save-preset-btn', '💾 Save', () => {
-            const name = prompt('Enter preset name:');
-            if (name && name.trim()) this.presetManager.savePreset(name.trim(), this.getFullState());
-        });
-
-        createButton(buttonGroup, 'delete-preset-btn', '🗑 Delete', () => {
-            if (this.presetSelect && this.presetSelect.value) {
-                if (confirm(`Delete preset "${this.presetSelect.value}"?`)) {
-                    this.presetManager.deletePreset(this.presetSelect.value);
-                }
-            }
-        });
-
-        this.appendControl(container, buttonGroup);
     }
 
     private updatePresetDropdown(): void {
