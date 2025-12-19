@@ -108,19 +108,44 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   grid-auto-rows: max-content;
-  gap: 1rem;
+  gap: 0.5rem;
   align-content: start;
 }
 
 /* --- Controls Styling --- */
 .control-card {
   position: relative;
+  background: linear-gradient(to top, var(--bg-primary), var(--bg-secondary));
   padding-left: 1rem;
+  padding-top: 1rem;
+  padding-right: 1rem;
   border-left: 1px solid var(--border-subtle);
+  padding-bottom: 64px;
+  border-radius: 10px;
 }
 
 .control-card:hover {
   border-left: 1px solid var(--border-focus);
+}
+
+.section-icon {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 64px;
+  height: 64px;
+  opacity: 0.3;
+  pointer-events: none;
+  color: #00ffaa;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.section-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 /* Section Titles */

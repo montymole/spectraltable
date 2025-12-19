@@ -6,6 +6,37 @@ export const WAVEFORM_ICONS: Record<string, string> = {
     none: '<svg viewBox="0 0 24 20"></svg>'
 };
 
+export const SECTION_ICONS: Record<string, string> = {
+    'Wave/Spectral Volume': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 32 10 L 58 24 L 58 52 L 32 64 L 6 52 L 6 24 Z" />
+        <path d="M 32 10 L 32 38 L 58 24" />
+        <path d="M 32 38 L 6 24" />
+        <path d="M 32 38 L 32 64" />
+    </svg>`,
+    'Audio Synthesis': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 5 32 Q 15 10 25 32 T 45 32" />
+        <path d="M 45 32 L 45 15 L 60 32 L 45 49 L 45 32" />
+        <circle cx="15" cy="32" r="2" fill="currentColor" />
+    </svg>`,
+    'Reading Path': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 10 50 L 50 50 M 10 50 L 10 10 M 10 50 L 40 30" stroke-opacity="0.3" />
+        <path d="M 8 40 C 20 40, 30 10, 55 15" stroke-width="2" />
+        <circle cx="55" cy="15" r="3" fill="currentColor" />
+    </svg>`,
+    'LFOs': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="32" cy="32" r="28" stroke-dasharray="4 4" stroke-opacity="0.3" />
+        <path d="M 12 32 C 12 10, 32 10, 32 32 C 32 54, 52 54, 52 32" />
+        <path d="M 50 32 L 54 32" />
+    </svg>`,
+    'Visualization': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="8" y="40" width="8" height="16" />
+        <rect x="20" y="25" width="8" height="31" />
+        <rect x="32" y="35" width="8" height="21" />
+        <rect x="44" y="15" width="8" height="41" />
+        <path d="M 5 56 L 59 56" />
+    </svg>`
+};
+
 /**
  * Toggle between 'slider' and 'knob' UI modes.
  */
@@ -22,6 +53,15 @@ export function createSection(parent: HTMLElement, title: string, mode: 'slider'
     const header = document.createElement('div');
     header.className = 'control-section-title';
     header.textContent = title;
+
+    // Add background icon
+    if (SECTION_ICONS[title]) {
+        const iconContainer = document.createElement('div');
+        iconContainer.className = 'section-icon';
+        iconContainer.innerHTML = SECTION_ICONS[title];
+        card.appendChild(iconContainer);
+    }
+
     card.appendChild(header);
     parent.appendChild(card);
     return card;
