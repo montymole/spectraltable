@@ -131,8 +131,8 @@ export class ControlPanel {
 
         const sections: SectionOpts[] = [
             { title: 'Wave/Spectral Volume', populate: (c) => this.populateVolumeSection(c) },
-            { title: 'Reading Path', populate: (c) => this.populatePathSection(c) },
             { title: 'Audio Synthesis', populate: (c) => this.populateSynthesisSection(c) },
+            { title: 'Reading Path', populate: (c) => this.populatePathSection(c) },
             { title: 'LFOs', populate: (c) => this.populateLFOSection(c) },
             { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c), mode: 'slider' }
         ];

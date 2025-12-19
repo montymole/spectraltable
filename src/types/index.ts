@@ -54,9 +54,9 @@ export const VOLUME_DENSITY_Z_DEFAULT = 128;
 
 // Synthesis modes
 export enum SynthMode {
-    SPECTRAL = 'spectral',   // iFFT / additive synthesis from frequency bins
-    WAVETABLE = 'wavetable', // Direct waveform playback from reading line
-    WHITENOISE_BAND_Q_FILTER = 'whitenoise_band_q_filter', // Subtractive noise filtering
+    SPECTRAL = 'iFFT Spectal',   // iFFT / additive synthesis from frequency bins
+    WAVETABLE = 'Wavetable', // Direct waveform playback from reading line
+    WHITENOISE_BAND_Q_FILTER = 'Noise band filter', // Subtractive noise filtering
 }
 
 // Carrier waveform types for wavetable AM synthesis
