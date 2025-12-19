@@ -17,6 +17,7 @@ import {
 interface SectionOpts {
     title: string;
     populate: (container: HTMLElement) => void;
+    mode?: 'slider' | 'knob';
 }
 
 // UI control panel with sliders for all parameters
@@ -133,11 +134,11 @@ export class ControlPanel {
             { title: 'Reading Path', populate: (c) => this.populatePathSection(c) },
             { title: 'Audio Synthesis', populate: (c) => this.populateSynthesisSection(c) },
             { title: 'LFOs', populate: (c) => this.populateLFOSection(c) },
-            { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c) }
+            { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c), mode: 'slider' }
         ];
 
         sections.forEach(s => {
-            const container = createSection(this.container, s.title);
+            const container = createSection(this.container, s.title, s.mode);
             s.populate(container);
         });
 
@@ -280,9 +281,9 @@ export class ControlPanel {
             }
             this.scheduleAutoSave();
         };
-        this.densityXSlider = createSlider(container, 'density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1, volUpdate);
-        this.densityYSlider = createSlider(container, 'density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1, volUpdate);
-        this.densityZSlider = createSlider(container, 'density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1, volUpdate);
+        this.densityXSlider = createSlider(container, 'density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1, volUpdate, 'slider');
+        this.densityYSlider = createSlider(container, 'density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1, volUpdate, 'slider');
+        this.densityZSlider = createSlider(container, 'density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1, volUpdate, 'slider');
     }
 
     private appendControl(container: HTMLElement, element: HTMLElement): void {

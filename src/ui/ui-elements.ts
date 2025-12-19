@@ -15,15 +15,13 @@ export const CONTROL_STYLE: 'slider' | 'knob' = 'knob';
  * Creates a section card with a title.
  * Returns the card element which acts as the container for controls.
  */
-export function createSection(parent: HTMLElement, title: string): HTMLElement {
+export function createSection(parent: HTMLElement, title: string, mode: 'slider' | 'knob' = CONTROL_STYLE): HTMLElement {
     const card = document.createElement('div');
     card.className = 'control-card';
-    if (CONTROL_STYLE === 'knob') card.classList.add('knob-layout');
-
+    if (mode === 'knob') card.classList.add('knob-layout');
     const header = document.createElement('div');
     header.className = 'control-section-title';
     header.textContent = title;
-
     card.appendChild(header);
     parent.appendChild(card);
     return card;
@@ -40,16 +38,15 @@ export function createSlider(
     max: number,
     value: number,
     step: number,
-    onInput?: (val: number) => void
+    onInput?: (val: number) => void,
+    mode: 'slider' | 'knob' = CONTROL_STYLE
 ): HTMLInputElement {
     const group = document.createElement('div');
     group.className = 'control-group';
-    if (CONTROL_STYLE === 'knob') group.classList.add('knob-centered');
-
+    if (mode === 'knob') group.classList.add('knob-centered');
     const labelEl = document.createElement('label');
     labelEl.htmlFor = id;
     labelEl.textContent = label;
-
     const valueDisplay = document.createElement('span');
     valueDisplay.className = 'value-display';
     valueDisplay.id = `${id}-value`;
@@ -57,7 +54,6 @@ export function createSlider(
         valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
     };
     updateDisplay(value);
-
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.id = id;
@@ -66,14 +62,12 @@ export function createSlider(
     slider.value = String(value);
     slider.step = String(step);
     slider.className = 'slider';
-
     slider.addEventListener('input', () => {
         const val = parseFloat(slider.value);
         updateDisplay(val);
         if (onInput) onInput(val);
     });
-
-    if (CONTROL_STYLE === 'knob') {
+    if (mode === 'knob') {
         slider.style.display = 'none';
         group.appendChild(labelEl);
         group.appendChild(createKnobElement(slider));
@@ -86,7 +80,6 @@ export function createSlider(
         group.appendChild(labelRow);
         group.appendChild(slider);
     }
-
     parent.appendChild(group);
     return slider;
 }
@@ -348,19 +341,17 @@ export function createModulatableSlider(
     step: number,
     lfoLabels: { value: string, label: string }[],
     onSliderInput: (val: number) => void,
-    onSourceChange: (source: string) => void
+    onSourceChange: (source: string) => void,
+    mode: 'slider' | 'knob' = CONTROL_STYLE
 ): { slider: HTMLInputElement, select: HTMLSelectElement } {
     const group = document.createElement('div');
     group.className = 'control-group';
-    if (CONTROL_STYLE === 'knob') group.classList.add('knob-centered');
-
+    if (mode === 'knob') group.classList.add('knob-centered');
     const labelEl = document.createElement('label');
     labelEl.htmlFor = id;
     labelEl.textContent = label;
-
     const sourceSelect = document.createElement('select');
-    sourceSelect.style.marginLeft = CONTROL_STYLE === 'knob' ? '0' : 'auto';
-
+    sourceSelect.style.marginLeft = mode === 'knob' ? '0' : 'auto';
     lfoLabels.forEach(opt => {
         const option = document.createElement('option');
         option.value = opt.value
@@ -368,7 +359,6 @@ export function createModulatableSlider(
         if (opt.value === 'none') option.selected = true;
         sourceSelect.appendChild(option);
     });
-
     const valueDisplay = document.createElement('span');
     valueDisplay.className = 'value-display';
     valueDisplay.id = `${id}-value`;
@@ -376,7 +366,6 @@ export function createModulatableSlider(
         valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
     };
     updateDisplay(value);
-
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.id = id;
@@ -385,20 +374,17 @@ export function createModulatableSlider(
     slider.value = String(value);
     slider.step = String(step);
     slider.className = 'slider';
-
     slider.addEventListener('input', () => {
         const val = parseFloat(slider.value);
         updateDisplay(val);
         onSliderInput(val);
     });
-
     sourceSelect.addEventListener('change', () => {
         onSourceChange(sourceSelect.value);
         slider.disabled = sourceSelect.value !== 'none';
         group.style.opacity = sourceSelect.value !== 'none' ? '0.8' : '1.0';
     });
-
-    if (CONTROL_STYLE === 'knob') {
+    if (mode === 'knob') {
         slider.style.display = 'none';
         group.appendChild(labelEl);
         group.appendChild(sourceSelect);
@@ -409,19 +395,15 @@ export function createModulatableSlider(
         labelRow.className = 'label-row';
         labelRow.appendChild(labelEl);
         labelRow.appendChild(sourceSelect);
-
         const valueRow = document.createElement('div');
         valueRow.className = 'label-row';
         valueRow.style.justifyContent = 'flex-end';
         valueRow.appendChild(valueDisplay);
-
         group.appendChild(labelRow);
         group.appendChild(valueRow);
         group.appendChild(slider);
     }
-
     parent.appendChild(group);
-
     return { slider, select: sourceSelect };
 }
 
