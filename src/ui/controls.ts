@@ -11,6 +11,13 @@ import {
 import { PresetManager } from './preset-manager';
 
 // UI control panel with sliders for all parameters
+const WAVEFORM_ICONS: Record<string, string> = {
+    sine: '<svg viewBox="0 0 24 20"><path d="M 2 10 Q 7 0 12 10 T 22 10" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    saw: '<svg viewBox="0 0 24 20"><path d="M 2 18 L 18 2 L 18 18" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    square: '<svg viewBox="0 0 24 20"><path d="M 2 18 L 2 2 L 12 2 L 12 18 L 22 18 L 22 2" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    triangle: '<svg viewBox="0 0 24 20"><path d="M 2 18 L 12 2 L 22 18" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    none: '<svg viewBox="0 0 24 20"></svg>'
+};
 
 export class ControlPanel {
     private container: HTMLElement;
@@ -427,6 +434,10 @@ export class ControlPanel {
 
         // Waveform
         const waveSelect = document.createElement('select');
+        const iconContainer = document.createElement('div');
+        iconContainer.className = 'waveform-icon';
+        iconContainer.innerHTML = WAVEFORM_ICONS[this.lfoState[index].waveform] || WAVEFORM_ICONS['sine'];
+
         ['Sine', 'Square', 'Saw', 'Triangle'].forEach(w => {
             const opt = document.createElement('option');
             opt.value = w.toLowerCase();
@@ -436,8 +447,19 @@ export class ControlPanel {
         waveSelect.addEventListener('change', () => {
             this.lfoState[index].waveform = waveSelect.value;
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'waveform', waveSelect.value);
+            iconContainer.innerHTML = WAVEFORM_ICONS[waveSelect.value] || WAVEFORM_ICONS['sine'];
             this.scheduleAutoSave();
         });
+
+        const waveLabelRow = document.createElement('div');
+        waveLabelRow.className = 'label-row';
+        waveLabelRow.style.marginBottom = '4px';
+        const waveLabel = document.createElement('label');
+        waveLabel.textContent = 'Waveform';
+        waveLabelRow.appendChild(waveLabel);
+        waveLabelRow.appendChild(iconContainer);
+
+        wrapper.appendChild(waveLabelRow);
         wrapper.appendChild(waveSelect);
         this.lfoWaveSelects[index] = waveSelect;
 
@@ -597,11 +619,15 @@ export class ControlPanel {
         const select = document.createElement('select');
         select.id = 'carrier';
 
+        const iconContainer = document.createElement('div');
+        iconContainer.className = 'waveform-icon';
+        iconContainer.innerHTML = WAVEFORM_ICONS['sine'];
+
         const options = [
-            { value: '0', label: 'Sine' },
-            { value: '1', label: 'Saw' },
-            { value: '2', label: 'Square' },
-            { value: '3', label: 'Triangle' },
+            { value: '0', label: 'Sine', key: 'sine' },
+            { value: '1', label: 'Saw', key: 'saw' },
+            { value: '2', label: 'Square', key: 'square' },
+            { value: '3', label: 'Triangle', key: 'triangle' },
         ];
 
         for (const opt of options) {
@@ -612,14 +638,18 @@ export class ControlPanel {
         }
 
         select.addEventListener('change', () => {
+            const val = parseInt(select.value) as CarrierType;
             if (this.onCarrierChange) {
-                this.onCarrierChange(parseInt(select.value) as CarrierType);
+                this.onCarrierChange(val);
             }
+            const key = options.find(o => o.value === select.value)?.key || 'sine';
+            iconContainer.innerHTML = WAVEFORM_ICONS[key];
         });
 
         const labelRow = document.createElement('div');
         labelRow.className = 'label-row';
         labelRow.appendChild(labelEl);
+        labelRow.appendChild(iconContainer);
 
         group.appendChild(labelRow);
         group.appendChild(select);
