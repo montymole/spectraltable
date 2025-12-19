@@ -9,44 +9,41 @@ import {
     PresetControls, LFOState
 } from '../types';
 import { PresetManager } from './preset-manager';
+import {
+    createSection, createSlider, createSelect, createModulatableSlider,
+    createFileInput, createButton, WAVEFORM_ICONS
+} from './ui-elements';
+
+interface SectionOpts {
+    title: string;
+    populate: (container: HTMLElement) => void;
+}
 
 // UI control panel with sliders for all parameters
-const WAVEFORM_ICONS: Record<string, string> = {
-    sine: '<svg viewBox="0 0 24 20"><path d="M 2 10 Q 7 0 12 10 T 22 10" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
-    saw: '<svg viewBox="0 0 24 20"><path d="M 2 18 L 18 2 L 18 18" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
-    square: '<svg viewBox="0 0 24 20"><path d="M 2 18 L 2 2 L 12 2 L 12 18 L 22 18 L 22 2" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
-    triangle: '<svg viewBox="0 0 24 20"><path d="M 2 18 L 12 2 L 22 18" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
-    none: '<svg viewBox="0 0 24 20"></svg>'
-};
-
 export class ControlPanel {
     private container: HTMLElement;
-    private currentSectionContainer: HTMLElement | null = null;
 
     // Path controls
-    private pathYSlider: HTMLInputElement;
-    // Rotation sliders removed - now controlled by mouse
-    private planeTypeSelect: HTMLSelectElement;
-
-    private scanPositionSlider: HTMLInputElement;
+    private pathYSlider!: HTMLInputElement;
+    private planeTypeSelect!: HTMLSelectElement;
+    private scanPositionSlider!: HTMLInputElement;
 
     // Synth mode controls
-    private synthModeSelect: HTMLSelectElement;
-    private frequencySlider: HTMLInputElement;
+    private synthModeSelect!: HTMLSelectElement;
+    private frequencySlider!: HTMLInputElement;
     private frequencyContainer: HTMLElement | null = null;
     private carrierContainer: HTMLElement | null = null;
     private feedbackContainer: HTMLElement | null = null;
 
-    private midiSelect: HTMLSelectElement;
+    private midiSelect!: HTMLSelectElement;
 
     // Volume density controls
-    private densityXSlider: HTMLInputElement;
-    private densityYSlider: HTMLInputElement;
-    private densityZSlider: HTMLInputElement;
+    private densityXSlider!: HTMLInputElement;
+    private densityYSlider!: HTMLInputElement;
+    private densityZSlider!: HTMLInputElement;
 
     // Spectral data controls
-    private spectralDataSelect: HTMLSelectElement;
-    private wavUploadInput: HTMLInputElement;
+    private spectralDataSelect!: HTMLSelectElement;
     private dynamicParamSlider: HTMLInputElement | null = null;
     private dynamicParamContainer: HTMLElement | null = null;
 
@@ -54,6 +51,11 @@ export class ControlPanel {
     private generatorParamsContainer: HTMLElement | null = null;
     private currentGeneratorParams: GeneratorParams | null = null;
     private currentDataSet: string = 'blank';
+
+    // Progress indicators
+    private progressContainer: HTMLElement | null = null;
+    private progressFill: HTMLElement | null = null;
+    private progressText: HTMLElement | null = null;
 
     // Callbacks
     private onPathChange: ((state: ReadingPathState) => void) | null = null;
@@ -83,12 +85,7 @@ export class ControlPanel {
 
     // LFO state for serialization
     private lfoLabels: string[] = ['None'];
-    private lfoState: LFOState[] = []
-    /*
-        { waveform: 'sine', frequency: 0.5, amplitude: 0.5, offset: 0 },
-        { waveform: 'sine', frequency: 0.5, amplitude: 0.5, offset: 0 },
-        { waveform: 'sine', frequency: 0.5, amplitude: 0.5, offset: 0 }
-    ];*/
+    private lfoState: LFOState[] = [];
     private modRoutingState = { pathY: 'none', scanPhase: 'none', shapePhase: 'none' };
     private octaveValue = 3;
 
@@ -115,6 +112,9 @@ export class ControlPanel {
 
     constructor(containerId: string, options: { lfos: LFO[] }) {
         const el = document.getElementById(containerId);
+        if (!el) throw new Error(`Container not found: ${containerId}`);
+        this.container = el;
+
         this.lfoState = options.lfos.map((lfo, index) => {
             const label = `LFO ${index + 1}`;
             this.lfoLabels.push(label);
@@ -125,306 +125,156 @@ export class ControlPanel {
                 offset: lfo.offset
             };
         });
-        if (!el) throw new Error(`Container not found: ${containerId}`);
-        this.container = el;
 
         // Initialize preset manager
         this.presetManager = new PresetManager();
         this.presetManager.setPresetsChangeCallback(() => this.updatePresetDropdown());
 
-        this.createSection('Wave/Spectral Volume');
-        this.spectralDataSelect = this.createSelect('spectral-data-type', 'Data Set', [
-            'blank',
-            '3d-julia',
-            'mandelbulb',
-            'menger-sponge',
-            'sine-plasma',
-            'game-of-life'
-        ]);
+        const sections: SectionOpts[] = [
+            { title: 'Wave/Spectral Volume', populate: (c) => this.populateVolumeSection(c) },
+            { title: 'Reading Path', populate: (c) => this.populatePathSection(c) },
+            { title: 'Audio Synthesis', populate: (c) => this.populateSynthesisSection(c) },
+            { title: 'LFOs', populate: (c) => this.populateLFOSection(c) },
+            { title: 'Envelopes', populate: (c) => this.populateEnvelopeSection(c) },
+            { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c) },
+            { title: 'Presets', populate: (c) => this.populatePresetSection(c) },
+        ];
 
-        // Add reset button next to dataset selector
-        this.createResetButton();
+        sections.forEach(s => {
+            const container = createSection(this.container, s.title);
+            s.populate(container);
+        });
 
-        // Dynamic parameter slider (shown for certain datasets)
-        this.createDynamicParameterSlider();
 
-        // Generator parameter sliders container
-        this.createGeneratorParamsContainer();
+    }
 
-        // Add WAV upload (multi-select for morphing)
-        this.wavUploadInput = this.createFileInput('wav-upload', 'Upload WAV (Multi-select)', '.wav,.mp3,.ogg', true);
+    private populateVolumeSection(container: HTMLElement): void {
+        this.spectralDataSelect = createSelect(container, 'spectral-data-type', 'Data Set', [
+            'blank', '3d-julia', 'mandelbulb', 'menger-sponge', 'sine-plasma', 'game-of-life'
+        ], (val) => {
+            if (this.onSpectralDataChange) this.onSpectralDataChange(val);
+            this.scheduleAutoSave();
+        });
 
-        // Add progress indicator
-        this.createProgressIndicator();
+        createButton(container, 'reset-dataset-btn', '↻ Reset Dataset', () => {
+            if (this.onSpectralDataChange) this.onSpectralDataChange(this.spectralDataSelect.value);
+        });
 
-        // Create section headers
-        this.createSection('Reading Path');
-        // Modulatable Sliders
-        const pathYControl = this.createModulatableSlider('path-y', 'Position Y (Morph)', -1, 1, 0, 0.01, 'pathY');
+        this.createDynamicParameterSlider(container);
+        this.createGeneratorParamsContainer(container);
+        createFileInput(container, 'wav-upload', 'Upload WAV (Multi-select)', '.wav,.mp3,.ogg', true, (files) => {
+            if (files && files.length > 0 && this.onWavUpload) this.onWavUpload(files);
+        });
+        this.createProgressIndicator(container);
+    }
+
+    private populatePathSection(container: HTMLElement): void {
+        const lfoOptions = this.lfoLabels.map(l => ({
+            value: l.toLowerCase().replace(' ', ''),
+            label: l
+        }));
+
+        const pathYControl = createModulatableSlider(container, 'path-y', 'Position Y (Morph)', -1, 1, 0, 0.01, lfoOptions,
+            (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
+            (source) => {
+                this.modRoutingState.pathY = source;
+                if (this.onModulationRoutingChange) this.onModulationRoutingChange('pathY', source);
+                this.scheduleAutoSave();
+            }
+        );
         this.pathYSlider = pathYControl.slider;
         this.pathYSourceSelect = pathYControl.select;
 
-        this.planeTypeSelect = this.createSelect('plane-type', 'Plane Type', [
-            PlaneType.FLAT,
-            PlaneType.SINCOS,
-            PlaneType.WAVE,
-            PlaneType.RIPPLE,
-        ]);
-
-        // Add Shape Phase Modulation Selector
-        const shapePhaseGroup = document.createElement('div');
-        shapePhaseGroup.className = 'control-group';
-
-        const shapePhaseLabel = document.createElement('label');
-        shapePhaseLabel.textContent = 'Shape Phase';
-        shapePhaseLabel.style.fontSize = '0.6rem';
-
-        const shapePhaseSelect = document.createElement('select');
-        shapePhaseSelect.className = 'source-select';
-        shapePhaseSelect.style.marginLeft = 'auto';
-        shapePhaseSelect.style.fontSize = '0.7rem';
-
-        this.lfoLabels.forEach((label) => {
-            const option = document.createElement('option');
-            option.value = label.toLowerCase().replace(' ', '');
-            option.textContent = label;
-            shapePhaseSelect.appendChild(option);
-        });
-
-        shapePhaseSelect.addEventListener('change', () => {
-            this.modRoutingState.shapePhase = shapePhaseSelect.value;
-            if (this.onModulationRoutingChange) {
-                this.onModulationRoutingChange('shapePhase', shapePhaseSelect.value);
-            }
+        this.planeTypeSelect = createSelect(container, 'plane-type', 'Plane Type', [
+            PlaneType.FLAT, PlaneType.SINCOS, PlaneType.WAVE, PlaneType.RIPPLE
+        ], (_val) => {
+            if (this.onPathChange) this.onPathChange(this.getState());
             this.scheduleAutoSave();
         });
-        this.shapePhaseSourceSelect = shapePhaseSelect;
 
-        const spLabelRow = document.createElement('div');
-        spLabelRow.className = 'label-row';
-        spLabelRow.appendChild(shapePhaseLabel);
-        spLabelRow.appendChild(shapePhaseSelect);
+        // Shape Phase Modulation
+        const spGroup = document.createElement('div');
+        spGroup.className = 'control-group';
 
-        shapePhaseGroup.appendChild(spLabelRow);
-        this.appendControl(shapePhaseGroup);
+        this.shapePhaseSourceSelect = createSelect(spGroup, 'shape-phase-source', 'Shape Phase Source', lfoOptions, (source) => {
+            this.modRoutingState.shapePhase = source;
+            if (this.onModulationRoutingChange) this.onModulationRoutingChange('shapePhase', source);
+            this.scheduleAutoSave();
+        });
 
+        container.appendChild(spGroup);
 
-        const scanPosControl = this.createModulatableSlider('scan-pos', 'Scan Phase', -1, 1, 0, 0.01, 'scanPhase');
-        this.scanPositionSlider = scanPosControl.slider;
-        this.scanPhaseSourceSelect = scanPosControl.select;
+        const scanControl = createModulatableSlider(container, 'scan-pos', 'Scan Phase', -1, 1, 0, 0.01, lfoOptions as any,
+            (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
+            (source) => {
+                this.modRoutingState.scanPhase = source;
+                if (this.onModulationRoutingChange) this.onModulationRoutingChange('scanPhase', source);
+                this.scheduleAutoSave();
+            }
+        );
+        this.scanPositionSlider = scanControl.slider;
+        this.scanPhaseSourceSelect = scanControl.select;
+    }
 
-        // Initialize controls
-        this.createSection('Audio Synthesis');
-        this.synthModeSelect = this.createSelect('synth-mode', 'Mode', [
-            SynthMode.WAVETABLE,
-            SynthMode.SPECTRAL,
-            SynthMode.WHITENOISE_BAND_Q_FILTER,
-        ]);
-        this.frequencySlider = this.createFrequencySlider();
-        this.createCarrierSelect();
-        this.createFeedbackSlider();
-        this.midiSelect = this.createMidiSelect();
-        this.createOctaveSelect();
+    private populateSynthesisSection(container: HTMLElement): void {
+        this.synthModeSelect = createSelect(container, 'synth-mode', 'Mode', [
+            SynthMode.WAVETABLE, SynthMode.SPECTRAL, SynthMode.WHITENOISE_BAND_Q_FILTER
+        ], (val) => {
+            const mode = val as SynthMode;
+            if (this.frequencyContainer) this.frequencyContainer.style.display = mode === SynthMode.WAVETABLE ? 'block' : 'none';
+            if (this.carrierContainer) this.carrierContainer.style.display = mode === SynthMode.WAVETABLE ? 'block' : 'none';
+            if (this.feedbackContainer) this.feedbackContainer.style.display = mode === SynthMode.WAVETABLE ? 'block' : 'none';
+            if (this.onSynthModeChange) this.onSynthModeChange(mode);
+            this.scheduleAutoSave();
+        });
 
-        // LFO Section
-        this.createSection('LFOs');
-        this.lfoState.forEach((_, index) => {
-            this.createLFOUnit(index);
-        })
+        this.frequencySlider = this.createFrequencySlider(container);
+        this.createCarrierSelect(container);
+        this.createFeedbackSlider(container);
+        this.midiSelect = this.createMidiSelect(container);
+        this.createOctaveSelect(container);
+    }
 
-        // Envelopes Section
-        this.createSection('Envelopes');
-        this.createEnvelopeUI();
+    private populateLFOSection(container: HTMLElement): void {
+        this.lfoState.forEach((_, index) => this.createLFOUnit(container, index));
+    }
 
-        this.createSection('Visualization');
-        this.densityXSlider = this.createSlider('density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1);
-        this.densityYSlider = this.createSlider('density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1);
-        this.densityZSlider = this.createSlider('density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1);
-        this.createResetViewButton();
+    private populateEnvelopeSection(container: HTMLElement): void {
+        this.createEnvelopeUI(container);
+    }
 
-        // Create preset section first
-        this.createSection('Presets');
-        this.createPresetUI();
+    private populateVisualizationSection(container: HTMLElement): void {
+        const volUpdate = () => {
+            if (this.onVolumeResolutionChange) {
+                this.onVolumeResolutionChange({
+                    x: Math.round(parseFloat(this.densityXSlider.value)),
+                    y: Math.round(parseFloat(this.densityYSlider.value)),
+                    z: Math.round(parseFloat(this.densityZSlider.value)),
+                });
+            }
+            this.scheduleAutoSave();
+        };
 
-        this.wireUpEvents();
+        this.densityXSlider = createSlider(container, 'density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1, volUpdate);
+        this.densityYSlider = createSlider(container, 'density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1, volUpdate);
+        this.densityZSlider = createSlider(container, 'density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1, volUpdate);
+
+        createButton(container, 'reset-view-btn', '⟲ Reset Camera View', () => {
+            if (this.onResetView) this.onResetView();
+        });
+    }
+
+    private populatePresetSection(container: HTMLElement): void {
+        this.createPresetUI(container);
     }
 
     // ... (createSection, createSlider, createSelect methods remain same)
 
-    private createSection(title: string): void {
-        const card = document.createElement('div');
-        card.className = 'control-card';
-
-        const header = document.createElement('div');
-        header.className = 'control-section-title';
-        header.textContent = title;
-
-        card.appendChild(header);
-        this.container.appendChild(card);
-        this.currentSectionContainer = card;
+    private appendControl(container: HTMLElement, element: HTMLElement): void {
+        container.appendChild(element);
     }
 
-    private appendControl(element: HTMLElement): void {
-        (this.currentSectionContainer || this.container).appendChild(element);
-    }
-
-    private createSlider(
-        id: string,
-        label: string,
-        min: number,
-        max: number,
-        value: number,
-        step: number
-    ): HTMLInputElement {
-        const group = document.createElement('div');
-        group.className = 'control-group';
-
-        const labelEl = document.createElement('label');
-        labelEl.htmlFor = id;
-        labelEl.textContent = label;
-
-        const valueDisplay = document.createElement('span');
-        valueDisplay.className = 'value-display';
-        valueDisplay.textContent = step >= 1 ? String(Math.round(value)) : value.toFixed(2);
-        valueDisplay.id = `${id}-value`;
-
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.id = id;
-        slider.min = String(min);
-        slider.max = String(max);
-        slider.value = String(value);
-        slider.step = String(step);
-        slider.className = 'slider';
-
-        // Update value display on change
-        slider.addEventListener('input', () => {
-            const val = parseFloat(slider.value);
-            valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
-        });
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-        labelRow.appendChild(valueDisplay);
-
-        group.appendChild(labelRow);
-        group.appendChild(slider);
-        this.appendControl(group);
-
-        return slider;
-    }
-
-    private createSelect(id: string, label: string, options: string[]): HTMLSelectElement {
-        const group = document.createElement('div');
-        group.className = 'control-group';
-
-        const labelEl = document.createElement('label');
-        labelEl.htmlFor = id;
-        labelEl.textContent = label;
-
-        const select = document.createElement('select');
-        select.id = id;
-
-        for (const option of options) {
-            const optEl = document.createElement('option');
-            optEl.value = option;
-            optEl.textContent = option;
-            select.appendChild(optEl);
-        }
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-
-        group.appendChild(labelRow);
-        group.appendChild(select);
-        this.appendControl(group);
-
-        return select;
-    }
-
-    private createModulatableSlider(
-        id: string,
-        label: string,
-        min: number,
-        max: number,
-        value: number,
-        step: number,
-        targetParam: string
-    ): { slider: HTMLInputElement, select: HTMLSelectElement } {
-        const group = document.createElement('div');
-        group.className = 'control-group';
-
-        const labelEl = document.createElement('label');
-        labelEl.htmlFor = id;
-        labelEl.textContent = label;
-
-        // Source Selector (None, LFO1, LFO2)
-        const sourceSelect = document.createElement('select');
-        sourceSelect.className = 'source-select';
-        sourceSelect.style.marginLeft = 'auto';
-        sourceSelect.style.fontSize = '0.7rem';
-        sourceSelect.style.padding = '2px';
-
-        this.lfoLabels.forEach(opt => {
-            const option = document.createElement('option');
-            option.value = opt.toLowerCase().replace(' ', '');
-            option.textContent = opt;
-            if (opt === 'None') option.selected = true;
-            sourceSelect.appendChild(option);
-        });
-
-        sourceSelect.addEventListener('change', () => {
-            if (targetParam === 'pathY') this.modRoutingState.pathY = sourceSelect.value;
-            if (targetParam === 'scanPhase') this.modRoutingState.scanPhase = sourceSelect.value;
-            if (this.onModulationRoutingChange) {
-                this.onModulationRoutingChange(targetParam, sourceSelect.value);
-            }
-            // Disable slider if modulated?
-            slider.disabled = sourceSelect.value !== 'none';
-            group.style.opacity = sourceSelect.value !== 'none' ? '0.8' : '1.0';
-            this.scheduleAutoSave();
-        });
-
-        const valueDisplay = document.createElement('span');
-        valueDisplay.className = 'value-display';
-        valueDisplay.textContent = step >= 1 ? String(Math.round(value)) : value.toFixed(2);
-        valueDisplay.id = `${id}-value`;
-
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.id = id;
-        slider.min = String(min);
-        slider.max = String(max);
-        slider.value = String(value);
-        slider.step = String(step);
-        slider.className = 'slider';
-
-        slider.addEventListener('input', () => {
-            const val = parseFloat(slider.value);
-            valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
-        });
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-        labelRow.appendChild(sourceSelect);
-
-        const valueRow = document.createElement('div');
-        valueRow.className = 'label-row';
-        valueRow.style.justifyContent = 'flex-end';
-        valueRow.appendChild(valueDisplay);
-
-        group.appendChild(labelRow);
-        group.appendChild(valueRow);
-        group.appendChild(slider);
-        this.appendControl(group);
-
-        return { slider, select: sourceSelect };
-    }
-
-    private createLFOUnit(index: number): void {
+    private createLFOUnit(container: HTMLElement, index: number): void {
         const wrapper = document.createElement('div');
         wrapper.className = 'lfo-unit';
         wrapper.style.marginBottom = '10px';
@@ -436,116 +286,52 @@ export class ControlPanel {
         title.innerHTML = `<label>LFO ${index + 1}</label>`;
         wrapper.appendChild(title);
 
-        // Waveform
-        const waveSelect = document.createElement('select');
         const iconContainer = document.createElement('div');
         iconContainer.className = 'waveform-icon';
         iconContainer.innerHTML = WAVEFORM_ICONS[this.lfoState[index].waveform] || WAVEFORM_ICONS['sine'];
         this.lfoIconContainers[index] = iconContainer;
 
-        ['Sine', 'Square', 'Saw', 'Triangle'].forEach(w => {
-            const opt = document.createElement('option');
-            opt.value = w.toLowerCase();
-            opt.textContent = w;
-            waveSelect.appendChild(opt);
-        });
-        waveSelect.addEventListener('change', () => {
-            this.lfoState[index].waveform = waveSelect.value;
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'waveform', waveSelect.value);
-            iconContainer.innerHTML = WAVEFORM_ICONS[waveSelect.value] || WAVEFORM_ICONS['sine'];
+        const waveSelect = createSelect(wrapper, `lfo-${index}-wave`, 'Waveform', [
+            { value: 'sine', label: 'Sine' },
+            { value: 'square', label: 'Square' },
+            { value: 'saw', label: 'Saw' },
+            { value: 'triangle', label: 'Triangle' }
+        ], (val) => {
+            this.lfoState[index].waveform = val;
+            if (this.onLFOParamChange) this.onLFOParamChange(index, 'waveform', val);
+            iconContainer.innerHTML = WAVEFORM_ICONS[val] || WAVEFORM_ICONS['sine'];
             this.scheduleAutoSave();
         });
 
-        const waveLabelRow = document.createElement('div');
-        waveLabelRow.className = 'label-row';
-        waveLabelRow.style.marginBottom = '4px';
-        const waveLabel = document.createElement('label');
-        waveLabel.textContent = 'Waveform';
-        waveLabelRow.appendChild(waveLabel);
-        waveLabelRow.appendChild(iconContainer);
+        const waveLabelRow = wrapper.querySelector('.label-row') as HTMLElement;
+        if (waveLabelRow) waveLabelRow.appendChild(iconContainer);
 
-        wrapper.appendChild(waveLabelRow);
-        wrapper.appendChild(waveSelect);
         this.lfoWaveSelects[index] = waveSelect;
 
-        // Frequency (0 - 1Hz)
-        const freqLabel = document.createElement('div');
-        freqLabel.className = 'label-row';
-        freqLabel.innerHTML = '<label>Freq</label><span class="value-display">0.5 Hz</span>';
-        const freqDisplay = freqLabel.querySelector('span')!;
-
-        const freqSlider = document.createElement('input');
-        freqSlider.type = 'range';
-        freqSlider.min = '0';
-        freqSlider.max = '1';
-        freqSlider.step = '0.01';
-        freqSlider.value = '0.5';
-        freqSlider.className = 'slider';
-        freqSlider.addEventListener('input', () => {
-            freqDisplay.textContent = `${freqSlider.value} Hz`;
-            this.lfoState[index].frequency = parseFloat(freqSlider.value);
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'frequency', parseFloat(freqSlider.value));
+        this.lfoFreqSliders[index] = createSlider(wrapper, `lfo-${index}-freq`, 'Freq', 0, 1, this.lfoState[index].frequency, 0.01, (val) => {
+            this.lfoState[index].frequency = val;
+            if (this.onLFOParamChange) this.onLFOParamChange(index, 'frequency', val);
             this.scheduleAutoSave();
         });
-        wrapper.appendChild(freqLabel);
-        wrapper.appendChild(freqSlider);
-        this.lfoFreqSliders[index] = freqSlider;
-        this.lfoFreqDisplays[index] = freqDisplay;
 
-        // Amplitude (0 - 1)
-        const ampLabel = document.createElement('div');
-        ampLabel.className = 'label-row';
-        ampLabel.innerHTML = '<label>Amp</label><span class="value-display">0.5</span>';
-        const ampDisplay = ampLabel.querySelector('span')!;
-
-        const ampSlider = document.createElement('input');
-        ampSlider.type = 'range';
-        ampSlider.min = '0';
-        ampSlider.max = '1';
-        ampSlider.step = '0.01';
-        ampSlider.value = '0.5';
-        ampSlider.className = 'slider';
-        ampSlider.addEventListener('input', () => {
-            ampDisplay.textContent = ampSlider.value;
-            this.lfoState[index].amplitude = parseFloat(ampSlider.value);
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'amplitude', parseFloat(ampSlider.value));
+        this.lfoAmpSliders[index] = createSlider(wrapper, `lfo-${index}-amp`, 'Amp', 0, 1, this.lfoState[index].amplitude, 0.01, (val) => {
+            this.lfoState[index].amplitude = val;
+            if (this.onLFOParamChange) this.onLFOParamChange(index, 'amplitude', val);
             this.scheduleAutoSave();
         });
-        wrapper.appendChild(ampLabel);
-        wrapper.appendChild(ampSlider);
-        this.lfoAmpSliders[index] = ampSlider;
-        this.lfoAmpDisplays[index] = ampDisplay;
 
-        // Offset (-1 to 1)
-        const offsetLabel = document.createElement('div');
-        offsetLabel.className = 'label-row';
-        offsetLabel.innerHTML = '<label>Offset</label><span class="value-display">0.0</span>';
-        const offsetDisplay = offsetLabel.querySelector('span')!;
-
-        const offsetSlider = document.createElement('input');
-        offsetSlider.type = 'range';
-        offsetSlider.min = '-1';
-        offsetSlider.max = '1';
-        offsetSlider.step = '0.01';
-        offsetSlider.value = '0.0';
-        offsetSlider.className = 'slider';
-        offsetSlider.addEventListener('input', () => {
-            offsetDisplay.textContent = offsetSlider.value;
-            this.lfoState[index].offset = parseFloat(offsetSlider.value);
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'offset', parseFloat(offsetSlider.value));
+        this.lfoOffsetSliders[index] = createSlider(wrapper, `lfo-${index}-offset`, 'Offset', -1, 1, this.lfoState[index].offset, 0.01, (val) => {
+            this.lfoState[index].offset = val;
+            if (this.onLFOParamChange) this.onLFOParamChange(index, 'offset', val);
             this.scheduleAutoSave();
         });
-        wrapper.appendChild(offsetLabel);
-        wrapper.appendChild(offsetSlider);
-        this.lfoOffsetSliders[index] = offsetSlider;
-        this.lfoOffsetDisplays[index] = offsetDisplay;
 
-        this.appendControl(wrapper);
+        this.appendControl(container, wrapper);
     }
 
     public envelopeCanvas: HTMLCanvasElement | null = null;
 
-    private createEnvelopeUI(): void {
+    private createEnvelopeUI(container: HTMLElement): void {
         const wrapper = document.createElement('div');
         wrapper.className = 'control-group';
         wrapper.style.height = '150px';
@@ -560,13 +346,11 @@ export class ControlPanel {
         canvas.style.border = '1px solid var(--border-subtle)';
 
         wrapper.appendChild(canvas);
-        this.appendControl(wrapper);
+        this.appendControl(container, wrapper);
         this.envelopeCanvas = canvas;
     }
 
-    private createFrequencySlider(): HTMLInputElement {
-        // Frequency slider with note name display
-        // Range: 20Hz to 2000Hz, default 220Hz (A3)
+    private createFrequencySlider(container: HTMLElement): HTMLInputElement {
         const group = document.createElement('div');
         group.id = 'frequency-container';
         group.className = 'control-group';
@@ -589,14 +373,11 @@ export class ControlPanel {
         slider.step = '1';
         slider.className = 'slider';
 
-        // Update value display with note name
         slider.addEventListener('input', () => {
             const freq = parseFloat(slider.value);
             const noteName = this.freqToNoteName(freq);
             valueDisplay.textContent = `${Math.round(freq)} Hz (${noteName})`;
-            if (this.onFrequencyChange) {
-                this.onFrequencyChange(freq);
-            }
+            if (this.onFrequencyChange) this.onFrequencyChange(freq);
         });
 
         const labelRow = document.createElement('div');
@@ -606,13 +387,14 @@ export class ControlPanel {
 
         group.appendChild(labelRow);
         group.appendChild(slider);
-        this.appendControl(group);
+        this.appendControl(container, group);
 
         this.frequencySlider = slider;
+        this.frequencyContainer = group;
         return slider;
     }
 
-    private createCarrierSelect(): HTMLSelectElement {
+    private createCarrierSelect(container: HTMLElement): HTMLSelectElement {
         const group = document.createElement('div');
         group.id = 'carrier-container';
         group.className = 'control-group';
@@ -621,143 +403,65 @@ export class ControlPanel {
         labelEl.htmlFor = 'carrier';
         labelEl.textContent = 'Carrier';
 
-        const select = document.createElement('select');
-        select.id = 'carrier';
-
         const iconContainer = document.createElement('div');
         iconContainer.className = 'waveform-icon';
         iconContainer.innerHTML = WAVEFORM_ICONS['sine'];
         this.carrierIconContainer = iconContainer;
 
-        const options = [
-            { value: '0', label: 'Sine', key: 'sine' },
-            { value: '1', label: 'Saw', key: 'saw' },
-            { value: '2', label: 'Square', key: 'square' },
-            { value: '3', label: 'Triangle', key: 'triangle' },
-        ];
-
-        for (const opt of options) {
-            const optEl = document.createElement('option');
-            optEl.value = opt.value;
-            optEl.textContent = opt.label;
-            select.appendChild(optEl);
-        }
-
-        select.addEventListener('change', () => {
-            const val = parseInt(select.value) as CarrierType;
-            if (this.onCarrierChange) {
-                this.onCarrierChange(val);
-            }
-            const key = options.find(o => o.value === select.value)?.key || 'sine';
-            iconContainer.innerHTML = WAVEFORM_ICONS[key];
+        const select = createSelect(group, 'carrier', 'Carrier', [
+            { value: '0', label: 'Sine' },
+            { value: '1', label: 'Saw' },
+            { value: '2', label: 'Square' },
+            { value: '3', label: 'Triangle' }
+        ], (val) => {
+            const carrierVal = parseInt(val) as CarrierType;
+            if (this.onCarrierChange) this.onCarrierChange(carrierVal);
+            const keys = ['sine', 'saw', 'square', 'triangle'];
+            iconContainer.innerHTML = WAVEFORM_ICONS[keys[carrierVal]] || WAVEFORM_ICONS['sine'];
         });
 
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-        labelRow.appendChild(iconContainer);
+        const labelRow = group.querySelector('.label-row') as HTMLElement;
+        if (labelRow) labelRow.appendChild(iconContainer);
 
-        group.appendChild(labelRow);
-        group.appendChild(select);
-        this.appendControl(group);
-
+        this.appendControl(container, group);
         this.carrierContainer = group;
         return select;
     }
 
-    private createFeedbackSlider(): HTMLInputElement {
-        const group = document.createElement('div');
-        group.id = 'feedback-container';
-        group.className = 'control-group';
-
-        const labelEl = document.createElement('label');
-        labelEl.htmlFor = 'feedback';
-        labelEl.textContent = 'Feedback';
-
-        const valueDisplay = document.createElement('span');
-        valueDisplay.className = 'value-display';
-        valueDisplay.id = 'feedback-value';
-        valueDisplay.textContent = '0%';
-
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.id = 'feedback';
-        slider.min = '0';
-        slider.max = '0.99';
-        slider.value = '0';
-        slider.step = '0.01';
-        slider.className = 'slider';
-
-        slider.addEventListener('input', () => {
-            const val = parseFloat(slider.value);
-            valueDisplay.textContent = Math.round(val * 100) + '%';
-            if (this.onFeedbackChange) {
-                this.onFeedbackChange(val);
-            }
+    private createFeedbackSlider(container: HTMLElement): HTMLInputElement {
+        const slider = createSlider(container, 'feedback', 'Feedback', 0, 0.99, 0, 0.01, (val) => {
+            if (this.onFeedbackChange) this.onFeedbackChange(val);
         });
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-        labelRow.appendChild(valueDisplay);
-
-        group.appendChild(labelRow);
-        group.appendChild(slider);
-        this.appendControl(group);
-
-        this.feedbackContainer = group;
+        const group = slider.closest('.control-group') as HTMLElement;
+        if (group) {
+            group.id = 'feedback-container';
+            this.feedbackContainer = group;
+        }
         return slider;
     }
 
-    private createMidiSelect(): HTMLSelectElement {
-        const group = document.createElement('div');
-        group.className = 'control-group';
-
-        const labelEl = document.createElement('label');
-        labelEl.htmlFor = 'midi-input';
-        labelEl.textContent = 'MIDI Input';
-
-        const select = document.createElement('select');
-        select.id = 'midi-input';
-
-        // Default option
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = '';
-        defaultOpt.textContent = 'No Devices Found';
-        select.appendChild(defaultOpt);
-
-        select.addEventListener('change', () => {
-            if (this.onMidiInputChange) {
-                this.onMidiInputChange(select.value);
-            }
+    private createMidiSelect(container: HTMLElement): HTMLSelectElement {
+        const select = createSelect(container, 'midi-input', 'MIDI Input', [
+            { value: '', label: 'No Devices Found' }
+        ], (val) => {
+            if (this.onMidiInputChange) this.onMidiInputChange(val);
         });
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-
-        group.appendChild(labelRow);
-        group.appendChild(select);
-        this.appendControl(group);
-
         return select;
     }
 
-    private createOctaveSelect(): HTMLSelectElement {
-        const select = this.createSelect('octave-select', 'Keyboard Octave', ['0', '1', '2', '3', '4', '5', '6', '7']);
-        select.value = '3'; // Default C3
-        select.addEventListener('change', () => {
-            this.octaveValue = parseInt(select.value, 10);
-            if (this.onOctaveChange) {
-                this.onOctaveChange(this.octaveValue);
-            }
+    private createOctaveSelect(container: HTMLElement): HTMLSelectElement {
+        const select = createSelect(container, 'octave-select', 'Keyboard Octave', [
+            '0', '1', '2', '3', '4', '5', '6', '7'
+        ], (val) => {
+            this.octaveValue = parseInt(val, 10);
+            if (this.onOctaveChange) this.onOctaveChange(this.octaveValue);
             this.scheduleAutoSave();
         });
+        select.value = '3';
         return select;
     }
 
     private freqToNoteName(freq: number): string {
-        // A4 = 440Hz = MIDI 69
         const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
         const midiNote = 12 * Math.log2(freq / 440) + 69;
         const roundedMidi = Math.round(midiNote);
@@ -766,179 +470,50 @@ export class ControlPanel {
         return `${noteNames[noteIndex]}${octave}`;
     }
 
-    private createFileInput(id: string, label: string, accept: string, multiple: boolean = false): HTMLInputElement {
+    private createDynamicParameterSlider(container: HTMLElement): void {
         const group = document.createElement('div');
+        group.id = 'dynamic-param-container';
         group.className = 'control-group';
+        group.style.display = 'none';
 
-        const labelEl = document.createElement('label');
-        labelEl.htmlFor = id;
-        labelEl.textContent = label;
-
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.id = id;
-        input.accept = accept;
-        input.multiple = multiple;
-        input.className = 'file-input';
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-
-        group.appendChild(labelRow);
-        group.appendChild(input);
-        this.appendControl(group);
-
-        return input;
-    }
-
-    private createResetButton(): void {
-        const group = document.createElement('div');
-        group.className = 'control-group';
-
-        const button = document.createElement('button');
-        button.id = 'reset-dataset-btn';
-        button.textContent = '↻ Reset Dataset';
-        button.className = 'reset-button';
-
-        button.addEventListener('click', () => {
-            // Trigger spectral data change callback to reinit current dataset
-            if (this.onSpectralDataChange) {
-                const currentDataset = this.spectralDataSelect.value;
-                this.onSpectralDataChange(currentDataset);
-            }
+        this.dynamicParamSlider = createSlider(group, 'dynamic-param', 'Parameter', 0, 1, 0.5, 0.01, (val) => {
+            if (this.onDynamicParamChange) this.onDynamicParamChange(val);
         });
 
-        group.appendChild(button);
-        this.appendControl(group);
+        this.appendControl(container, group);
+        this.dynamicParamContainer = group;
     }
 
-    private createResetViewButton(): void {
-        const group = document.createElement('div');
-        group.className = 'control-group';
-
-        const button = document.createElement('button');
-        button.id = 'reset-view-btn';
-        button.textContent = '⟲ Reset Camera View';
-        button.className = 'reset-button';
-        button.style.marginTop = '10px';
-
-        button.addEventListener('click', () => {
-            if (this.onResetView) {
-                this.onResetView();
-            }
-        });
-
-        group.appendChild(button);
-        this.appendControl(group);
-    }
-
-    private createDynamicParameterSlider(): void {
-        const container = document.createElement('div');
-        container.id = 'dynamic-param-container';
-        container.className = 'control-group';
-        container.style.display = 'none'; // Hidden by default
-
-        const labelEl = document.createElement('label');
-        labelEl.htmlFor = 'dynamic-param';
-        labelEl.id = 'dynamic-param-label';
-        labelEl.textContent = 'Parameter';
-
-        const valueDisplay = document.createElement('span');
-        valueDisplay.className = 'value-display';
-        valueDisplay.id = 'dynamic-param-value';
-        valueDisplay.textContent = '0.50';
-
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.id = 'dynamic-param';
-        slider.min = '0';
-        slider.max = '1';
-        slider.value = '0.5';
-        slider.step = '0.01';
-        slider.className = 'slider';
-
-        // Update value display on change
-        slider.addEventListener('input', () => {
-            const val = parseFloat(slider.value);
-            const step = parseFloat(slider.step);
-            valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
-            if (this.onDynamicParamChange) {
-                this.onDynamicParamChange(val);
-            }
-        });
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-        labelRow.appendChild(valueDisplay);
-
-        container.appendChild(labelRow);
-        container.appendChild(slider);
-        this.appendControl(container);
-
-        this.dynamicParamSlider = slider;
-        this.dynamicParamContainer = container;
-    }
-
-    private createPresetUI(): void {
-        // Preset dropdown
+    private createPresetUI(container: HTMLElement): void {
         const selectGroup = document.createElement('div');
         selectGroup.className = 'control-group';
 
-        const selectLabel = document.createElement('label');
-        selectLabel.textContent = 'Load Preset';
-
-        const select = document.createElement('select');
-        select.id = 'preset-select';
+        this.presetSelect = createSelect(selectGroup, 'preset-select', 'Load Preset', [], (val) => {
+            if (val && this.onPresetLoad) {
+                const preset = this.presetManager.getPreset(val);
+                if (preset) this.onPresetLoad(preset.controls);
+            }
+        });
 
         const defaultOpt = document.createElement('option');
         defaultOpt.value = '';
         defaultOpt.textContent = '-- Select Preset --';
-        select.appendChild(defaultOpt);
+        this.presetSelect.insertBefore(defaultOpt, this.presetSelect.firstChild);
 
-        select.addEventListener('change', () => {
-            if (select.value && this.onPresetLoad) {
-                const preset = this.presetManager.getPreset(select.value);
-                if (preset) {
-                    this.onPresetLoad(preset.controls);
-                }
-            }
-        });
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(selectLabel);
-
-        selectGroup.appendChild(labelRow);
-        selectGroup.appendChild(select);
-        this.appendControl(selectGroup);
-
-        this.presetSelect = select;
+        this.appendControl(container, selectGroup);
         this.updatePresetDropdown();
 
-        // Save / Delete buttons
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'control-group';
         buttonGroup.style.display = 'flex';
         buttonGroup.style.gap = '8px';
 
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'reset-button';
-        saveBtn.textContent = '💾 Save';
-        saveBtn.style.flex = '1';
-        saveBtn.addEventListener('click', () => {
+        createButton(buttonGroup, 'save-preset-btn', '💾 Save', () => {
             const name = prompt('Enter preset name:');
-            if (name && name.trim()) {
-                this.presetManager.savePreset(name.trim(), this.getFullState());
-            }
+            if (name && name.trim()) this.presetManager.savePreset(name.trim(), this.getFullState());
         });
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'reset-button';
-        deleteBtn.textContent = '🗑 Delete';
-        deleteBtn.style.flex = '1';
-        deleteBtn.addEventListener('click', () => {
+        createButton(buttonGroup, 'delete-preset-btn', '🗑 Delete', () => {
             if (this.presetSelect && this.presetSelect.value) {
                 if (confirm(`Delete preset "${this.presetSelect.value}"?`)) {
                     this.presetManager.deletePreset(this.presetSelect.value);
@@ -946,9 +521,7 @@ export class ControlPanel {
             }
         });
 
-        buttonGroup.appendChild(saveBtn);
-        buttonGroup.appendChild(deleteBtn);
-        this.appendControl(buttonGroup);
+        this.appendControl(container, buttonGroup);
     }
 
     private updatePresetDropdown(): void {
@@ -1151,12 +724,12 @@ export class ControlPanel {
         if (dzDisplay) dzDisplay.textContent = String(Math.round(parseFloat(this.densityZSlider.value)));
     }
 
-    private createGeneratorParamsContainer(): void {
-        const container = document.createElement('div');
-        container.id = 'generator-params-container';
-        container.style.display = 'none';
-        this.appendControl(container);
-        this.generatorParamsContainer = container;
+    private createGeneratorParamsContainer(container: HTMLElement): void {
+        const group = document.createElement('div');
+        group.id = 'generator-params-container';
+        group.style.display = 'none';
+        this.appendControl(container, group);
+        this.generatorParamsContainer = group;
     }
 
     private showGeneratorParams(dataSet: string, initialParams?: GeneratorParams): void {
@@ -1165,98 +738,55 @@ export class ControlPanel {
         this.generatorParamsContainer.innerHTML = '';
         this.currentDataSet = dataSet;
 
-        const createSlider = (label: string, min: number, max: number, value: number, step: number, onChange: (v: number) => void): HTMLInputElement => {
-            const group = document.createElement('div');
-            group.className = 'control-group';
-
-            const labelEl = document.createElement('label');
-            labelEl.textContent = label;
-
-            const valueDisplay = document.createElement('span');
-            valueDisplay.className = 'value-display';
-            valueDisplay.textContent = step >= 1 ? String(Math.round(value)) : value.toFixed(2);
-
-            const slider = document.createElement('input');
-            slider.type = 'range';
-            slider.min = String(min);
-            slider.max = String(max);
-            slider.value = String(value);
-            slider.step = String(step);
-            slider.className = 'slider';
-
-            slider.addEventListener('input', () => {
-                const val = parseFloat(slider.value);
-                valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
-                onChange(val);
-            });
-
-            const labelRow = document.createElement('div');
-            labelRow.className = 'label-row';
-            labelRow.appendChild(labelEl);
-            labelRow.appendChild(valueDisplay);
-
-            group.appendChild(labelRow);
-            group.appendChild(slider);
-            this.generatorParamsContainer!.appendChild(group);
-
-            return slider;
-        };
-
         const triggerUpdate = () => {
             if (this.onGeneratorParamsChange && this.currentGeneratorParams) {
                 this.onGeneratorParamsChange(this.currentDataSet, this.currentGeneratorParams);
             }
         };
 
+        const createParamSlider = (label: string, min: number, max: number, value: number, step: number, onChange: (v: number) => void) => {
+            return createSlider(this.generatorParamsContainer!, `gen-param-${label}`, label, min, max, value, step, onChange);
+        };
+
         switch (dataSet) {
             case '3d-julia': {
-                const saved = initialParams as JuliaParams | undefined;
-                const params: JuliaParams = saved ? { ...saved } : { ...defaultJuliaParams };
+                const params = { ...(initialParams as JuliaParams || defaultJuliaParams) };
                 this.currentGeneratorParams = params;
-
-                createSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
-                createSlider('C Real', -1, 1, params.cReal, 0.05, (v) => { params.cReal = v; triggerUpdate(); });
-                createSlider('C Imaginary', -1, 1, params.cImag, 0.05, (v) => { params.cImag = v; triggerUpdate(); });
+                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
+                createParamSlider('C Real', -1, 1, params.cReal, 0.05, (v) => { params.cReal = v; triggerUpdate(); });
+                createParamSlider('C Imaginary', -1, 1, params.cImag, 0.05, (v) => { params.cImag = v; triggerUpdate(); });
                 break;
             }
             case 'mandelbulb': {
-                const saved = initialParams as MandelbulbParams | undefined;
-                const params: MandelbulbParams = saved ? { ...saved } : { ...defaultMandelbulbParams };
+                const params = { ...(initialParams as MandelbulbParams || defaultMandelbulbParams) };
                 this.currentGeneratorParams = params;
-
-                createSlider('Power', 2, 12, params.power, 1, (v) => { params.power = v; triggerUpdate(); });
-                createSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
-                createSlider('Iterations', 4, 20, params.iterations, 1, (v) => { params.iterations = v; triggerUpdate(); });
+                createParamSlider('Power', 2, 12, params.power, 1, (v) => { params.power = v; triggerUpdate(); });
+                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
+                createParamSlider('Iterations', 4, 20, params.iterations, 1, (v) => { params.iterations = v; triggerUpdate(); });
                 break;
             }
             case 'menger-sponge': {
-                const saved = initialParams as MengerParams | undefined;
-                const params: MengerParams = saved ? { ...saved } : { ...defaultMengerParams };
+                const params = { ...(initialParams as MengerParams || defaultMengerParams) };
                 this.currentGeneratorParams = params;
-
-                createSlider('Iterations', 1, 5, params.iterations, 1, (v) => { params.iterations = v; triggerUpdate(); });
-                createSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
-                createSlider('Hole Size', 0.2, 0.5, params.holeSize, 0.01, (v) => { params.holeSize = v; triggerUpdate(); });
+                createParamSlider('Iterations', 1, 5, params.iterations, 1, (v) => { params.iterations = v; triggerUpdate(); });
+                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
+                createParamSlider('Hole Size', 0.2, 0.5, params.holeSize, 0.01, (v) => { params.holeSize = v; triggerUpdate(); });
                 break;
             }
             case 'sine-plasma': {
-                const saved = initialParams as PlasmaParams | undefined;
-                const params: PlasmaParams = saved ? { ...saved } : { ...defaultPlasmaParams };
+                const params = { ...(initialParams as PlasmaParams || defaultPlasmaParams) };
                 this.currentGeneratorParams = params;
-
-                createSlider('Frequency', 1, 10, params.frequency, 0.5, (v) => { params.frequency = v; triggerUpdate(); });
-                createSlider('Complexity', 1, 6, params.complexity, 1, (v) => { params.complexity = v; triggerUpdate(); });
-                createSlider('Contrast', 0.5, 3.0, params.contrast, 0.1, (v) => { params.contrast = v; triggerUpdate(); });
+                createParamSlider('Frequency', 1, 10, params.frequency, 0.5, (v) => { params.frequency = v; triggerUpdate(); });
+                createParamSlider('Complexity', 1, 6, params.complexity, 1, (v) => { params.complexity = v; triggerUpdate(); });
+                createParamSlider('Contrast', 0.5, 3.0, params.contrast, 0.1, (v) => { params.contrast = v; triggerUpdate(); });
                 break;
             }
             case 'game-of-life': {
-                const saved = initialParams as GameOfLifeParams | undefined;
-                const params: GameOfLifeParams = saved ? { ...saved } : { ...defaultGameOfLifeParams };
+                const params = { ...(initialParams as GameOfLifeParams || defaultGameOfLifeParams) };
                 this.currentGeneratorParams = params;
-
-                createSlider('Density', 0.1, 0.5, params.density, 0.05, (v) => { params.density = v; triggerUpdate(); });
-                createSlider('Birth Neighbors', 4, 6, params.birthMin, 1, (v) => { params.birthMin = v; triggerUpdate(); });
-                createSlider('Survive Neighbors', 3, 6, params.surviveMin, 1, (v) => { params.surviveMin = v; triggerUpdate(); });
+                createParamSlider('Density', 0.1, 0.5, params.density, 0.05, (v) => { params.density = v; triggerUpdate(); });
+                createParamSlider('Birth Neighbors', 4, 6, params.birthMin, 1, (v) => { params.birthMin = v; triggerUpdate(); });
+                createParamSlider('Survive Neighbors', 3, 6, params.surviveMin, 1, (v) => { params.surviveMin = v; triggerUpdate(); });
                 break;
             }
             default:
@@ -1276,11 +806,11 @@ export class ControlPanel {
         this.currentGeneratorParams = null;
     }
 
-    private createProgressIndicator(): void {
+    private createProgressIndicator(container: HTMLElement): void {
         const progressContainer = document.createElement('div');
         progressContainer.id = 'wav-progress-container';
         progressContainer.className = 'progress-container';
-        progressContainer.style.display = 'none'; // Hidden by default
+        progressContainer.style.display = 'none';
 
         const spinner = document.createElement('div');
         spinner.className = 'spinner';
@@ -1302,76 +832,23 @@ export class ControlPanel {
         progressContainer.appendChild(progressBar);
         progressContainer.appendChild(progressText);
 
-        this.appendControl(progressContainer);
+        this.appendControl(container, progressContainer);
+        this.progressContainer = progressContainer;
+        this.progressFill = progressFill;
+        this.progressText = progressText;
     }
 
-    private wireUpEvents(): void {
-        const pathUpdate = () => {
-            if (this.onPathChange) {
-                this.onPathChange(this.getState());
-            }
-            this.scheduleAutoSave();
-        };
+    public showProgress(): void {
+        if (this.progressContainer) this.progressContainer.style.display = 'flex';
+    }
 
+    public hideProgress(): void {
+        if (this.progressContainer) this.progressContainer.style.display = 'none';
+    }
 
-
-        const volumeUpdate = () => {
-            if (this.onVolumeResolutionChange) {
-                this.onVolumeResolutionChange({
-                    x: Math.round(parseFloat(this.densityXSlider.value)),
-                    y: Math.round(parseFloat(this.densityYSlider.value)),
-                    z: Math.round(parseFloat(this.densityZSlider.value)),
-                });
-            }
-            this.scheduleAutoSave();
-        };
-
-        const spectralDataUpdate = () => {
-            if (this.onSpectralDataChange) {
-                this.onSpectralDataChange(this.spectralDataSelect.value);
-            }
-            this.scheduleAutoSave();
-        };
-
-        this.spectralDataSelect.addEventListener('change', spectralDataUpdate);
-
-        // WAV upload (multi-file support)
-        this.wavUploadInput.addEventListener('change', () => {
-            const files = this.wavUploadInput.files;
-            if (files && files.length > 0 && this.onWavUpload) {
-                this.onWavUpload(files);
-            }
-        });
-
-        this.pathYSlider.addEventListener('input', pathUpdate);
-        // Rotation sliders removed - controlled by mouse
-        this.planeTypeSelect.addEventListener('change', pathUpdate);
-        this.scanPositionSlider.addEventListener('input', pathUpdate);
-
-        // Synth mode change
-        this.synthModeSelect.addEventListener('change', () => {
-            const mode = this.synthModeSelect.value as SynthMode;
-            // Show/hide wavetable-specific controls based on mode
-            const isWavetable = mode === SynthMode.WAVETABLE;
-            if (this.frequencyContainer) {
-                this.frequencyContainer.style.display = isWavetable ? 'block' : 'none';
-            }
-            if (this.carrierContainer) {
-                this.carrierContainer.style.display = isWavetable ? 'block' : 'none';
-            }
-            if (this.feedbackContainer) {
-                this.feedbackContainer.style.display = isWavetable ? 'block' : 'none';
-            }
-            if (this.onSynthModeChange) {
-                this.onSynthModeChange(mode);
-            }
-            this.scheduleAutoSave();
-        });
-
-        // Volume density sliders trigger on change (not input) to avoid too many reinits
-        this.densityXSlider.addEventListener('change', volumeUpdate);
-        this.densityYSlider.addEventListener('change', volumeUpdate);
-        this.densityZSlider.addEventListener('change', volumeUpdate);
+    public updateProgress(percent: number): void {
+        if (this.progressFill) this.progressFill.style.width = `${percent}%`;
+        if (this.progressText) this.progressText.textContent = `${Math.round(percent)}%`;
     }
 
     public setPathChangeCallback(callback: (state: ReadingPathState) => void): void {
@@ -1414,9 +891,7 @@ export class ControlPanel {
     }
 
     public updateMidiInputs(inputs: { id: string, name: string }[]): void {
-        // Save current selection
         const currentSelection = this.midiSelect.value;
-
         this.midiSelect.innerHTML = '';
 
         if (inputs.length === 0) {
@@ -1427,10 +902,6 @@ export class ControlPanel {
             this.midiSelect.disabled = true;
         } else {
             this.midiSelect.disabled = false;
-
-            // Add "None" or placeholder? User probably wants to select one.
-            // Let's rely on logic to select first one if not selected
-
             for (const input of inputs) {
                 const opt = document.createElement('option');
                 opt.value = input.id;
@@ -1438,7 +909,6 @@ export class ControlPanel {
                 this.midiSelect.appendChild(opt);
             }
 
-            // Restore selection if still exists, or select first
             if (inputs.some(i => i.id === currentSelection)) {
                 this.midiSelect.value = currentSelection;
             } else if (inputs.length > 0) {
@@ -1524,9 +994,9 @@ export class ControlPanel {
                 z: 0,
             },
             rotation: {
-                x: 0, // Controlled by mouse
-                y: 0, // Not used
-                z: 0, // Controlled by mouse
+                x: 0,
+                y: 0,
+                z: 0,
             },
             scanPosition: parseFloat(this.scanPositionSlider.value),
             planeType: this.planeTypeSelect.value as PlaneType,
@@ -1534,15 +1004,11 @@ export class ControlPanel {
         };
     }
 
-    // getSpeed Removed
-
     public updateScanPosition(pos: number): void {
         this.scanPositionSlider.value = String(pos);
-        // Update display
         const display = document.getElementById('scan-pos-value');
         if (display) display.textContent = pos.toFixed(2);
 
-        // Trigger callback manually
         if (this.onPathChange) {
             this.onPathChange(this.getState());
         }
@@ -1553,14 +1019,12 @@ export class ControlPanel {
         const display = document.getElementById('path-y-value');
         if (display) display.textContent = y.toFixed(2);
 
-        // Trigger callback manually
         if (this.onPathChange) {
             this.onPathChange(this.getState());
         }
     }
 
     public addSpectralDataOption(value: string, label: string): void {
-        // Check if option already exists
         const existingOption = Array.from(this.spectralDataSelect.options).find(
             opt => opt.value === value
         );
@@ -1572,21 +1036,16 @@ export class ControlPanel {
             this.spectralDataSelect.appendChild(option);
         }
 
-        // Select the new option
         this.spectralDataSelect.value = value;
-
-        // Trigger change event
         const event = new Event('change');
         this.spectralDataSelect.dispatchEvent(event);
     }
 
     public setVolumeDensity(resolution: VolumeResolution): void {
-        // Update slider values
         this.densityXSlider.value = String(resolution.x);
         this.densityYSlider.value = String(resolution.y);
         this.densityZSlider.value = String(resolution.z);
 
-        // Update displays
         const xDisplay = document.getElementById('density-x-value');
         const yDisplay = document.getElementById('density-y-value');
         const zDisplay = document.getElementById('density-z-value');
@@ -1594,24 +1053,6 @@ export class ControlPanel {
         if (xDisplay) xDisplay.textContent = String(Math.round(resolution.x));
         if (yDisplay) yDisplay.textContent = String(Math.round(resolution.y));
         if (zDisplay) zDisplay.textContent = String(Math.round(resolution.z));
-    }
-
-    public showProgress(): void {
-        const container = document.getElementById('wav-progress-container');
-        if (container) container.style.display = 'flex';
-    }
-
-    public hideProgress(): void {
-        const container = document.getElementById('wav-progress-container');
-        if (container) container.style.display = 'none';
-    }
-
-    public updateProgress(percent: number): void {
-        const fill = document.getElementById('wav-progress-fill');
-        const text = document.getElementById('wav-progress-text');
-
-        if (fill) fill.style.width = `${percent}%`;
-        if (text) text.textContent = `${Math.round(percent)}%`;
     }
 
     public setResetViewCallback(callback: () => void): void {
