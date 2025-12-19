@@ -356,6 +356,123 @@ class WavetableProcessor extends AudioWorkletProcessor {
 registerProcessor('wavetable-processor', WavetableProcessor);
 `;
 
+// Processor code for subtractive noise filtering
+// Starts with white noise and applies a bank of notch filters
+// spectralData[0] (R) = Frequency
+// spectralData[1] (G) = Q/Bandwidth
+const WHITENOISE_PROCESSOR_CODE = `
+const INTERP_SAMPLES = 64;
+
+class WhitenoiseProcessor extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this.spectralData = new Float32Array(1024 * 4);
+        this.prevData = new Float32Array(1024 * 4);
+        this.targetData = new Float32Array(1024 * 4);
+        
+        // State Variable Filter states (low and band) per potential filter band
+        this.lowStates = new Float32Array(1024);
+        this.bandStates = new Float32Array(1024);
+        
+        this.frequencyMultiplier = 1.0;
+        
+        this.interpT = 1.0;
+        this.interpStep = INTERP_SAMPLES > 0 ? 1.0 / (INTERP_SAMPLES + 1) : 1.0;
+        
+        this.port.onmessage = (e) => {
+            if (e.data.type === 'spectral-data') {
+                const data = e.data.data;
+                if (INTERP_SAMPLES === 0) {
+                    this.spectralData.set(data);
+                    this.targetData.set(data);
+                } else {
+                    this.prevData.set(this.spectralData);
+                    this.targetData.set(data);
+                    this.interpT = 0.0;
+                }
+            } else if (e.data.type === 'frequency-multiplier') {
+                this.frequencyMultiplier = e.data.value;
+            }
+        };
+    }
+
+    process(inputs, outputs, parameters) {
+        const output = outputs[0];
+        const channelL = output[0];
+        const channelR = output[1];
+        
+        const numPoints = this.spectralData.length / 4;
+        
+        for (let i = 0; i < channelL.length; i++) {
+            // Per-sample interpolation for smooth parameter changes
+            if (INTERP_SAMPLES > 0 && this.interpT < 1.0) {
+                this.interpT += this.interpStep;
+                if (this.interpT > 1.0) this.interpT = 1.0;
+                const t = this.interpT;
+                const invT = 1.0 - t;
+                for (let j = 0; j < this.spectralData.length; j++) {
+                    this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
+                }
+            }
+            
+            // Source: White Noise
+            const noise = Math.random() * 2 - 1;
+            let sumSubtracted = 0;
+            
+            const minFreq = 20;
+            const maxFreq = 20000;
+            const freqRange = maxFreq - minFreq;
+            const binWidth = freqRange / numPoints;
+            
+            // Subtractive Filtering (Parallel Bank of SVF Band-Pass filters subtracted from noise)
+            for (let bin = 0; bin < numPoints; bin++) {
+                const idx = bin * 4;
+                const suppression = this.spectralData[idx]; // R channel: Suppression amount
+                const qVal = this.spectralData[idx + 1];    // G channel: Width multiplier
+                
+                if (suppression < 0.001) continue;
+                
+                // Frequency mapped to index (consistent with Spectral mode)
+                const normalizedBin = bin / numPoints;
+                const baseFreq = minFreq + freqRange * normalizedBin;
+                const freq = baseFreq * this.frequencyMultiplier;
+                
+                if (freq >= sampleRate * 0.48) continue; // Protect SVF stability
+                
+                // Bandwidth: one bin width scaled by Green channel
+                const widthInBins = qVal * 10 + 0.1;
+                const BW = binWidth * widthInBins;
+                
+                // Q = center_freq / bandwidth
+                const Q = Math.max(0.5, freq / BW);
+                
+                // SVF Coefficients (Standard SVF for subtraction)
+                const f = 2.0 * Math.sin(Math.PI * freq / sampleRate);
+                const q = 1.0 / Q;
+                
+                // SVF Update Equations for Band-Pass
+                this.lowStates[bin] = this.lowStates[bin] + f * this.bandStates[bin];
+                const high = noise - this.lowStates[bin] - q * this.bandStates[bin];
+                const band = f * high + this.bandStates[bin];
+                this.bandStates[bin] = band;
+                
+                // Add to parallel subtraction sum
+                sumSubtracted += band * suppression;
+            }
+            
+            const sample = noise - sumSubtracted;
+            
+            const gain = 0.01; // User adjusted gain
+            channelL[i] = sample * gain;
+            channelR[i] = sample * gain;
+        }
+        
+        return true;
+    }
+}
+registerProcessor('whitenoise-processor', WhitenoiseProcessor);
+`;
+
 export class AudioEngine {
     private ctx: AudioContext;
     private workletNode: AudioWorkletNode | null = null;
@@ -420,15 +537,19 @@ export class AudioEngine {
             // Load both processors
             const spectralBlob = new Blob([SPECTRAL_PROCESSOR_CODE], { type: 'application/javascript' });
             const wavetableBlob = new Blob([WAVETABLE_PROCESSOR_CODE], { type: 'application/javascript' });
+            const whitenoiseBlob = new Blob([WHITENOISE_PROCESSOR_CODE], { type: 'application/javascript' });
 
             const spectralUrl = URL.createObjectURL(spectralBlob);
             const wavetableUrl = URL.createObjectURL(wavetableBlob);
+            const whitenoiseUrl = URL.createObjectURL(whitenoiseBlob);
 
             await this.ctx.audioWorklet.addModule(spectralUrl);
             await this.ctx.audioWorklet.addModule(wavetableUrl);
+            await this.ctx.audioWorklet.addModule(whitenoiseUrl);
 
             URL.revokeObjectURL(spectralUrl);
             URL.revokeObjectURL(wavetableUrl);
+            URL.revokeObjectURL(whitenoiseUrl);
 
             // Create initial worklet based on current mode
             this.createWorkletNode();
@@ -448,9 +569,9 @@ export class AudioEngine {
             this.workletNode = null;
         }
 
-        const processorName = this.currentMode === SynthMode.SPECTRAL
-            ? 'spectral-processor'
-            : 'wavetable-processor';
+        let processorName = 'wavetable-processor';
+        if (this.currentMode === SynthMode.SPECTRAL) processorName = 'spectral-processor';
+        if (this.currentMode === SynthMode.WHITENOISE_BAND_Q_FILTER) processorName = 'whitenoise-processor';
 
         this.workletNode = new AudioWorkletNode(this.ctx, processorName, {
             numberOfInputs: 0,
@@ -564,7 +685,9 @@ export class AudioEngine {
     }
 
     public setSpectralPitch(multiplier: number): void {
-        if (this.workletNode && this.currentMode === SynthMode.SPECTRAL) {
+        const supported = this.currentMode === SynthMode.SPECTRAL ||
+            this.currentMode === SynthMode.WHITENOISE_BAND_Q_FILTER;
+        if (this.workletNode && supported) {
             this.workletNode.port.postMessage({
                 type: 'frequency-multiplier',
                 value: multiplier

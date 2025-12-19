@@ -207,6 +207,7 @@ export class ControlPanel {
         this.synthModeSelect = this.createSelect('synth-mode', 'Mode', [
             SynthMode.WAVETABLE,
             SynthMode.SPECTRAL,
+            SynthMode.WHITENOISE_BAND_Q_FILTER,
         ]);
         this.frequencySlider = this.createFrequencySlider();
         this.createCarrierSelect();
@@ -216,7 +217,7 @@ export class ControlPanel {
 
         // LFO Section
         this.createSection('LFOs');
-        this.lfoState.forEach((lfo, index) => {
+        this.lfoState.forEach((_, index) => {
             this.createLFOUnit(index);
         })
 
