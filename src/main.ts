@@ -3,7 +3,7 @@ import { WebGLContext } from './gpu/context';
 import { Renderer } from './gpu/renderer';
 import { ControlPanel } from './ui/controls';
 import { SpectrogramWebGL as Spectrogram } from './ui/spectrogram-webgl';
-import { StereoScope } from './ui/scope';
+import { StereoScopeWebGL as StereoScope } from './ui/scope-webgl';
 import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
 import { MidiHandler } from './audio/midi-handler';
@@ -139,7 +139,6 @@ class SpectralTableApp {
         this.controls.setVolumeResolutionChangeCallback(this.onVolumeResolutionChange.bind(this));
         this.controls.setSpectralDataChangeCallback(this.onSpectralDataChange.bind(this));
         this.controls.setWavUploadCallback(this.onWavUpload.bind(this));
-        this.controls.setDynamicParamChangeCallback(this.onDynamicParamChange.bind(this));
         this.controls.setSynthModeChangeCallback(this.onSynthModeChange.bind(this));
         this.controls.setFrequencyChangeCallback(this.onFrequencyChange.bind(this));
         this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
@@ -346,17 +345,6 @@ class SpectralTableApp {
 
         // Resume audio when data changes
         this.audioEngine.resume();
-    }
-
-    private onDynamicParamChange(value: number): void {
-        // Update speed for active animation (0-1 range)
-        if (this.gameOfLifeActive) {
-            this.gameOfLifeSpeed = value;
-            console.log(`Game of Life speed: ${value.toFixed(2)} (0=pause, 1=instant)`);
-        } else if (this.sinePlasmaActive) {
-            this.sinePlasmaSpeed = value;
-            console.log(`Sine plasma speed: ${value.toFixed(2)} (0=static, 1=fast)`);
-        }
     }
 
     private onSynthModeChange(mode: SynthMode): void {

@@ -11,7 +11,7 @@ import {
 import { PresetManager } from './preset-manager';
 import {
     createSection, createSlider, createSelect, createModulatableSlider,
-    createFileInput, createButton, WAVEFORM_ICONS
+    createFileInput, createButton, WAVEFORM_ICONS, CONTROL_STYLE
 } from './ui-elements';
 
 interface SectionOpts {
@@ -62,7 +62,6 @@ export class ControlPanel {
     private onVolumeResolutionChange?: (resolution: VolumeResolution) => void;
     private onSpectralDataChange?: (dataSet: string) => void;
     private onWavUpload?: (files: FileList) => void;
-    private onDynamicParamChange?: (value: number) => void;
     private onSynthModeChange: ((mode: SynthMode) => void) | null = null;
     private onFrequencyChange: ((freq: number) => void) | null = null;
     private onCarrierChange: ((carrier: CarrierType) => void) | null = null;
@@ -149,23 +148,26 @@ export class ControlPanel {
     }
 
     private populateVolumeSection(container: HTMLElement): void {
-        this.spectralDataSelect = createSelect(container, 'spectral-data-type', 'Data Set', [
+        const subGroup = document.createElement('div');
+        subGroup.classList.add('sub-group');
+        container.appendChild(subGroup);
+        this.spectralDataSelect = createSelect(subGroup, 'spectral-data-type', 'Data Set', [
             'blank', '3d-julia', 'mandelbulb', 'menger-sponge', 'sine-plasma', 'game-of-life'
         ], (val) => {
             if (this.onSpectralDataChange) this.onSpectralDataChange(val);
             this.scheduleAutoSave();
         });
-
-        createButton(container, 'reset-dataset-btn', '↻ Reset Dataset', () => {
+        this.createGeneratorParamsContainer(subGroup);
+        createButton(subGroup, 'reset-dataset-btn', '↻ Reset Dataset', () => {
             if (this.onSpectralDataChange) this.onSpectralDataChange(this.spectralDataSelect.value);
         });
-
-        this.createDynamicParameterSlider(container);
-        this.createGeneratorParamsContainer(container);
-        createFileInput(container, 'wav-upload', 'Upload WAV (Multi-select)', '.wav,.mp3,.ogg', true, (files) => {
+        const subGroup2 = document.createElement('div');
+        subGroup2.classList.add('sub-group');
+        container.appendChild(subGroup2);
+        createFileInput(subGroup2, 'wav-upload', 'Upload WAV (Multi-select)', '.wav,.mp3,.ogg', true, (files) => {
             if (files && files.length > 0 && this.onWavUpload) this.onWavUpload(files);
         });
-        this.createProgressIndicator(container);
+        this.createProgressIndicator(subGroup2);
     }
 
     private populatePathSection(container: HTMLElement): void {
@@ -217,7 +219,10 @@ export class ControlPanel {
     }
 
     private populateSynthesisSection(container: HTMLElement): void {
-        this.synthModeSelect = createSelect(container, 'synth-mode', 'Mode', [
+        const subGroup = document.createElement('div');
+        subGroup.classList.add('sub-group');
+        container.appendChild(subGroup);
+        this.synthModeSelect = createSelect(subGroup, 'synth-mode', 'Mode', [
             SynthMode.WAVETABLE, SynthMode.SPECTRAL, SynthMode.WHITENOISE_BAND_Q_FILTER
         ], (val) => {
             const mode = val as SynthMode;
@@ -227,12 +232,14 @@ export class ControlPanel {
             if (this.onSynthModeChange) this.onSynthModeChange(mode);
             this.scheduleAutoSave();
         });
-
-        this.frequencySlider = this.createFrequencySlider(container);
-        this.createCarrierSelect(container);
-        this.createFeedbackSlider(container);
-        this.midiSelect = this.createMidiSelect(container);
-        this.createOctaveSelect(container);
+        this.midiSelect = this.createMidiSelect(subGroup);
+        this.createOctaveSelect(subGroup);
+        const subGroup2 = document.createElement('div');
+        subGroup2.classList.add('sub-group');
+        container.appendChild(subGroup2);
+        this.createCarrierSelect(subGroup2);
+        this.frequencySlider = this.createFrequencySlider(subGroup2);
+        this.createFeedbackSlider(subGroup2);
     }
 
     private populateLFOSection(container: HTMLElement): void {
@@ -254,14 +261,9 @@ export class ControlPanel {
             }
             this.scheduleAutoSave();
         };
-
         this.densityXSlider = createSlider(container, 'density-x', 'Freq Bins (X)', VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT, 1, volUpdate);
         this.densityYSlider = createSlider(container, 'density-y', 'Morph Layers (Y)', VOLUME_DENSITY_Y_MIN, VOLUME_DENSITY_Y_MAX, VOLUME_DENSITY_Y_DEFAULT, 1, volUpdate);
         this.densityZSlider = createSlider(container, 'density-z', 'Time Res (Z)', VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT, 1, volUpdate);
-
-        createButton(container, 'reset-view-btn', '⟲ Reset Camera View', () => {
-            if (this.onResetView) this.onResetView();
-        });
     }
 
     private populatePresetSection(container: HTMLElement): void {
@@ -277,13 +279,10 @@ export class ControlPanel {
     private createLFOUnit(container: HTMLElement, index: number): void {
         const wrapper = document.createElement('div');
         wrapper.className = 'lfo-unit';
-        wrapper.style.marginBottom = '10px';
-        wrapper.style.padding = '5px';
-        wrapper.style.borderLeft = '2px solid #333';
+        if (CONTROL_STYLE === 'knob') wrapper.classList.add('knob-layout');
 
-        const title = document.createElement('div');
-        title.className = 'label-row';
-        title.innerHTML = `<label>LFO ${index + 1}</label>`;
+        const title = document.createElement('label');
+        title.innerText = `LFO ${index + 1}`;
         wrapper.appendChild(title);
 
         const iconContainer = document.createElement('div');
@@ -351,46 +350,22 @@ export class ControlPanel {
     }
 
     private createFrequencySlider(container: HTMLElement): HTMLInputElement {
-        const group = document.createElement('div');
-        group.id = 'frequency-container';
-        group.className = 'control-group';
-
-        const labelEl = document.createElement('label');
-        labelEl.htmlFor = 'frequency';
-        labelEl.textContent = 'Frequency';
-
-        const valueDisplay = document.createElement('span');
-        valueDisplay.className = 'value-display';
-        valueDisplay.id = 'frequency-value';
-        valueDisplay.textContent = '220 Hz (A3)';
-
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.id = 'frequency';
-        slider.min = '20';
-        slider.max = '2000';
-        slider.value = '220';
-        slider.step = '1';
-        slider.className = 'slider';
-
-        slider.addEventListener('input', () => {
-            const freq = parseFloat(slider.value);
-            const noteName = this.freqToNoteName(freq);
-            valueDisplay.textContent = `${Math.round(freq)} Hz (${noteName})`;
+        const slider = createSlider(container, 'frequency', 'Frequency', 20, 2000, 220, 1, (freq) => {
+            const valDisplay = document.getElementById('frequency-value');
+            if (valDisplay) {
+                const noteName = this.freqToNoteName(freq);
+                valDisplay.textContent = `${Math.round(freq)} Hz (${noteName})`;
+            }
             if (this.onFrequencyChange) this.onFrequencyChange(freq);
         });
 
-        const labelRow = document.createElement('div');
-        labelRow.className = 'label-row';
-        labelRow.appendChild(labelEl);
-        labelRow.appendChild(valueDisplay);
-
-        group.appendChild(labelRow);
-        group.appendChild(slider);
-        this.appendControl(container, group);
+        const group = slider.closest('.control-group') as HTMLElement;
+        if (group) {
+            group.id = 'frequency-container';
+            this.frequencyContainer = group;
+        }
 
         this.frequencySlider = slider;
-        this.frequencyContainer = group;
         return slider;
     }
 
@@ -468,20 +443,6 @@ export class ControlPanel {
         const octave = Math.floor(roundedMidi / 12) - 1;
         const noteIndex = roundedMidi % 12;
         return `${noteNames[noteIndex]}${octave}`;
-    }
-
-    private createDynamicParameterSlider(container: HTMLElement): void {
-        const group = document.createElement('div');
-        group.id = 'dynamic-param-container';
-        group.className = 'control-group';
-        group.style.display = 'none';
-
-        this.dynamicParamSlider = createSlider(group, 'dynamic-param', 'Parameter', 0, 1, 0.5, 0.01, (val) => {
-            if (this.onDynamicParamChange) this.onDynamicParamChange(val);
-        });
-
-        this.appendControl(container, group);
-        this.dynamicParamContainer = group;
     }
 
     private createPresetUI(container: HTMLElement): void {
@@ -728,6 +689,7 @@ export class ControlPanel {
         const group = document.createElement('div');
         group.id = 'generator-params-container';
         group.style.display = 'none';
+        group.classList.add('lfo-unit');
         this.appendControl(container, group);
         this.generatorParamsContainer = group;
     }
@@ -932,10 +894,6 @@ export class ControlPanel {
         this.onWavUpload = callback;
     }
 
-    public setDynamicParamChangeCallback(callback: (value: number) => void): void {
-        this.onDynamicParamChange = callback;
-    }
-
     public setLFOParamChangeCallback(callback: (index: number, param: string, value: any) => void): void {
         this.onLFOParamChange = callback;
     }
@@ -1045,17 +1003,11 @@ export class ControlPanel {
         this.densityXSlider.value = String(resolution.x);
         this.densityYSlider.value = String(resolution.y);
         this.densityZSlider.value = String(resolution.z);
-
         const xDisplay = document.getElementById('density-x-value');
         const yDisplay = document.getElementById('density-y-value');
         const zDisplay = document.getElementById('density-z-value');
-
         if (xDisplay) xDisplay.textContent = String(Math.round(resolution.x));
         if (yDisplay) yDisplay.textContent = String(Math.round(resolution.y));
         if (zDisplay) zDisplay.textContent = String(Math.round(resolution.z));
-    }
-
-    public setResetViewCallback(callback: () => void): void {
-        this.onResetView = callback;
     }
 }
