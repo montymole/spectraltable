@@ -2,7 +2,7 @@ import './style.css';
 import { WebGLContext } from './gpu/context';
 import { Renderer } from './gpu/renderer';
 import { ControlPanel } from './ui/controls';
-import { Spectrogram } from './ui/spectrogram';
+import { SpectrogramWebGL as Spectrogram } from './ui/spectrogram-webgl';
 import { StereoScope } from './ui/scope';
 import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
