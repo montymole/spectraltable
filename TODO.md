@@ -3,15 +3,15 @@
 ## Immediate Improvements
 
 ### Render WAV Dialog
-- [ ] Add progress indicator (match load wav progress style)
-- [ ] Replace base note input with dropdown selector (C-1 → C-8, display as C-3 format)
+- [x] Add progress indicator (match load wav progress style)
+- [x] Replace base note input with dropdown selector (C-1 → C-8, display as C-3 format)
       *→ generate options array with noteToName() helper*
-- [ ] Replace direct download with embedded audio player
-  - [ ] Add play/replay button in render dialog
+- [x] Replace direct download with embedded audio player
+  - [x] Add play/replay button in render dialog
         *→ use `<audio>` element with blob URL from rendered buffer*
-  - [ ] Add save button with filename picker
+  - [x] Add save button with filename picker
         *→ `showSaveFilePicker()` (File System Access API) with fallback to `<a download>`*
-  - [ ] Default filename to "preset name-basenote.wav" or "synthesistype-basenote.wav"
+  - [x] Default filename to "preset name-basenote.wav" or "synthesistype-basenote.wav"
 
 ### LFO Enhancements
 - [ ] Extend frequency range down to 0.001 Hz
