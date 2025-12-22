@@ -12,7 +12,7 @@ import { PianoKeyboard } from './ui/piano';
 import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType,
     VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT,
-    GeneratorParams, PresetControls
+    GeneratorParams, PresetControls, OctaveDoublingState
 } from './types';
 import { LFO, LFOWaveform } from './modulators/lfo';
 
@@ -139,9 +139,10 @@ class SpectralTableApp {
         this.controls.setSpectralDataChangeCallback(this.onSpectralDataChange.bind(this));
         this.controls.setWavUploadCallback(this.onWavUpload.bind(this));
         this.controls.setSynthModeChangeCallback(this.onSynthModeChange.bind(this));
-        this.controls.setFrequencyChangeCallback(this.onFrequencyChange.bind(this));
         this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
         this.controls.setFeedbackChangeCallback(this.onFeedbackChange.bind(this));
+        this.controls.setOctaveDoublingChangeCallback(this.onOctaveDoublingChange.bind(this));
+        this.controls.setInterpSamplesChangeCallback((samples) => this.audioEngine.setInterpSamples(samples));
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
 
@@ -243,6 +244,7 @@ class SpectralTableApp {
         this.audioEngine.setWavetableFrequency(state.frequency);
         this.audioEngine.setCarrier(state.carrier);
         this.audioEngine.setFeedback(state.feedback);
+        this.audioEngine.setInterpSamples(state.interpSamples || 64);
 
         // Apply amp envelope (always first envelope)
         if (state.envelopes?.[0]) {
@@ -254,6 +256,15 @@ class SpectralTableApp {
 
         // Apply piano octave
         this.piano.setBaseOctave(state.octave);
+
+        // Apply octave doubling
+        if (state.octaveDoubling) {
+            this.audioEngine.setOctaveDoubling(
+                state.octaveDoubling.lowCount,
+                state.octaveDoubling.highCount,
+                state.octaveDoubling.multiplier
+            );
+        }
 
         // Apply volume resolution
         const resolution = { x: state.densityX, y: state.densityY, z: state.densityZ };
@@ -351,16 +362,20 @@ class SpectralTableApp {
         console.log(`✓ Synth mode: ${mode}`);
     }
 
-    private onFrequencyChange(freq: number): void {
-        this.audioEngine.setWavetableFrequency(freq);
-    }
-
     private onCarrierChange(carrier: CarrierType): void {
         this.audioEngine.setCarrier(carrier);
     }
 
     private onFeedbackChange(amount: number): void {
         this.audioEngine.setFeedback(amount);
+    }
+
+    private onOctaveDoublingChange(state: OctaveDoublingState): void {
+        this.audioEngine.setOctaveDoubling(
+            state.lowCount,
+            state.highCount,
+            state.multiplier
+        );
     }
 
     private onGeneratorParamsChange(dataSet: string, params: GeneratorParams): void {
@@ -390,17 +405,8 @@ class SpectralTableApp {
         const mode = this.audioEngine.getMode();
 
         if (mode === SynthMode.WAVETABLE) {
-            // Override frequency slider
+            // Set wavetable frequency directly from MIDI
             this.audioEngine.setWavetableFrequency(freq);
-
-            // Update UI slider to match
-            // We need to access the controls to update the slider visual
-            // Currently controls doesn't expose a method to set value, so we might need to add one
-            // or just let it diverge. But better to update it.
-            // Let's add setFrequencyValue to ControlPanel in next step if needed.
-            if (this.controls) {
-                this.controls.setFrequency(freq);
-            }
         } else if (mode === SynthMode.SPECTRAL) {
             // Spectral Mode Pitch Strategy
             // Root = 440Hz (A4)

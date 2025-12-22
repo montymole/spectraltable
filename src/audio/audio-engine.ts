@@ -43,14 +43,15 @@ function computeRolloff(normalizedFreq, mode) {
     }
 }
 
-// Interpolation: intermediate samples between spectral frame transitions
-// 0 = OFF (instant update, may cause rattling on sudden changes)
-// 1 = 1 intermediate sample, 2 = 2 intermediate samples, etc.
-const INTERP_SAMPLES = 64;
+// Default interpolation samples (can be changed dynamically)
+const DEFAULT_INTERP_SAMPLES = 64;
 
 class SpectralProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
+        // Interpolation setting
+        this.interpSamples = DEFAULT_INTERP_SAMPLES;
+        
         // Current working spectral data (interpolated)
         this.spectralData = new Float32Array(1024 * 4);
         // Previous frame (start of interpolation)
@@ -69,17 +70,30 @@ class SpectralProcessor extends AudioWorkletProcessor {
         
         this.frequencyMultiplier = 1.0;
         
+        // Octave Doubling: layering octaves
+        this.octaveLow = 0;      // 0-10 octaves below
+        this.octaveHigh = 0;     // 0-10 octaves above
+        this.octaveMult = 0.5;   // Volume decay per octave
+        
+        // Extra phase accumulators for octave doubling (10 low + 10 high per bin)
+        this.harmonicPhases = new Float32Array(1024 * 20); // This will be resized based on numPoints
+        
         // Interpolation state: 0 = at prev, 1 = at target
         this.interpT = 1.0;
-        // N intermediate samples means N+1 total steps to reach target
-        this.interpStep = INTERP_SAMPLES > 0 ? 1.0 / (INTERP_SAMPLES + 1) : 1.0;
+        // Recalculate step based on current interpSamples
+        this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
         
         this.port.onmessage = (e) => {
             if (e.data.type === 'spectral-data') {
                 const data = e.data.data;
                 const numPoints = data.length / 4;
                 
-                if (INTERP_SAMPLES === 0) {
+                // Resize harmonicPhases if numPoints changed
+                if (this.harmonicPhases.length !== numPoints * 20) {
+                    this.harmonicPhases = new Float32Array(numPoints * 20);
+                }
+
+                if (this.interpSamples === 0) {
                     // No interpolation - instant update
                     this.spectralData.set(data);
                     this.targetData.set(data);
@@ -105,6 +119,13 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 }
             } else if (e.data.type === 'frequency-multiplier') {
                 this.frequencyMultiplier = e.data.value;
+            } else if (e.data.type === 'octave-doubling') {
+                this.octaveLow = e.data.low;
+                this.octaveHigh = e.data.high;
+                this.octaveMult = e.data.multiplier;
+            } else if (e.data.type === 'interp-samples') {
+                this.interpSamples = e.data.value;
+                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
             }
         };
     }
@@ -116,10 +137,12 @@ class SpectralProcessor extends AudioWorkletProcessor {
         
         const numPoints = this.spectralData.length / 4;
         const nyquist = sampleRate * 0.5;
+        const PI2_SR = (2 * Math.PI) / sampleRate;
+        const PI2 = 2 * Math.PI;
         
         for (let i = 0; i < channelL.length; i++) {
             // Per-sample interpolation advance (skip if disabled)
-            if (INTERP_SAMPLES > 0 && this.interpT < 1.0) {
+            if (this.interpSamples > 0 && this.interpT < 1.0) {
                 this.interpT += this.interpStep;
                 if (this.interpT > 1.0) this.interpT = 1.0;
                 
@@ -166,28 +189,55 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 const db = mag * 60 - 60;
                 const linearMag = Math.pow(10, db / 20) * rolloffGain;
                 
-                // Phase increment from instantaneous frequency
-                // This changes smoothly because freq comes from interpolated data
-                const phaseInc = (freq * 2 * Math.PI) / sampleRate;
+                const p = (custom1 - 0.5) * 2;
+                const baseGainL = Math.min(1, 1 - p) * linearMag;
+                const baseGainR = Math.min(1, 1 + p) * linearMag;
                 
-                // Advance phase accumulator continuously - never reset
-                this.phaseAccumulators[bin] += phaseInc;
+                // Helper to generate oscillator at given frequency with gain
+                const generateOsc = (oscFreq, gain, phaseIdx) => {
+                    if (gain < 0.001) return;
+                    const nf = oscFreq / nyquist;
+                    if (nf >= 1.0) return;
+                    const rf = computeRolloff(nf, ROLLOFF_MODE);
+                    if (rf < 0.001) return;
+                    
+                    this.harmonicPhases[phaseIdx] += (oscFreq * PI2_SR);
+                    if (this.harmonicPhases[phaseIdx] > PI2) {
+                        this.harmonicPhases[phaseIdx] -= PI2;
+                    }
+                    const sample = Math.sin(this.harmonicPhases[phaseIdx] + phaseOffset * PI2);
+                    sumL += sample * baseGainL * gain * rf;
+                    sumR += sample * baseGainR * gain * rf;
+                };
                 
-                // Wrap phase to prevent floating point precision loss
-                if (this.phaseAccumulators[bin] > 2 * Math.PI) {
-                    this.phaseAccumulators[bin] -= 2 * Math.PI;
+                // Base oscillator (fundamental)
+                this.phaseAccumulators[bin] += (freq * PI2_SR);
+                if (this.phaseAccumulators[bin] > PI2) {
+                    this.phaseAccumulators[bin] -= PI2;
+                }
+                const currentPhase = this.phaseAccumulators[bin] + (phaseOffset * PI2);
+                const sample = Math.sin(currentPhase);
+                sumL += sample * baseGainL;
+                sumR += sample * baseGainR;
+                
+                // Low octaves (doubling below)
+                let harmGain = this.octaveMult;
+                for (let h = 1; h <= this.octaveLow; h++) {
+                    const harmFreq = freq / Math.pow(2, h);
+                    if (harmFreq < 20) break;
+                    const phaseIdx = bin * 20 + (h - 1);
+                    generateOsc(harmFreq, harmGain, phaseIdx);
+                    harmGain *= this.octaveMult;
                 }
                 
-                // Apply phase offset (now smoothly interpolated)
-                const currentPhase = this.phaseAccumulators[bin] + (phaseOffset * 2 * Math.PI);
-                const sample = Math.sin(currentPhase);
-                
-                const p = (custom1 - 0.5) * 2;
-                const gainL = Math.min(1, 1 - p) * linearMag;
-                const gainR = Math.min(1, 1 + p) * linearMag;
-                
-                sumL += sample * gainL;
-                sumR += sample * gainR;
+                // High octaves (doubling above)
+                harmGain = this.octaveMult;
+                for (let h = 1; h <= this.octaveHigh; h++) {
+                    const harmFreq = freq * Math.pow(2, h);
+                    const phaseIdx = bin * 20 + 10 + (h - 1);
+                    generateOsc(harmFreq, harmGain, phaseIdx);
+                    harmGain *= this.octaveMult;
+                }
             }
             
             const scale = 0.1; 
@@ -206,13 +256,14 @@ registerProcessor('spectral-processor', SpectralProcessor);
 // Magnitude 0 = silence, Magnitude 1 = full carrier amplitude
 // Feedback: previous output mixed back into carrier for evolving timbres
 const WAVETABLE_PROCESSOR_CODE = `
-// Same interpolation setting as SpectralProcessor
-// 0 = OFF (instant), N = N intermediate samples between frames
-const INTERP_SAMPLES = 128;
+const DEFAULT_INTERP_SAMPLES = 128;
 
 class WavetableProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
+        // Interpolation setting
+        this.interpSamples = DEFAULT_INTERP_SAMPLES;
+        
         this.envelope = new Float32Array(1024);     // Current interpolated envelope
         this.prevEnvelope = new Float32Array(1024); // Previous envelope
         this.targetEnvelope = new Float32Array(1024); // Target envelope
@@ -224,9 +275,18 @@ class WavetableProcessor extends AudioWorkletProcessor {
         this.feedback = 0;        // Feedback amount 0-1
         this.lastSample = 0;      // Previous output for feedback
         
+        // Octave Doubling: octave layering
+        this.octaveLow = 0;    // 0-10 octaves below
+        this.octaveHigh = 0;   // 0-10 octaves above
+        this.octaveMult = 0.5; // Volume decay per octave
+        
+        // Octave doubling phases (10 low + 10 high)
+        this.harmonicPhases = new Float32Array(20);
+        this.harmonicEnvPhases = new Float32Array(20);
+        
         // Interpolation state
         this.interpT = 1.0;
-        this.interpStep = INTERP_SAMPLES > 0 ? 1.0 / (INTERP_SAMPLES + 1) : 1.0;
+        this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
         
         this.port.onmessage = (e) => {
             if (e.data.type === 'spectral-data') {
@@ -242,7 +302,7 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 
                 const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
                 
-                if (INTERP_SAMPLES === 0) {
+                if (this.interpSamples === 0) {
                     // No interpolation - instant update
                     for (let i = 0; i < numPoints; i++) {
                         this.envelope[i] = data[i * 4] * scale;
@@ -265,6 +325,13 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 this.carrierType = e.data.value;
             } else if (e.data.type === 'feedback') {
                 this.feedback = e.data.value;
+            } else if (e.data.type === 'octave-doubling') {
+                this.octaveLow = e.data.low;
+                this.octaveHigh = e.data.high;
+                this.octaveMult = e.data.multiplier;
+            } else if (e.data.type === 'interp-samples') {
+                this.interpSamples = e.data.value;
+                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
             }
         };
     }
@@ -302,10 +369,11 @@ class WavetableProcessor extends AudioWorkletProcessor {
         
         const carrierPhaseInc = this.frequency / sampleRate;
         const envPhaseInc = carrierPhaseInc;
+        const nyquist = sampleRate * 0.5;
         
         for (let i = 0; i < channelL.length; i++) {
             // Per-sample interpolation advance (skip if disabled)
-            if (INTERP_SAMPLES > 0 && this.interpT < 1.0) {
+            if (this.interpSamples > 0 && this.interpT < 1.0) {
                 this.interpT += this.interpStep;
                 if (this.interpT > 1.0) this.interpT = 1.0;
                 
@@ -316,6 +384,13 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 }
             }
             
+            // Get envelope with linear interpolation
+            const envPos = this.envPhase * this.envelopeSize;
+            const envIdx0 = Math.floor(envPos) % this.envelopeSize;
+            const envIdx1 = (envIdx0 + 1) % this.envelopeSize;
+            const envFrac = envPos - Math.floor(envPos);
+            const amplitude = this.envelope[envIdx0] * (1 - envFrac) + this.envelope[envIdx1] * envFrac;
+            
             // Get base carrier sample
             let carrierSample = this.carrier(this.phase, this.carrierType);
             
@@ -325,22 +400,71 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 carrierSample = carrierSample * (1 - this.feedback * 0.5) + this.lastSample * this.feedback * 0.5;
             }
             
-            // Get envelope with linear interpolation
-            const envPos = this.envPhase * this.envelopeSize;
-            const envIdx0 = Math.floor(envPos) % this.envelopeSize;
-            const envIdx1 = (envIdx0 + 1) % this.envelopeSize;
-            const envFrac = envPos - Math.floor(envPos);
-            const amplitude = this.envelope[envIdx0] * (1 - envFrac) + this.envelope[envIdx1] * envFrac;
-            
             // AM synthesis: carrier * envelope
-            const sample = carrierSample * amplitude;
+            let totalSample = carrierSample * amplitude;
+            
+            // Add low octaves (doubling below)
+            let harmGain = this.octaveMult;
+            for (let h = 1; h <= this.octaveLow; h++) {
+                const harmFreq = this.frequency / Math.pow(2, h);
+                if (harmFreq < 20) break;
+                const phaseIdx = h - 1;
+                const harmPhaseInc = harmFreq / sampleRate;
+                
+                let harmCarrier = this.carrier(this.harmonicPhases[phaseIdx], this.carrierType);
+                
+                // Get envelope at harmonic's position
+                const harmEnvPos = this.harmonicEnvPhases[phaseIdx] * this.envelopeSize;
+                const hEnvIdx0 = Math.floor(harmEnvPos) % this.envelopeSize;
+                const hEnvIdx1 = (hEnvIdx0 + 1) % this.envelopeSize;
+                const hEnvFrac = harmEnvPos - Math.floor(harmEnvPos);
+                const harmAmp = this.envelope[hEnvIdx0] * (1 - hEnvFrac) + this.envelope[hEnvIdx1] * hEnvFrac;
+                
+                totalSample += harmCarrier * harmAmp * harmGain;
+                
+                // Advance harmonic phases
+                this.harmonicPhases[phaseIdx] += harmPhaseInc;
+                if (this.harmonicPhases[phaseIdx] >= 1.0) this.harmonicPhases[phaseIdx] -= 1.0;
+                this.harmonicEnvPhases[phaseIdx] += harmPhaseInc;
+                if (this.harmonicEnvPhases[phaseIdx] >= 1.0) this.harmonicEnvPhases[phaseIdx] -= 1.0;
+                
+                harmGain *= this.octaveMult;
+            }
+            
+            // Add high octaves (doubling above)
+            harmGain = this.octaveMult;
+            for (let h = 1; h <= this.octaveHigh; h++) {
+                const harmFreq = this.frequency * Math.pow(2, h);
+                if (harmFreq >= nyquist) break;
+                const phaseIdx = 10 + (h - 1);
+                const harmPhaseInc = harmFreq / sampleRate;
+                
+                let harmCarrier = this.carrier(this.harmonicPhases[phaseIdx], this.carrierType);
+                
+                // Get envelope at harmonic's position
+                const harmEnvPos = this.harmonicEnvPhases[phaseIdx] * this.envelopeSize;
+                const hEnvIdx0 = Math.floor(harmEnvPos) % this.envelopeSize;
+                const hEnvIdx1 = (hEnvIdx0 + 1) % this.envelopeSize;
+                const hEnvFrac = harmEnvPos - Math.floor(harmEnvPos);
+                const harmAmp = this.envelope[hEnvIdx0] * (1 - hEnvFrac) + this.envelope[hEnvIdx1] * hEnvFrac;
+                
+                totalSample += harmCarrier * harmAmp * harmGain;
+                
+                // Advance harmonic phases
+                this.harmonicPhases[phaseIdx] += harmPhaseInc;
+                if (this.harmonicPhases[phaseIdx] >= 1.0) this.harmonicPhases[phaseIdx] -= 1.0;
+                this.harmonicEnvPhases[phaseIdx] += harmPhaseInc;
+                if (this.harmonicEnvPhases[phaseIdx] >= 1.0) this.harmonicEnvPhases[phaseIdx] -= 1.0;
+                
+                harmGain *= this.octaveMult;
+            }
             
             // Store for feedback
-            this.lastSample = sample;
+            this.lastSample = totalSample;
             
             const gain = 0.5;
-            channelL[i] = sample * gain;
-            channelR[i] = sample * gain;
+            channelL[i] = totalSample * gain;
+            channelR[i] = totalSample * gain;
             
             // Advance phases
             this.phase += carrierPhaseInc;
@@ -361,11 +485,14 @@ registerProcessor('wavetable-processor', WavetableProcessor);
 // spectralData[0] (R) = Frequency
 // spectralData[1] (G) = Q/Bandwidth
 const WHITENOISE_PROCESSOR_CODE = `
-const INTERP_SAMPLES = 64;
+const DEFAULT_INTERP_SAMPLES = 64;
 
 class WhitenoiseProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
+        // Interpolation setting
+        this.interpSamples = DEFAULT_INTERP_SAMPLES;
+        
         this.spectralData = new Float32Array(1024 * 4);
         this.prevData = new Float32Array(1024 * 4);
         this.targetData = new Float32Array(1024 * 4);
@@ -374,15 +501,24 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
         this.lowStates = new Float32Array(1024);
         this.bandStates = new Float32Array(1024);
         
+        // Octave doubling filter states (10 low + 10 high) per bin
+        this.harmLowStates = new Float32Array(1024 * 20);
+        this.harmBandStates = new Float32Array(1024 * 20);
+        
         this.frequencyMultiplier = 1.0;
         
+        // Octave Doubling: layering octaves for filter bands
+        this.octaveLow = 0;
+        this.octaveHigh = 0;
+        this.octaveMult = 0.5;
+        
         this.interpT = 1.0;
-        this.interpStep = INTERP_SAMPLES > 0 ? 1.0 / (INTERP_SAMPLES + 1) : 1.0;
+        this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
         
         this.port.onmessage = (e) => {
             if (e.data.type === 'spectral-data') {
                 const data = e.data.data;
-                if (INTERP_SAMPLES === 0) {
+                if (this.interpSamples === 0) {
                     this.spectralData.set(data);
                     this.targetData.set(data);
                 } else {
@@ -392,6 +528,13 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
                 }
             } else if (e.data.type === 'frequency-multiplier') {
                 this.frequencyMultiplier = e.data.value;
+            } else if (e.data.type === 'octave-doubling') {
+                this.octaveLow = e.data.low;
+                this.octaveHigh = e.data.high;
+                this.octaveMult = e.data.multiplier;
+            } else if (e.data.type === 'interp-samples') {
+                this.interpSamples = e.data.value;
+                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
             }
         };
     }
@@ -405,7 +548,7 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
         
         for (let i = 0; i < channelL.length; i++) {
             // Per-sample interpolation for smooth parameter changes
-            if (INTERP_SAMPLES > 0 && this.interpT < 1.0) {
+            if (this.interpSamples > 0 && this.interpT < 1.0) {
                 this.interpT += this.interpStep;
                 if (this.interpT > 1.0) this.interpT = 1.0;
                 const t = this.interpT;
@@ -507,6 +650,11 @@ export class AudioEngine {
     // Feedback amount (0-1)
     private feedback = 0;
 
+    // Octave doubling state
+    private octaveLow = 0;
+    private octaveHigh = 0;
+    private octaveMult = 0.5;
+
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
@@ -592,6 +740,16 @@ export class AudioEngine {
                 value: this.wavetableFrequency
             });
         }
+
+        // Send initial octave doubling settings to the new worklet
+        if (this.workletNode) {
+            this.workletNode.port.postMessage({
+                type: 'octave-doubling',
+                low: this.octaveLow,
+                high: this.octaveHigh,
+                multiplier: this.octaveMult
+            });
+        }
     }
 
     public setMode(mode: SynthMode): void {
@@ -664,6 +822,38 @@ export class AudioEngine {
             type: 'spectral-data',
             data: data
         });
+    }
+
+    public setOctaveDoubling(low: number, high: number, multiplier: number): void {
+        this.octaveLow = low;
+        this.octaveHigh = high;
+        this.octaveMult = multiplier;
+
+        if (this.workletNode && this.isInitialized) {
+            this.workletNode.port.postMessage({
+                type: 'octave-doubling',
+                low: low,
+                high: high,
+                multiplier: multiplier
+            });
+        }
+    }
+
+    public getOctaveDoubling(): { low: number, high: number, multiplier: number } {
+        return {
+            low: this.octaveLow,
+            high: this.octaveHigh,
+            multiplier: this.octaveMult
+        };
+    }
+
+    public setInterpSamples(samples: number): void {
+        if (this.workletNode && this.isInitialized) {
+            this.workletNode.port.postMessage({
+                type: 'interp-samples',
+                value: samples
+            });
+        }
     }
 
     public getScopeData(): { left: Float32Array, right: Float32Array } {

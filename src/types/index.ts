@@ -54,7 +54,7 @@ export const VOLUME_DENSITY_Z_DEFAULT = 128;
 
 // Synthesis modes
 export enum SynthMode {
-    SPECTRAL = 'iFFT Spectal',   // iFFT / additive synthesis from frequency bins
+    SPECTRAL = 'iFFT Spectral',   // iFFT / additive synthesis from frequency bins
     WAVETABLE = 'Wavetable', // Direct waveform playback from reading line
     WHITENOISE_BAND_Q_FILTER = 'Noise band filter', // Subtractive noise filtering
 }
@@ -73,6 +73,19 @@ export interface LFOState {
     amplitude: number;
     offset: number;
 }
+
+// Octave doubling state for octave layering
+export interface OctaveDoublingState {
+    lowCount: number;      // 0-10, number of octaves below base frequency
+    highCount: number;     // 0-10, number of octaves above base frequency
+    multiplier: number;    // 0.0-1.0, volume decay per octave step
+}
+
+export const defaultOctaveDoublingState: OctaveDoublingState = {
+    lowCount: 0,
+    highCount: 0,
+    multiplier: 0.5
+};
 
 // Generator parameter interfaces
 export interface JuliaParams {
@@ -132,6 +145,8 @@ export interface PresetControls {
     envelopes: { attack: number; decay: number; sustain: number; release: number }[];
     modRouting: { pathY: string; scanPhase: string; shapePhase: string };
     octave: number;
+    octaveDoubling?: OctaveDoublingState;
+    interpSamples: number;
 }
 
 export interface PresetData {

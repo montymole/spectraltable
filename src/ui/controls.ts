@@ -6,7 +6,7 @@ import {
     VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
     defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
-    PresetControls, LFOState
+    PresetControls, LFOState, OctaveDoublingState, defaultOctaveDoublingState
 } from '../types';
 import { PresetManager } from './preset-manager';
 import {
@@ -31,11 +31,8 @@ export class ControlPanel {
 
     // Synth mode controls
     private synthModeSelect!: HTMLSelectElement;
-    private frequencySlider!: HTMLInputElement;
-    private frequencyContainer: HTMLElement | null = null;
-    private carrierContainer: HTMLElement | null = null;
-    private feedbackContainer: HTMLElement | null = null;
-
+    private synthParamsContainer: HTMLElement | null = null;
+    private interpSamplesSlider!: HTMLInputElement;
     private midiSelect!: HTMLSelectElement;
 
     // Volume density controls
@@ -64,11 +61,12 @@ export class ControlPanel {
     private onSpectralDataChange?: (dataSet: string) => void;
     private onWavUpload?: (files: FileList) => void;
     private onSynthModeChange: ((mode: SynthMode) => void) | null = null;
-    private onFrequencyChange: ((freq: number) => void) | null = null;
     private onCarrierChange: ((carrier: CarrierType) => void) | null = null;
     private onFeedbackChange: ((amount: number) => void) | null = null;
     private onMidiInputChange: ((id: string) => void) | null = null;
     private onOctaveChange: ((octave: number) => void) | null = null;
+    private onOctaveDoublingChange: ((state: OctaveDoublingState) => void) | null = null;
+    private onInterpSamplesChange: ((samples: number) => void) | null = null;
 
     // LFO Callbacks
     private onLFOParamChange: ((index: number, param: string, value: any) => void) | null = null;
@@ -87,6 +85,12 @@ export class ControlPanel {
     private lfoState: LFOState[] = [];
     private modRoutingState = { pathY: 'none', scanPhase: 'none', shapePhase: 'none' };
     private octaveValue = 3;
+
+    // Octave doubling state
+    private octaveDoublingState: OctaveDoublingState = { ...defaultOctaveDoublingState };
+    private octaveLowSlider!: HTMLInputElement;
+    private octaveHighSlider!: HTMLInputElement;
+    private octaveMultSlider!: HTMLInputElement;
 
     // Debounce timer for auto-save
     private autoSaveTimer: number | null = null;
@@ -245,25 +249,78 @@ export class ControlPanel {
         const subGroup = document.createElement('div');
         subGroup.classList.add('sub-group');
         container.appendChild(subGroup);
+
         this.synthModeSelect = createSelect(subGroup, 'synth-mode', 'Mode', [
             SynthMode.WAVETABLE, SynthMode.SPECTRAL, SynthMode.WHITENOISE_BAND_Q_FILTER
         ], (val) => {
             const mode = val as SynthMode;
-            if (this.frequencyContainer) this.frequencyContainer.style.display = mode === SynthMode.WAVETABLE ? 'block' : 'none';
-            if (this.carrierContainer) this.carrierContainer.style.display = mode === SynthMode.WAVETABLE ? 'block' : 'none';
-            if (this.feedbackContainer) this.feedbackContainer.style.display = mode === SynthMode.WAVETABLE ? 'block' : 'none';
+            this.updateSynthModeUI(mode);
             if (this.onSynthModeChange) this.onSynthModeChange(mode);
             this.scheduleAutoSave();
         });
+
         this.createEnvelopeUI(subGroup);
         this.midiSelect = this.createMidiSelect(subGroup);
         this.createOctaveSelect(subGroup);
+
+        // Dynamic synth parameter container
+        this.synthParamsContainer = document.createElement('div');
+        this.synthParamsContainer.id = 'synth-params-container';
+        this.synthParamsContainer.classList.add('sub-group');
+        container.appendChild(this.synthParamsContainer);
+
+        // Global synthesis settings (like Interpolation)
         const subGroup2 = document.createElement('div');
         subGroup2.classList.add('sub-group');
         container.appendChild(subGroup2);
-        this.createCarrierSelect(subGroup2);
-        this.frequencySlider = this.createFrequencySlider(subGroup2);
-        this.createFeedbackSlider(subGroup2);
+
+        // Interpolation samples control (all modes)
+        this.interpSamplesSlider = createSlider(subGroup2, 'interp-samples', 'Interp Samples', 16, 1024, 64, 16, (val) => {
+            if (this.onInterpSamplesChange) this.onInterpSamplesChange(val);
+            this.scheduleAutoSave();
+        });
+
+        // Octave doubling controls (available for all modes)
+        const subGroup3 = document.createElement('div');
+        subGroup3.classList.add('sub-group');
+        container.appendChild(subGroup3);
+        const harmTitle = document.createElement('label');
+        harmTitle.textContent = 'Octave Doubling';
+        harmTitle.style.fontWeight = 'bold';
+        harmTitle.style.marginBottom = '8px';
+        harmTitle.style.display = 'block';
+        subGroup3.appendChild(harmTitle);
+
+        const octaveUpdate = () => {
+            if (this.onOctaveDoublingChange) this.onOctaveDoublingChange(this.octaveDoublingState);
+            this.scheduleAutoSave();
+        };
+
+        this.octaveLowSlider = createSlider(subGroup3, 'octave-low', 'Low (octaves below)', 0, 10, 0, 1, (val) => {
+            this.octaveDoublingState.lowCount = val;
+            octaveUpdate();
+        });
+        this.octaveHighSlider = createSlider(subGroup3, 'octave-high', 'High (octaves above)', 0, 10, 0, 1, (val) => {
+            this.octaveDoublingState.highCount = val;
+            octaveUpdate();
+        });
+        this.octaveMultSlider = createSlider(subGroup3, 'octave-mult', 'Decay (per octave)', 0, 1, 0.5, 0.01, (val) => {
+            this.octaveDoublingState.multiplier = val;
+            octaveUpdate();
+        });
+
+        // Initialize dynamic UI
+        this.updateSynthModeUI(this.synthModeSelect.value as SynthMode);
+    }
+
+    private updateSynthModeUI(mode: SynthMode): void {
+        if (!this.synthParamsContainer) return;
+        this.synthParamsContainer.innerHTML = '';
+
+        if (mode === SynthMode.WAVETABLE) {
+            this.createCarrierSelect(this.synthParamsContainer);
+            this.createFeedbackSlider(this.synthParamsContainer);
+        }
     }
 
     private populateLFOSection(container: HTMLElement): void {
@@ -365,26 +422,6 @@ export class ControlPanel {
         this.envelopeCanvas = canvas;
     }
 
-    private createFrequencySlider(container: HTMLElement): HTMLInputElement {
-        const slider = createSlider(container, 'frequency', 'Frequency', 20, 2000, 220, 1, (freq) => {
-            const valDisplay = document.getElementById('frequency-value');
-            if (valDisplay) {
-                const noteName = this.freqToNoteName(freq);
-                valDisplay.textContent = `${Math.round(freq)} Hz (${noteName})`;
-            }
-            if (this.onFrequencyChange) this.onFrequencyChange(freq);
-        });
-
-        const group = slider.closest('.control-group') as HTMLElement;
-        if (group) {
-            group.id = 'frequency-container';
-            this.frequencyContainer = group;
-        }
-
-        this.frequencySlider = slider;
-        return slider;
-    }
-
     private createCarrierSelect(container: HTMLElement): HTMLSelectElement {
         const group = document.createElement('div');
         group.id = 'carrier-container';
@@ -415,7 +452,6 @@ export class ControlPanel {
         if (labelRow) labelRow.appendChild(iconContainer);
 
         this.appendControl(container, group);
-        this.carrierContainer = group;
         return select;
     }
 
@@ -426,7 +462,6 @@ export class ControlPanel {
         const group = slider.closest('.control-group') as HTMLElement;
         if (group) {
             group.id = 'feedback-container';
-            this.feedbackContainer = group;
         }
         return slider;
     }
@@ -450,15 +485,6 @@ export class ControlPanel {
         });
         select.value = '3';
         return select;
-    }
-
-    private freqToNoteName(freq: number): string {
-        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-        const midiNote = 12 * Math.log2(freq / 440) + 69;
-        const roundedMidi = Math.round(midiNote);
-        const octave = Math.floor(roundedMidi / 12) - 1;
-        const noteIndex = roundedMidi % 12;
-        return `${noteNames[noteIndex]}${octave}`;
     }
 
     private updatePresetDropdown(): void {
@@ -501,7 +527,7 @@ export class ControlPanel {
             scanPosition: parseFloat(this.scanPositionSlider.value),
             planeType: this.planeTypeSelect.value,
             synthMode: this.synthModeSelect.value,
-            frequency: parseFloat(this.frequencySlider.value),
+            frequency: 220, // Deprecated, kept for preset compatibility
             carrier: parseInt((document.getElementById('carrier') as HTMLSelectElement)?.value || '0'),
             feedback: parseFloat((document.getElementById('feedback') as HTMLInputElement)?.value || '0'),
             densityX: parseFloat(this.densityXSlider.value),
@@ -512,7 +538,9 @@ export class ControlPanel {
             lfos: this.lfoState.map(lfo => ({ ...lfo })),
             modRouting: { ...this.modRoutingState },
             envelopes: [{ attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.5 }], // Will be updated from AudioEngine
-            octave: this.octaveValue
+            octave: this.octaveValue,
+            octaveDoubling: { ...this.octaveDoublingState },
+            interpSamples: parseFloat(this.interpSamplesSlider.value)
         };
     }
 
@@ -530,11 +558,15 @@ export class ControlPanel {
         this.scanPositionSlider.value = String(state.scanPosition);
         this.planeTypeSelect.value = state.planeType;
         this.synthModeSelect.value = state.synthMode;
-        this.frequencySlider.value = String(state.frequency);
+        // Note: frequency slider removed, pitch controlled via MIDI/piano
         this.densityXSlider.value = String(state.densityX);
         this.densityYSlider.value = String(state.densityY);
         this.densityZSlider.value = String(state.densityZ);
         this.spectralDataSelect.value = state.spectralData;
+        this.interpSamplesSlider.value = String(state.interpSamples || 64);
+
+        // Refresh dynamic synth UI
+        this.updateSynthModeUI(state.synthMode as SynthMode);
 
         // Update carrier and feedback
         const carrierEl = document.getElementById('carrier') as HTMLSelectElement;
@@ -579,6 +611,14 @@ export class ControlPanel {
         // Store generator params
         if (state.generatorParams) {
             this.currentGeneratorParams = state.generatorParams;
+        }
+
+        // Restore octave doubling state
+        if (state.octaveDoubling) {
+            this.octaveDoublingState = { ...state.octaveDoubling };
+            this.octaveLowSlider.value = String(state.octaveDoubling.lowCount);
+            this.octaveHighSlider.value = String(state.octaveDoubling.highCount);
+            this.octaveMultSlider.value = String(state.octaveDoubling.multiplier);
         }
 
         // Update value displays
@@ -639,13 +679,6 @@ export class ControlPanel {
         // Update scan position display
         const scanDisplay = document.getElementById('scan-pos-value');
         if (scanDisplay) scanDisplay.textContent = parseFloat(this.scanPositionSlider.value).toFixed(2);
-
-        // Update frequency display
-        const freqDisplay = document.getElementById('frequency-value');
-        if (freqDisplay) {
-            const freq = parseFloat(this.frequencySlider.value);
-            freqDisplay.textContent = `${Math.round(freq)} Hz (${this.freqToNoteName(freq)})`;
-        }
 
         // Update feedback display
         const fbDisplay = document.getElementById('feedback-value');
@@ -819,19 +852,8 @@ export class ControlPanel {
         this.onSynthModeChange = callback;
     }
 
-    public setFrequencyChangeCallback(callback: (freq: number) => void): void {
-        this.onFrequencyChange = callback;
-    }
-
-    public setFrequency(freq: number): void {
-        if (this.frequencySlider) {
-            this.frequencySlider.value = String(freq);
-        }
-        const valueDisplay = document.getElementById('frequency-value');
-        if (valueDisplay) {
-            const noteName = this.freqToNoteName(freq);
-            valueDisplay.textContent = `${Math.round(freq)} Hz (${noteName})`;
-        }
+    public setInterpSamplesChangeCallback(callback: (samples: number) => void): void {
+        this.onInterpSamplesChange = callback;
     }
 
     public setCarrierChangeCallback(callback: (carrier: CarrierType) => void): void {
@@ -848,6 +870,10 @@ export class ControlPanel {
 
     public setOctaveChangeCallback(callback: (octave: number) => void): void {
         this.onOctaveChange = callback;
+    }
+
+    public setOctaveDoublingChangeCallback(callback: (state: OctaveDoublingState) => void): void {
+        this.onOctaveDoublingChange = callback;
     }
 
     public updateMidiInputs(inputs: { id: string, name: string }[]): void {
