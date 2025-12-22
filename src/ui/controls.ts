@@ -418,11 +418,11 @@ export class ControlPanel {
 
         this.lfoWaveSelects[index] = waveSelect;
 
-        this.lfoFreqSliders[index] = createSlider(wrapper, `lfo-${index}-freq`, 'Freq', 0, 1, this.lfoState[index].frequency, 0.01, (val) => {
+        this.lfoFreqSliders[index] = createSlider(wrapper, `lfo-${index}-freq`, 'Freq', 0.001, 20.0, this.lfoState[index].frequency, 0.001, (val) => {
             this.lfoState[index].frequency = val;
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'frequency', val);
             this.scheduleAutoSave();
-        });
+        }, CONTROL_STYLE, 'logarithmic', 3);
 
         this.lfoAmpSliders[index] = createSlider(wrapper, `lfo-${index}-amp`, 'Amp', 0, 1, this.lfoState[index].amplitude, 0.01, (val) => {
             this.lfoState[index].amplitude = val;

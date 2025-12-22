@@ -14,12 +14,12 @@
   - [x] Default filename to "preset name-basenote.wav" or "synthesistype-basenote.wav"
 
 ### LFO Enhancements
-- [ ] Extend frequency range down to 0.001 Hz
+- [x] Extend frequency range down to 0.001 Hz
       *→ update min in lfo.ts, ensure phase accumulator precision (use double or modulo)*
-- [ ] Add more decimal precision to frequency control and display
-- [ ] Implement logarithmic mode for knob control
+- [x] Add more decimal precision to frequency control and display
+- [x] Implement logarithmic mode for knob control
       *→ `value = min * Math.pow(max/min, normalized)` for log scaling*
-- [ ] Apply logarithmic scaling to LFO frequency dial
+- [x] Apply logarithmic scaling to LFO frequency dial
 
 ---
 

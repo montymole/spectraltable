@@ -79,7 +79,9 @@ export function createSlider(
     value: number,
     step: number,
     onInput?: (val: number) => void,
-    mode: 'slider' | 'knob' = CONTROL_STYLE
+    mode: 'slider' | 'knob' = CONTROL_STYLE,
+    scale: 'linear' | 'logarithmic' = 'linear',
+    precision: number = 2
 ): HTMLInputElement {
     const group = document.createElement('div');
     group.className = 'control-group';
@@ -91,22 +93,59 @@ export function createSlider(
     valueDisplay.className = 'value-display';
     valueDisplay.id = `${id}-value`;
     const updateDisplay = (val: number) => {
-        valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
+        valueDisplay.textContent = val.toFixed(precision);
     };
     updateDisplay(value);
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.id = id;
-    slider.min = String(min);
-    slider.max = String(max);
-    slider.value = String(value);
-    slider.step = String(step);
+
+    const isLog = scale === 'logarithmic' && min > 0 && max > 0;
+    (slider as any).isLogarithmic = isLog;
+    (slider as any).precision = precision;
+
+    if (isLog) {
+        slider.min = String(Math.log10(min));
+        slider.max = String(Math.log10(max));
+        slider.step = 'any';
+        slider.value = String(Math.log10(value));
+    } else {
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+        slider.value = String(value);
+    }
+
     slider.className = 'slider';
+
+    const getActualValue = () => {
+        const v = parseFloat(slider.value);
+        return isLog ? Math.pow(10, v) : v;
+    };
+
     slider.addEventListener('input', () => {
-        const val = parseFloat(slider.value);
+        const val = getActualValue();
         updateDisplay(val);
         if (onInput) onInput(val);
     });
+
+    // Wrap value property to handle actual values transparently
+    const originalValueDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    Object.defineProperty(slider, 'value', {
+        get: function () {
+            const v = originalValueDescriptor!.get!.call(this);
+            return isLog ? String(Math.pow(10, parseFloat(v))) : v;
+        },
+        set: function (v) {
+            const num = parseFloat(v);
+            const valToSet = isLog ? String(Math.log10(num)) : String(num);
+            originalValueDescriptor!.set!.call(this, valToSet);
+            updateDisplay(num);
+            if ((this as any).updateKnob) (this as any).updateKnob();
+        },
+        configurable: true
+    });
+
     if (mode === 'knob') {
         slider.style.display = 'none';
         group.appendChild(labelEl);
@@ -169,10 +208,23 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
     container.appendChild(svg);
 
     const updateKnob = () => {
+        // Now that we wrapped slider.value, it returns the ACTUAL value.
+        // But for internal knob calculations, we might want the normalized percent.
+        // We can get the raw internal value by reading from the prototype if needed,
+        // or just calculate from the actual value.
+
         const val = parseFloat(input.value);
-        const min = parseFloat(input.min);
-        const max = parseFloat(input.max);
-        const percent = (val - min) / (max - min);
+        const min = (input as any).isLogarithmic ? Math.pow(10, parseFloat(input.min)) : parseFloat(input.min);
+        const max = (input as any).isLogarithmic ? Math.pow(10, parseFloat(input.max)) : parseFloat(input.max);
+        const isLog = (input as any).isLogarithmic;
+
+        let percent: number;
+        if (isLog && min > 0 && max > 0) {
+            percent = (Math.log10(val) - Math.log10(min)) / (Math.log10(max) - Math.log10(min));
+        } else {
+            percent = (val - min) / (max - min);
+        }
+        percent = Math.max(0, Math.min(1, percent));
 
         // Update value arc
         const endAngle = 225 + percent * 270;
@@ -184,12 +236,19 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
             const offset = typeof inputAny.modOffset === 'number' ? inputAny.modOffset : 0;
             const amp = typeof inputAny.modAmplitude === 'number' ? inputAny.modAmplitude : 0;
 
-            // start = offset - 0.5 * amp, end = offset + 0.5 * amp
             const startVal = offset - amp;
             const endVal = offset + amp;
 
-            const startP = (startVal - min) / (max - min);
-            const endP = (endVal - min) / (max - min);
+            let startP: number, endP: number;
+            if (isLog && min > 0 && max > 0) {
+                const logMin = Math.log10(min);
+                const logRange = Math.log10(max) - logMin;
+                startP = (Math.log10(Math.max(min, startVal)) - logMin) / logRange;
+                endP = (Math.log10(Math.max(min, endVal)) - logMin) / logRange;
+            } else {
+                startP = (startVal - min) / (max - min);
+                endP = (endVal - min) / (max - min);
+            }
 
             const sAngle = 225 + Math.max(0, Math.min(1, startP)) * 270;
             const eAngle = 225 + Math.max(0, Math.min(1, endP)) * 270;
@@ -230,17 +289,36 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
         const onMouseMove = (moveEvent: MouseEvent) => {
             if (!isDragging) return;
             const deltaY = startY - moveEvent.clientY;
-            const range = parseFloat(input.max) - parseFloat(input.min);
-            const sensitivity = range / 200; // 200px for full range
-            let newVal = startVal + deltaY * sensitivity;
 
-            const step = parseFloat(input.step) || 0.01;
-            newVal = Math.round(newVal / step) * step;
-            newVal = Math.max(parseFloat(input.min), Math.min(parseFloat(input.max), newVal));
+            // Interaction is always normalized 0-1
+            const deltaP = deltaY / 200;
 
-            input.value = String(newVal);
+            const min = (input as any).isLogarithmic ? Math.pow(10, parseFloat(input.min)) : parseFloat(input.min);
+            const max = (input as any).isLogarithmic ? Math.pow(10, parseFloat(input.max)) : parseFloat(input.max);
+            const isLog = (input as any).isLogarithmic;
+            const step = parseFloat(input.step) || 0.001;
+
+            let newVal: number;
+            if (isLog) {
+                const logMin = Math.log10(min);
+                const logMax = Math.log10(max);
+                const logRange = logMax - logMin;
+                const startP = (Math.log10(startVal) - logMin) / logRange;
+                const newP = Math.max(0, Math.min(1, startP + deltaP));
+                newVal = Math.pow(10, logMin + newP * logRange);
+            } else {
+                const range = max - min;
+                newVal = startVal + deltaY * (range / 200);
+            }
+
+            // Snap to step (only if not 'any')
+            if (input.step !== 'any') {
+                newVal = Math.round(newVal / step) * step;
+            }
+            newVal = Math.max(min, Math.min(max, newVal));
+
+            input.value = String(newVal); // This calls our wrapped setter
             input.dispatchEvent(new Event('input'));
-            updateKnob();
         };
 
         const onMouseUp = () => {
@@ -382,7 +460,9 @@ export function createModulatableSlider(
     lfoLabels: { value: string, label: string }[],
     onSliderInput: (val: number) => void,
     onSourceChange: (source: string) => void,
-    mode: 'slider' | 'knob' = CONTROL_STYLE
+    mode: 'slider' | 'knob' = CONTROL_STYLE,
+    scale: 'linear' | 'logarithmic' = 'linear',
+    precision: number = 2
 ): { slider: HTMLInputElement, select: HTMLSelectElement } {
     const group = document.createElement('div');
     group.className = 'control-group';
@@ -403,19 +483,56 @@ export function createModulatableSlider(
     valueDisplay.className = 'value-display';
     valueDisplay.id = `${id}-value`;
     const updateDisplay = (val: number) => {
-        valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
+        valueDisplay.textContent = val.toFixed(precision);
     };
     updateDisplay(value);
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.id = id;
-    slider.min = String(min);
-    slider.max = String(max);
-    slider.value = String(value);
-    slider.step = String(step);
+
+    const isLog = scale === 'logarithmic' && min > 0 && max > 0;
+    (slider as any).isLogarithmic = isLog;
+    (slider as any).precision = precision;
+
+    if (isLog) {
+        slider.min = String(Math.log10(min));
+        slider.max = String(Math.log10(max));
+        slider.step = 'any';
+        slider.value = String(Math.log10(value));
+    } else {
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+        slider.value = String(value);
+    }
+
     slider.className = 'slider';
+
+    const getActualValue = () => {
+        const v = parseFloat(slider.value);
+        return isLog ? Math.pow(10, v) : v;
+    };
+
+    // Wrap value property to handle actual values transparently
+    const originalValueDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    Object.defineProperty(slider, 'value', {
+        get: function () {
+            const v = originalValueDescriptor!.get!.call(this);
+            const num = parseFloat(v);
+            return isLog ? String(Math.pow(10, num)) : v;
+        },
+        set: function (v) {
+            const num = parseFloat(v);
+            const valToSet = isLog ? String(Math.log10(num)) : String(num);
+            originalValueDescriptor!.set!.call(this, valToSet);
+            updateDisplay(num);
+            if ((this as any).updateKnob) (this as any).updateKnob();
+        },
+        configurable: true
+    });
+
     slider.addEventListener('input', () => {
-        const val = parseFloat(slider.value);
+        const val = getActualValue();
         updateDisplay(val);
         onSliderInput(val);
     });
