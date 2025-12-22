@@ -11,7 +11,8 @@ import {
 import { PresetManager } from './preset-manager';
 import {
     createSection, createSlider, createSelect, createModulatableSlider,
-    createFileInput, createButton, createNumberInput, WAVEFORM_ICONS, CONTROL_STYLE
+    createFileInput, createButton, createNumberInput, WAVEFORM_ICONS, CONTROL_STYLE,
+    noteToName, createProgressUI, ProgressUI
 } from './ui-elements';
 
 interface SectionOpts {
@@ -51,9 +52,8 @@ export class ControlPanel {
     private currentDataSet: string = 'blank';
 
     // Progress indicators
-    private progressContainer: HTMLElement | null = null;
-    private progressFill: HTMLElement | null = null;
-    private progressText: HTMLElement | null = null;
+    private uploadProgressUI!: ProgressUI;
+    private renderProgressUI!: ProgressUI;
 
     // Callbacks
     private onPathChange: ((state: ReadingPathState) => void) | null = null;
@@ -173,7 +173,7 @@ export class ControlPanel {
         createFileInput(subGroup2, 'wav-upload', 'Upload WAV (Multi-select)', '.wav,.mp3,.ogg', true, (files) => {
             if (files && files.length > 0 && this.onWavUpload) this.onWavUpload(files);
         });
-        this.createProgressIndicator(subGroup2);
+        this.uploadProgressUI = createProgressUI(subGroup2);
         this.presetSelect = createSelect(subGroup2, 'preset-select', 'Load Preset', [], (val) => {
             if (val && this.onPresetLoad) {
                 const preset = this.presetManager.getPreset(val);
@@ -365,14 +365,22 @@ export class ControlPanel {
         row.style.gap = '12px';
         subGroup.appendChild(row);
 
-        const baseNoteInput = createNumberInput(row, 'render-base-note', 'Base Note', 48, 0, 127, 1);
+        const noteOptions = [];
+        for (let n = 0; n <= 108; n++) {
+            noteOptions.push({ value: String(n), label: noteToName(n) });
+        }
+
+        const baseNoteSelect = createSelect(row, 'render-base-note', 'Base Note', noteOptions, () => { });
+        baseNoteSelect.value = '48'; // Default to C3
         const durationInput = createNumberInput(row, 'render-duration', 'Duration (s)', 2.0, 0.1, 10.0, 0.1);
 
         createButton(subGroup, 'render-wav-btn', 'RENDER WAV', () => {
-            const note = parseInt(baseNoteInput.value);
+            const note = parseInt(baseNoteSelect.value);
             const duration = parseFloat(durationInput.value);
             if (this.onRenderWav) this.onRenderWav(note, duration);
         }, 'reset-button');
+
+        this.renderProgressUI = createProgressUI(subGroup);
     }
 
     public setRenderWavCallback(callback: (note: number, duration: number) => void): void {
@@ -823,6 +831,97 @@ export class ControlPanel {
         this.generatorParamsContainer.style.display = 'block';
     }
 
+    public async showRenderDialog(blob: Blob, defaultFilename: string): Promise<void> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            document.body.appendChild(overlay);
+
+            // Force reflow for transition
+            overlay.offsetHeight;
+            overlay.classList.add('active');
+
+            const content = document.createElement('div');
+            content.className = 'modal-content';
+            overlay.appendChild(content);
+
+            const header = document.createElement('div');
+            header.className = 'modal-header';
+            header.innerHTML = `<h2>Render Complete</h2>`;
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'modal-close';
+            closeBtn.innerHTML = '&times;';
+            header.appendChild(closeBtn);
+            content.appendChild(header);
+
+            const audioUrl = URL.createObjectURL(blob);
+            const playerDiv = document.createElement('div');
+            playerDiv.className = 'render-result-player';
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.src = audioUrl;
+            playerDiv.appendChild(audio);
+            content.appendChild(playerDiv);
+
+            const actions = document.createElement('div');
+            actions.className = 'modal-actions';
+
+            const saveBtn = document.createElement('button');
+            saveBtn.className = 'modal-btn primary';
+            saveBtn.textContent = 'Save WAV';
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'modal-btn secondary';
+            cancelBtn.textContent = 'Dismiss';
+
+            actions.appendChild(saveBtn);
+            actions.appendChild(cancelBtn);
+            content.appendChild(actions);
+
+            const cleanup = () => {
+                overlay.classList.remove('active');
+                setTimeout(() => {
+                    document.body.removeChild(overlay);
+                    URL.revokeObjectURL(audioUrl);
+                    resolve();
+                }, 300);
+            };
+
+            closeBtn.onclick = cleanup;
+            cancelBtn.onclick = cleanup;
+
+            saveBtn.onclick = async () => {
+                try {
+                    if ('showSaveFilePicker' in window) {
+                        const handle = await (window as any).showSaveFilePicker({
+                            suggestedName: defaultFilename,
+                            types: [{
+                                description: 'WAV Audio File',
+                                accept: { 'audio/wav': ['.wav'] },
+                            }],
+                        });
+                        const writable = await handle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                    } else {
+                        const a = document.createElement('a');
+                        a.href = audioUrl;
+                        a.download = defaultFilename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    }
+                    cleanup();
+                } catch (err) {
+                    if ((err as Error).name !== 'AbortError') {
+                        console.error('Failed to save file:', err);
+                        alert('Failed to save file.');
+                    }
+                }
+            };
+        });
+    }
+
     private hideGeneratorParams(): void {
         if (this.generatorParamsContainer) {
             this.generatorParamsContainer.style.display = 'none';
@@ -831,49 +930,28 @@ export class ControlPanel {
         this.currentGeneratorParams = null;
     }
 
-    private createProgressIndicator(container: HTMLElement): void {
-        const progressContainer = document.createElement('div');
-        progressContainer.id = 'wav-progress-container';
-        progressContainer.className = 'progress-container';
-        progressContainer.style.display = 'none';
-
-        const spinner = document.createElement('div');
-        spinner.className = 'spinner';
-
-        const progressBar = document.createElement('div');
-        progressBar.className = 'progress-bar';
-
-        const progressFill = document.createElement('div');
-        progressFill.id = 'wav-progress-fill';
-        progressFill.className = 'progress-fill';
-
-        const progressText = document.createElement('span');
-        progressText.id = 'wav-progress-text';
-        progressText.className = 'progress-text';
-        progressText.textContent = '0%';
-
-        progressBar.appendChild(progressFill);
-        progressContainer.appendChild(spinner);
-        progressContainer.appendChild(progressBar);
-        progressContainer.appendChild(progressText);
-
-        this.appendControl(container, progressContainer);
-        this.progressContainer = progressContainer;
-        this.progressFill = progressFill;
-        this.progressText = progressText;
-    }
-
     public showProgress(): void {
-        if (this.progressContainer) this.progressContainer.style.display = 'flex';
+        this.uploadProgressUI.show();
     }
 
     public hideProgress(): void {
-        if (this.progressContainer) this.progressContainer.style.display = 'none';
+        this.uploadProgressUI.hide();
     }
 
     public updateProgress(percent: number): void {
-        if (this.progressFill) this.progressFill.style.width = `${percent}%`;
-        if (this.progressText) this.progressText.textContent = `${Math.round(percent)}%`;
+        this.uploadProgressUI.update(percent);
+    }
+
+    public showRenderProgress(): void {
+        this.renderProgressUI.show();
+    }
+
+    public hideRenderProgress(): void {
+        this.renderProgressUI.hide();
+    }
+
+    public updateRenderProgress(percent: number): void {
+        this.renderProgressUI.update(percent);
     }
 
     public setPathChangeCallback(callback: (state: ReadingPathState) => void): void {

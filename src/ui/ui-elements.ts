@@ -538,3 +538,61 @@ export function createNumberInput(
 
     return input;
 }
+
+/**
+ * Converts a MIDI note number to a human-readable name (e.g., 60 -> "C4").
+ */
+export function noteToName(note: number): string {
+    const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const octave = Math.floor(note / 12) - 1;
+    const name = names[note % 12];
+    return `${name}${octave}`;
+}
+
+export interface ProgressUI {
+    container: HTMLElement;
+    fill: HTMLElement;
+    text: HTMLElement;
+    show: () => void;
+    hide: () => void;
+    update: (percent: number) => void;
+}
+
+/**
+ * Creates a progress indicator with a spinner and bar.
+ */
+export function createProgressUI(parent: HTMLElement): ProgressUI {
+    const container = document.createElement('div');
+    container.className = 'progress-container';
+
+    const spinner = document.createElement('div');
+    spinner.className = 'spinner';
+    container.appendChild(spinner);
+
+    const bar = document.createElement('div');
+    bar.className = 'progress-bar';
+    const fill = document.createElement('div');
+    fill.className = 'progress-fill';
+    bar.appendChild(fill);
+    container.appendChild(bar);
+
+    const text = document.createElement('div');
+    text.className = 'progress-text';
+    text.textContent = '0%';
+    container.appendChild(text);
+
+    parent.appendChild(container);
+
+    return {
+        container,
+        fill,
+        text,
+        show: () => { container.style.display = 'flex'; },
+        hide: () => { container.style.display = 'none'; },
+        update: (percent: number) => {
+            const p = Math.max(0, Math.min(100, percent));
+            fill.style.width = `${p}%`;
+            text.textContent = `${Math.round(p)}%`;
+        }
+    };
+}

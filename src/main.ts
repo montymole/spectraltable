@@ -15,6 +15,7 @@ import {
     GeneratorParams, PresetControls, OctaveDoublingState
 } from './types';
 import { LFO, LFOWaveform } from './modulators/lfo';
+import { noteToName } from './ui/ui-elements';
 
 // Main application entry point
 // Initializes WebGL, UI, and wires up event handling
@@ -431,9 +432,9 @@ class SpectralTableApp {
         const totalDuration = duration + envState.release;
 
         // Check if any LFO modulation is active
-        const hasModulation = this.pathYSource !== 'none' || 
-                              this.scanPhaseSource !== 'none' || 
-                              this.shapePhaseSource !== 'none';
+        const hasModulation = this.pathYSource !== 'none' ||
+            this.scanPhaseSource !== 'none' ||
+            this.shapePhaseSource !== 'none';
 
         let spectralData: Float32Array;
         let timelineInfo: { numFrames: number, frameSize: number } | undefined;
@@ -504,6 +505,9 @@ class SpectralTableApp {
         }
 
         try {
+            this.controls.showRenderProgress();
+            this.controls.updateRenderProgress(0);
+
             const blob = await this.audioEngine.renderOffline(note, duration, spectralData, {
                 mode: state.synthMode as SynthMode,
                 wavetableParams: {
@@ -520,20 +524,22 @@ class SpectralTableApp {
                 timeline: timelineInfo
             });
 
-            // Trigger download
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `spectral_sample_note_${note}.wav`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            this.controls.updateRenderProgress(100);
 
-            console.log('✓ WAV render complete and downloaded');
+            // Construct filename
+            const presetName = (document.getElementById('preset-select') as HTMLSelectElement)?.value;
+            const sourceName = presetName && presetName.trim() ? presetName : state.spectralData;
+            const noteName = noteToName(note);
+            const filename = `${sourceName}-${noteName}.wav`;
+
+            await this.controls.showRenderDialog(blob, filename);
+
+            console.log('✓ WAV render complete');
         } catch (error) {
             console.error('Offline render failed:', error);
             alert(`Failed to render WAV: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } finally {
+            this.controls.hideRenderProgress();
         }
     }
 
