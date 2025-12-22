@@ -83,8 +83,34 @@ class SpectralProcessor extends AudioWorkletProcessor {
         // Recalculate step based on current interpSamples
         this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
         
+        // Timeline mode for offline rendering (LFO simulation)
+        this.timeline = null;
+        this.timelineFrameSize = 0;
+        this.timelineNumFrames = 0;
+        this.timelineTotalSamples = 0;
+        this.sampleCount = 0;
+        
         this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-data') {
+            if (e.data.type === 'spectral-timeline') {
+                // Timeline of spectral frames for offline rendering
+                this.timeline = e.data.frames;
+                this.timelineFrameSize = e.data.frameSize;
+                this.timelineNumFrames = e.data.numFrames;
+                this.timelineTotalSamples = e.data.totalSamples;
+                this.sampleCount = 0;
+                // Initialize with first frame
+                const numPoints = this.timelineFrameSize / 4;
+                if (this.harmonicPhases.length !== numPoints * 20) {
+                    this.harmonicPhases = new Float32Array(numPoints * 20);
+                }
+                for (let i = 0; i < this.timelineFrameSize; i++) {
+                    this.spectralData[i] = this.timeline[i];
+                }
+                for (let bin = 0; bin < numPoints; bin++) {
+                    this.currentPhaseOffsets[bin] = this.timeline[bin * 4 + 1];
+                }
+                this.port.postMessage({ type: 'ready' });
+            } else if (e.data.type === 'spectral-data') {
                 const data = e.data.data;
                 const numPoints = data.length / 4;
                 
@@ -103,6 +129,8 @@ class SpectralProcessor extends AudioWorkletProcessor {
                         this.currentPhaseOffsets[bin] = offset;
                         this.targetPhaseOffsets[bin] = offset;
                     }
+                    // Acknowledge data received for offline rendering sync
+                    this.port.postMessage({ type: 'ready' });
                 } else {
                     // Snapshot current state as previous
                     this.prevData.set(this.spectralData);
@@ -141,8 +169,26 @@ class SpectralProcessor extends AudioWorkletProcessor {
         const PI2 = 2 * Math.PI;
         
         for (let i = 0; i < channelL.length; i++) {
+            // Timeline mode: step through pre-computed frames
+            if (this.timeline && this.timelineNumFrames > 1) {
+                const progress = this.sampleCount / this.timelineTotalSamples;
+                const framePos = progress * (this.timelineNumFrames - 1);
+                const frame0 = Math.floor(framePos);
+                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
+                const t = framePos - frame0;
+                const offset0 = frame0 * this.timelineFrameSize;
+                const offset1 = frame1 * this.timelineFrameSize;
+                for (let j = 0; j < this.timelineFrameSize; j++) {
+                    this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
+                }
+                const np = this.timelineFrameSize / 4;
+                for (let bin = 0; bin < np; bin++) {
+                    this.currentPhaseOffsets[bin] = this.spectralData[bin * 4 + 1];
+                }
+                this.sampleCount++;
+            }
             // Per-sample interpolation advance (skip if disabled)
-            if (this.interpSamples > 0 && this.interpT < 1.0) {
+            else if (this.interpSamples > 0 && this.interpT < 1.0) {
                 this.interpT += this.interpStep;
                 if (this.interpT > 1.0) this.interpT = 1.0;
                 
@@ -288,8 +334,34 @@ class WavetableProcessor extends AudioWorkletProcessor {
         this.interpT = 1.0;
         this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
         
+        // Timeline mode for offline rendering (LFO simulation)
+        this.timeline = null;
+        this.timelineFrameSize = 0;
+        this.timelineNumFrames = 0;
+        this.timelineTotalSamples = 0;
+        this.sampleCount = 0;
+        
         this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-data') {
+            if (e.data.type === 'spectral-timeline') {
+                // Timeline of spectral frames for offline rendering
+                this.timeline = e.data.frames;
+                this.timelineFrameSize = e.data.frameSize;
+                this.timelineNumFrames = e.data.numFrames;
+                this.timelineTotalSamples = e.data.totalSamples;
+                this.sampleCount = 0;
+                this.envelopeSize = this.timelineFrameSize / 4;
+                // Initialize envelope from first frame
+                let maxMag = 0;
+                for (let i = 0; i < this.envelopeSize; i++) {
+                    const mag = this.timeline[i * 4];
+                    if (mag > maxMag) maxMag = mag;
+                }
+                const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
+                for (let i = 0; i < this.envelopeSize; i++) {
+                    this.envelope[i] = this.timeline[i * 4] * scale;
+                }
+                this.port.postMessage({ type: 'ready' });
+            } else if (e.data.type === 'spectral-data') {
                 const data = e.data.data;
                 const numPoints = data.length / 4;
                 this.envelopeSize = numPoints;
@@ -308,6 +380,8 @@ class WavetableProcessor extends AudioWorkletProcessor {
                         this.envelope[i] = data[i * 4] * scale;
                         this.targetEnvelope[i] = this.envelope[i];
                     }
+                    // Acknowledge data received for offline rendering sync
+                    this.port.postMessage({ type: 'ready' });
                 } else {
                     // Snapshot current envelope as previous
                     this.prevEnvelope.set(this.envelope);
@@ -372,8 +446,33 @@ class WavetableProcessor extends AudioWorkletProcessor {
         const nyquist = sampleRate * 0.5;
         
         for (let i = 0; i < channelL.length; i++) {
+            // Timeline mode: step through pre-computed frames
+            if (this.timeline && this.timelineNumFrames > 1) {
+                const progress = this.sampleCount / this.timelineTotalSamples;
+                const framePos = progress * (this.timelineNumFrames - 1);
+                const frame0 = Math.floor(framePos);
+                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
+                const t = framePos - frame0;
+                const offset0 = frame0 * this.timelineFrameSize;
+                const offset1 = frame1 * this.timelineFrameSize;
+                // Interpolate envelope from timeline frames
+                let maxMag = 0;
+                for (let j = 0; j < this.envelopeSize; j++) {
+                    const mag0 = this.timeline[offset0 + j * 4];
+                    const mag1 = this.timeline[offset1 + j * 4];
+                    const mag = mag0 * (1 - t) + mag1 * t;
+                    if (mag > maxMag) maxMag = mag;
+                }
+                const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
+                for (let j = 0; j < this.envelopeSize; j++) {
+                    const mag0 = this.timeline[offset0 + j * 4];
+                    const mag1 = this.timeline[offset1 + j * 4];
+                    this.envelope[j] = (mag0 * (1 - t) + mag1 * t) * scale;
+                }
+                this.sampleCount++;
+            }
             // Per-sample interpolation advance (skip if disabled)
-            if (this.interpSamples > 0 && this.interpT < 1.0) {
+            else if (this.interpSamples > 0 && this.interpT < 1.0) {
                 this.interpT += this.interpStep;
                 if (this.interpT > 1.0) this.interpT = 1.0;
                 
@@ -515,12 +614,33 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
         this.interpT = 1.0;
         this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
         
+        // Timeline mode for offline rendering (LFO simulation)
+        this.timeline = null;
+        this.timelineFrameSize = 0;
+        this.timelineNumFrames = 0;
+        this.timelineTotalSamples = 0;
+        this.sampleCount = 0;
+        
         this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-data') {
+            if (e.data.type === 'spectral-timeline') {
+                // Timeline of spectral frames for offline rendering
+                this.timeline = e.data.frames;
+                this.timelineFrameSize = e.data.frameSize;
+                this.timelineNumFrames = e.data.numFrames;
+                this.timelineTotalSamples = e.data.totalSamples;
+                this.sampleCount = 0;
+                // Initialize with first frame
+                for (let i = 0; i < this.timelineFrameSize; i++) {
+                    this.spectralData[i] = this.timeline[i];
+                }
+                this.port.postMessage({ type: 'ready' });
+            } else if (e.data.type === 'spectral-data') {
                 const data = e.data.data;
                 if (this.interpSamples === 0) {
                     this.spectralData.set(data);
                     this.targetData.set(data);
+                    // Acknowledge data received for offline rendering sync
+                    this.port.postMessage({ type: 'ready' });
                 } else {
                     this.prevData.set(this.spectralData);
                     this.targetData.set(data);
@@ -547,8 +667,22 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
         const numPoints = this.spectralData.length / 4;
         
         for (let i = 0; i < channelL.length; i++) {
+            // Timeline mode: step through pre-computed frames
+            if (this.timeline && this.timelineNumFrames > 1) {
+                const progress = this.sampleCount / this.timelineTotalSamples;
+                const framePos = progress * (this.timelineNumFrames - 1);
+                const frame0 = Math.floor(framePos);
+                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
+                const t = framePos - frame0;
+                const offset0 = frame0 * this.timelineFrameSize;
+                const offset1 = frame1 * this.timelineFrameSize;
+                for (let j = 0; j < this.timelineFrameSize; j++) {
+                    this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
+                }
+                this.sampleCount++;
+            }
             // Per-sample interpolation for smooth parameter changes
-            if (this.interpSamples > 0 && this.interpT < 1.0) {
+            else if (this.interpSamples > 0 && this.interpT < 1.0) {
                 this.interpT += this.interpStep;
                 if (this.interpT > 1.0) this.interpT = 1.0;
                 const t = this.interpT;
@@ -971,12 +1105,13 @@ export class AudioEngine {
     public async renderOffline(
         note: number,
         duration: number,
-        currentSpectralData: Float32Array,
+        spectralDataOrTimeline: Float32Array,
         params: {
             mode: SynthMode,
             wavetableParams: { frequency: number, carrier: number, feedback: number },
             octaveDoubling: { low: number, high: number, multiplier: number },
-            interpSamples: number
+            interpSamples: number,
+            timeline?: { numFrames: number, frameSize: number }
         }
     ): Promise<Blob> {
         const offlineSampleRate = 44100;
@@ -1019,8 +1154,6 @@ export class AudioEngine {
         masterGain.connect(offlineCtx.destination);
 
         // Setup parameters
-        node.port.postMessage({ type: 'spectral-data', data: currentSpectralData });
-        node.port.postMessage({ type: 'interp-samples', value: params.interpSamples });
         node.port.postMessage({
             type: 'octave-doubling',
             low: params.octaveDoubling.low,
@@ -1039,6 +1172,27 @@ export class AudioEngine {
             const rootFreq = 440;
             node.port.postMessage({ type: 'frequency-multiplier', value: targetFreq / rootFreq });
         }
+
+        // Send spectral data - either as timeline (for LFO simulation) or single frame
+        if (params.timeline) {
+            node.port.postMessage({
+                type: 'spectral-timeline',
+                frames: spectralDataOrTimeline,
+                frameSize: params.timeline.frameSize,
+                numFrames: params.timeline.numFrames,
+                totalSamples: lengthSamples
+            });
+        } else {
+            node.port.postMessage({ type: 'interp-samples', value: 0 });
+            node.port.postMessage({ type: 'spectral-data', data: spectralDataOrTimeline });
+        }
+
+        // Wait for worklet to acknowledge spectral data is loaded before rendering
+        await new Promise<void>((resolve) => {
+            node.port.onmessage = (e) => {
+                if (e.data.type === 'ready') resolve();
+            };
+        });
 
         // Trigger Envelope
         const now = 0;

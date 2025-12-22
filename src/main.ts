@@ -425,18 +425,89 @@ class SpectralTableApp {
     private async onRenderWav(note: number, duration: number): Promise<void> {
         console.log(`Rendering WAV for note ${note}, duration ${duration}s...`);
 
-        // Use current spectral snapshot from renderer
-        const spectralData = this.renderer.getReadingLineSpectralData();
         const octaveDoubling = this.audioEngine.getOctaveDoubling();
-
-        // Get current state from controls
         const state = this.controls.getFullState();
+        const envState = this.audioEngine.getEnvelopeState();
+        const totalDuration = duration + envState.release;
+
+        // Check if any LFO modulation is active
+        const hasModulation = this.pathYSource !== 'none' || 
+                              this.scanPhaseSource !== 'none' || 
+                              this.shapePhaseSource !== 'none';
+
+        let spectralData: Float32Array;
+        let timelineInfo: { numFrames: number, frameSize: number } | undefined;
+
+        if (hasModulation) {
+            // Simulate LFO modulations at 60fps
+            const fps = 60;
+            const numFrames = Math.ceil(totalDuration * fps);
+            const deltaTime = 1 / fps;
+
+            // Clone LFO state to avoid modifying originals
+            const simLfos = this.lfos.map(lfo => {
+                const simLfo = new LFO(lfo.frequency);
+                simLfo.setWaveform(lfo.waveform);
+                simLfo.setAmplitude(lfo.amplitude);
+                simLfo.setOffset(lfo.offset);
+                return simLfo;
+            });
+
+            // Get initial path state
+            const pathState = this.controls.getState();
+            const initialPathY = pathState.position.y;
+            const initialScanPos = pathState.scanPosition;
+            const initialShapePhase = pathState.shapePhase;
+
+            // First frame to determine frame size
+            const firstFrame = this.renderer.getReadingLineSpectralData();
+            const frameSize = firstFrame.length;
+
+            // Allocate timeline buffer
+            const timeline = new Float32Array(numFrames * frameSize);
+
+            // Generate frames
+            for (let f = 0; f < numFrames; f++) {
+                // Update LFOs and apply modulations
+                simLfos.forEach((lfo, index) => {
+                    const lfoOut = lfo.update(deltaTime);
+                    const sourceName = `lfo${index + 1}`;
+                    if (this.pathYSource === sourceName) {
+                        pathState.position.y = lfoOut;
+                    }
+                    if (this.scanPhaseSource === sourceName) {
+                        pathState.scanPosition = lfoOut;
+                    }
+                    if (this.shapePhaseSource === sourceName) {
+                        pathState.shapePhase = lfoOut;
+                    }
+                });
+
+                // Update renderer and capture spectral data
+                this.renderer.updateReadingPath(pathState);
+                const frame = this.renderer.getReadingLineSpectralData();
+                timeline.set(frame, f * frameSize);
+            }
+
+            // Restore original state
+            pathState.position.y = initialPathY;
+            pathState.scanPosition = initialScanPos;
+            pathState.shapePhase = initialShapePhase;
+            this.renderer.updateReadingPath(pathState);
+
+            spectralData = timeline;
+            timelineInfo = { numFrames, frameSize };
+            console.log(`Generated ${numFrames} frames for LFO modulation simulation`);
+        } else {
+            // No modulation - use single snapshot
+            spectralData = this.renderer.getReadingLineSpectralData();
+        }
 
         try {
             const blob = await this.audioEngine.renderOffline(note, duration, spectralData, {
                 mode: state.synthMode as SynthMode,
                 wavetableParams: {
-                    frequency: 220, // Not used directly in offline render as note is passed
+                    frequency: 220,
                     carrier: state.carrier,
                     feedback: state.feedback
                 },
@@ -445,7 +516,8 @@ class SpectralTableApp {
                     high: octaveDoubling.high,
                     multiplier: octaveDoubling.multiplier
                 },
-                interpSamples: state.interpSamples
+                interpSamples: state.interpSamples,
+                timeline: timelineInfo
             });
 
             // Trigger download
