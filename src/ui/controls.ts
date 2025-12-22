@@ -11,7 +11,7 @@ import {
 import { PresetManager } from './preset-manager';
 import {
     createSection, createSlider, createSelect, createModulatableSlider,
-    createFileInput, createButton, WAVEFORM_ICONS, CONTROL_STYLE
+    createFileInput, createButton, createNumberInput, WAVEFORM_ICONS, CONTROL_STYLE
 } from './ui-elements';
 
 interface SectionOpts {
@@ -74,6 +74,9 @@ export class ControlPanel {
 
     // Generator params callback
     private onGeneratorParamsChange: ((dataSet: string, params: GeneratorParams) => void) | null = null;
+
+    // Offline Render callback
+    private onRenderWav: ((note: number, duration: number) => void) | null = null;
 
     // Preset system
     private presetManager: PresetManager;
@@ -138,7 +141,8 @@ export class ControlPanel {
             { title: 'Audio Synthesis', populate: (c) => this.populateSynthesisSection(c) },
             { title: 'Reading Path', populate: (c) => this.populatePathSection(c) },
             { title: 'LFOs', populate: (c) => this.populateLFOSection(c) },
-            { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c), mode: 'slider' }
+            { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c), mode: 'slider' },
+            { title: 'Offline Render', populate: (c) => this.populateOfflineRenderSection(c) }
         ];
 
         sections.forEach(s => {
@@ -345,6 +349,34 @@ export class ControlPanel {
 
     private appendControl(container: HTMLElement, element: HTMLElement): void {
         container.appendChild(element);
+    }
+
+    private populateOfflineRenderSection(container: HTMLElement): void {
+        const subGroup = document.createElement('div');
+        subGroup.classList.add('sub-group');
+        subGroup.style.display = 'flex';
+        subGroup.style.flexDirection = 'column';
+        subGroup.style.gap = '8px';
+        container.appendChild(subGroup);
+
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '12px';
+        subGroup.appendChild(row);
+
+        const baseNoteInput = createNumberInput(row, 'render-base-note', 'Base Note', 48, 0, 127, 1);
+        const durationInput = createNumberInput(row, 'render-duration', 'Duration (s)', 2.0, 0.1, 10.0, 0.1);
+
+        createButton(subGroup, 'render-wav-btn', 'RENDER WAV', () => {
+            const note = parseInt(baseNoteInput.value);
+            const duration = parseFloat(durationInput.value);
+            if (this.onRenderWav) this.onRenderWav(note, duration);
+        }, 'reset-button');
+    }
+
+    public setRenderWavCallback(callback: (note: number, duration: number) => void): void {
+        this.onRenderWav = callback;
     }
 
     private createLFOUnit(container: HTMLElement, index: number): void {

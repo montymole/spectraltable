@@ -486,3 +486,55 @@ export function createFileInput(
 
     return input;
 }
+
+/**
+ * Number input factory for simple numeric fields.
+ */
+export function createNumberInput(
+    parent: HTMLElement,
+    id: string,
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    onChange?: (val: number) => void
+): HTMLInputElement {
+    const group = document.createElement('div');
+    group.className = 'control-group-row';
+    group.style.display = 'flex';
+    group.style.alignItems = 'center';
+    group.style.gap = '8px';
+    group.style.marginBottom = '8px';
+
+    const labelEl = document.createElement('label');
+    labelEl.htmlFor = id;
+    labelEl.textContent = label;
+    labelEl.style.fontSize = '12px';
+    labelEl.style.whiteSpace = 'nowrap';
+    labelEl.style.marginBottom = '0';
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.id = id;
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(value);
+    input.style.width = '60px';
+    input.style.background = 'var(--bg-input)';
+    input.style.border = '1px solid var(--border-subtle)';
+    input.style.color = 'var(--text-main)';
+    input.style.padding = '2px 4px';
+    input.style.borderRadius = '4px';
+
+    if (onChange) {
+        input.addEventListener('change', () => onChange(parseFloat(input.value)));
+    }
+
+    group.appendChild(labelEl);
+    group.appendChild(input);
+    parent.appendChild(group);
+
+    return input;
+}

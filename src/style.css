@@ -585,3 +585,33 @@ select:focus {
   cursor: default;
   pointer-events: none;
 }
+/* Offline Render Specifics */
+.control-group-row input[type="number"] {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: #4a9eff;
+  font-family: 'Berkeley Mono', monospace;
+  font-size: 0.75rem;
+  padding: 2px 4px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.control-group-row input[type="number"]:focus {
+  border-color: var(--accent-primary);
+  background: rgba(74, 158, 255, 0.1);
+}
+
+#render-wav-btn {
+  background: rgba(0, 255, 170, 0.1);
+  color: #00ffaa;
+  border: 1px solid rgba(0, 255, 170, 0.2);
+  margin-top: 8px;
+}
+
+#render-wav-btn:hover {
+  background: rgba(0, 255, 170, 0.2);
+  border-color: #00ffaa;
+  box-shadow: 0 0 15px rgba(0, 255, 170, 0.3);
+}

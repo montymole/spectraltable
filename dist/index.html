@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="GPU-accelerated spectral synthesis in the browser" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet">
+  <title>Spectra Table Synthesis</title>
+  <script type="module" crossorigin src="/assets/index-DqPp4D_k.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-B1sp_XHv.css">
+</head>
+
+<body>
+  <div id="app">
+    <div id="canvas-container">
+      <div id="left-panel">
+        <div class="vis-group">
+          <div class="vis-content">
+            <canvas id="gl-canvas"></canvas>
+          </div>
+          <div class="vis-header">Spectral Cube</div>
+        </div>
+        <div class="vis-group">
+          <div class="vis-content">
+            <canvas id="spectrogram-canvas"></canvas>
+          </div>
+          <div class="vis-header">Spectrogram</div>
+        </div>
+        <div class="vis-group">
+          <div class="vis-content">
+            <canvas id="scope-canvas"></canvas>
+          </div>
+          <div class="vis-header">Scope</div>
+        </div>
+      </div>
+
+    </div>
+    <div id="right-panel">
+      <div id="controls"></div>
+    </div>
+  </div>
+  <div id="piano-container"></div>
+  </div>
+</body>
+
+</html>
