@@ -145,6 +145,7 @@ class SpectralTableApp {
         this.controls.setInterpSamplesChangeCallback((samples) => this.audioEngine.setInterpSamples(samples));
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
+        this.controls.setRenderWavCallback(this.onRenderWav.bind(this));
 
 
         // LFO Wiring
@@ -419,6 +420,49 @@ class SpectralTableApp {
 
         // Trigger Envelope Attack (Multi-trigger behavior: every new note triggers attack)
         this.audioEngine.triggerAttack();
+    }
+
+    private async onRenderWav(note: number, duration: number): Promise<void> {
+        console.log(`Rendering WAV for note ${note}, duration ${duration}s...`);
+
+        // Use current spectral snapshot from renderer
+        const spectralData = this.renderer.getReadingLineSpectralData();
+        const octaveDoubling = this.audioEngine.getOctaveDoubling();
+
+        // Get current state from controls
+        const state = this.controls.getFullState();
+
+        try {
+            const blob = await this.audioEngine.renderOffline(note, duration, spectralData, {
+                mode: state.synthMode as SynthMode,
+                wavetableParams: {
+                    frequency: 220, // Not used directly in offline render as note is passed
+                    carrier: state.carrier,
+                    feedback: state.feedback
+                },
+                octaveDoubling: {
+                    low: octaveDoubling.low,
+                    high: octaveDoubling.high,
+                    multiplier: octaveDoubling.multiplier
+                },
+                interpSamples: state.interpSamples
+            });
+
+            // Trigger download
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `spectral_sample_note_${note}.wav`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            console.log('✓ WAV render complete and downloaded');
+        } catch (error) {
+            console.error('Offline render failed:', error);
+            alert(`Failed to render WAV: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
     }
 
     private async onWavUpload(files: FileList): Promise<void> {
