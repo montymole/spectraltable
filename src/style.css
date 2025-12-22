@@ -156,11 +156,10 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.15em;
   color: var(--text-primary);
-  transform: rotate(-90deg);
   transform-origin: left top;
   position: absolute;
-  bottom: 0;
-  left: -.5rem;
+  top: -0.5rem;
+  left: 0;
   padding: 0 1rem;
 }
 
@@ -585,6 +584,7 @@ select:focus {
   cursor: default;
   pointer-events: none;
 }
+
 /* Offline Render Specifics */
 .control-group-row input[type="number"] {
   background: rgba(255, 255, 255, 0.05);

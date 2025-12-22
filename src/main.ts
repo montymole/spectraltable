@@ -49,6 +49,8 @@ class SpectralTableApp {
     // Modulation Logic
     private lfos: LFO[] = [
         new LFO(0.5),
+        new LFO(0.5),
+        new LFO(0.5),
         new LFO(0.5)
     ];
     private pathYSource: string = 'none'; // 'none', 'lfo1', 'lfo2'
@@ -121,11 +123,11 @@ class SpectralTableApp {
         });
 
         // MIDI Input Selection
-        this.controls.setMidiInputChangeCallback((id) => {
+        this.controls.setMidiInputChangeCallback((id: string) => {
             this.midiHandler.selectInput(id);
         });
 
-        this.controls.setOctaveChangeCallback((octave) => {
+        this.controls.setOctaveChangeCallback((octave: number) => {
             this.piano.setBaseOctave(octave);
         });
 
@@ -143,23 +145,28 @@ class SpectralTableApp {
         this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
         this.controls.setFeedbackChangeCallback(this.onFeedbackChange.bind(this));
         this.controls.setOctaveDoublingChangeCallback(this.onOctaveDoublingChange.bind(this));
-        this.controls.setInterpSamplesChangeCallback((samples) => this.audioEngine.setInterpSamples(samples));
+        this.controls.setInterpSamplesChangeCallback((samples: number) => this.audioEngine.setInterpSamples(samples));
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
         this.controls.setRenderWavCallback(this.onRenderWav.bind(this));
+        this.controls.setBPMCallback((bpm) => {
+            this.lfos.forEach(lfo => lfo.setBPM(bpm));
+        });
 
 
         // LFO Wiring
-        this.controls.setLFOParamChangeCallback((index, param, value) => {
+        this.controls.setLFOParamChangeCallback((index: number, param: string, value: any) => {
             const lfo = this.lfos[index];
             if (!lfo) return;   // Invalid index
             if (param === 'waveform') lfo.setWaveform(value as LFOWaveform);
             if (param === 'frequency') lfo.setFrequency(value);
             if (param === 'amplitude') lfo.setAmplitude(value);
             if (param === 'offset') lfo.setOffset(value);
+            if (param === 'isSynced') lfo.setSync(value);
+            if (param === 'division') lfo.setDivision(value);
         });
 
-        this.controls.setModulationRoutingChangeCallback((target, source) => {
+        this.controls.setModulationRoutingChangeCallback((target: string, source: string) => {
             if (target === 'pathY') this.pathYSource = source;
             if (target === 'scanPhase') this.scanPhaseSource = source;
             if (target === 'shapePhase') this.shapePhaseSource = source;
@@ -227,13 +234,21 @@ class SpectralTableApp {
         // Apply to controls UI
         this.controls.applyState(state);
 
+        // Apply BPM
+        if (state.bpm !== undefined) {
+            this.lfos.forEach(lfo => lfo.setBPM(state.bpm));
+        }
+
         // Apply to LFOs
         this.lfos.forEach((lfo, index) => {
             if (!state.lfos || index >= state.lfos.length) return;
-            lfo.setWaveform(state.lfos[index].waveform as any);
-            lfo.setFrequency(state.lfos[index].frequency);
-            lfo.setAmplitude(state.lfos[index].amplitude);
-            lfo.setOffset(state.lfos[index].offset);
+            const s = state.lfos[index];
+            lfo.setWaveform(s.waveform as any);
+            lfo.setFrequency(s.frequency);
+            lfo.setAmplitude(s.amplitude);
+            lfo.setOffset(s.offset);
+            if (s.isSynced !== undefined) lfo.setSync(s.isSynced);
+            if (s.division !== undefined) lfo.setDivision(s.division);
         });
 
         // Apply modulation routing
@@ -335,8 +350,10 @@ class SpectralTableApp {
             this.gameOfLifeActive = true;
             this.gameOfLifeLastUpdate = performance.now();
 
-            // Show dynamic parameter slider for evolution speed (0-1)
-            this.controls.showDynamicParam('Evolution Speed', 0, 1, 0.5, 0.01);
+            // Show dynamic parameter slider for evolution speed (0.01 to 1.0)
+            this.controls.showDynamicParam('Evolution Speed', 0.5, 0.01, 1.0, 0.01, (v: number) => {
+                this.gameOfLifeSpeed = v;
+            });
             console.log('✓ Game of Life initialized');
         } else if (dataSet === 'sine-plasma') {
             // Initialize Sine Plasma with current params
@@ -345,8 +362,10 @@ class SpectralTableApp {
             this.sinePlasmaActive = true;
             this.sinePlasmaLastUpdate = performance.now();
 
-            // Show dynamic parameter slider for evolution speed (0-1)
-            this.controls.showDynamicParam('Evolution Speed', 0, 1, 0.5, 0.01);
+            // Show dynamic parameter slider for evolution speed (0.01 to 1.0)
+            this.controls.showDynamicParam('Evolution Speed', 0.5, 0.01, 1.0, 0.01, (v: number) => {
+                this.sinePlasmaSpeed = v;
+            });
             console.log('✓ Sine Plasma initialized with evolution');
         } else {
             // Built-in data sets with params
@@ -424,12 +443,23 @@ class SpectralTableApp {
     }
 
     private async onRenderWav(note: number, duration: number): Promise<void> {
-        console.log(`Rendering WAV for note ${note}, duration ${duration}s...`);
+        const fullState = this.controls.getFullState();
+        const bpm = (fullState as any).bpm || 140;
+
+        let actualDuration = duration;
+        const anySynced = this.lfos.some(lfo => lfo.isSynced);
+
+        if (anySynced) {
+            actualDuration = duration * (60 / bpm);
+            console.log(`Auto-adjusting render duration to ${duration} beats (${actualDuration.toFixed(3)}s) at ${bpm} BPM`);
+        }
+
+        console.log(`Rendering WAV for note ${note}, duration ${actualDuration}s...`);
 
         const octaveDoubling = this.audioEngine.getOctaveDoubling();
-        const state = this.controls.getFullState();
+        const state = fullState;
         const envState = this.audioEngine.getEnvelopeState();
-        const totalDuration = duration + envState.release;
+        const totalDuration = actualDuration + envState.release;
 
         // Check if any LFO modulation is active
         const hasModulation = this.pathYSource !== 'none' ||
@@ -451,6 +481,9 @@ class SpectralTableApp {
                 simLfo.setWaveform(lfo.waveform);
                 simLfo.setAmplitude(lfo.amplitude);
                 simLfo.setOffset(lfo.offset);
+                simLfo.setSync(lfo.isSynced);
+                simLfo.setDivision(lfo.division);
+                simLfo.setBPM((state as any).bpm || 140);
                 return simLfo;
             });
 
@@ -505,10 +538,10 @@ class SpectralTableApp {
         }
 
         try {
-            this.controls.showRenderProgress();
-            this.controls.updateRenderProgress(0);
+            this.controls.showProgress('render');
+            this.controls.updateProgress('render', 0);
 
-            const blob = await this.audioEngine.renderOffline(note, duration, spectralData, {
+            const blob = await this.audioEngine.renderOffline(note, actualDuration, spectralData, {
                 mode: state.synthMode as SynthMode,
                 wavetableParams: {
                     frequency: 220,
@@ -524,7 +557,7 @@ class SpectralTableApp {
                 timeline: timelineInfo
             });
 
-            this.controls.updateRenderProgress(100);
+            this.controls.updateProgress('render', 100);
 
             // Construct filename
             const presetName = (document.getElementById('preset-select') as HTMLSelectElement)?.value;
@@ -539,7 +572,7 @@ class SpectralTableApp {
             console.error('Offline render failed:', error);
             alert(`Failed to render WAV: ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
-            this.controls.hideRenderProgress();
+            this.controls.hideProgress('render');
         }
     }
 
@@ -549,8 +582,8 @@ class SpectralTableApp {
 
         try {
             // Show progress
-            this.controls.showProgress();
-            this.controls.updateProgress(0);
+            this.controls.showProgress('upload');
+            this.controls.updateProgress('upload', 0);
 
             // Get current volume resolution
             const resolution = this.renderer.getSpectralVolume().getResolution();
@@ -563,14 +596,14 @@ class SpectralTableApp {
             };
 
             // Update Y density slider
-            this.controls.setVolumeDensity(newResolution);
+            this.controls.setVolumeDensity(newResolution.x, newResolution.y, newResolution.z);
             this.renderer.updateVolumeResolution(newResolution);
 
             // Analyze all files and build the morphing volume
             const volumeData = await this.audioAnalyzer.analyzeMultipleFiles(
                 fileArray,
                 newResolution,
-                (percent) => this.controls.updateProgress(percent)
+                (percent: number) => this.controls.updateProgress('upload', percent)
             );
 
             // Store the volume data
@@ -584,7 +617,7 @@ class SpectralTableApp {
             this.renderer.getSpectralVolume().setData(volumeData);
 
             // Add to dropdown and select it
-            this.controls.addSpectralDataOption(volumeName, volumeName);
+            this.controls.addSpectralDataOption(volumeName);
 
             console.log(`✓ Processed ${fileArray.length} file(s) into morphing volume`);
         } catch (error) {
@@ -592,7 +625,7 @@ class SpectralTableApp {
             alert(`Error processing audio file(s): ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
             // Hide progress
-            setTimeout(() => this.controls.hideProgress(), 500);
+            setTimeout(() => this.controls.hideProgress('upload'), 500);
         }
     }
 
@@ -657,21 +690,31 @@ class SpectralTableApp {
             }
 
             // LFO modulation update
+            let pathModulated = false;
+            const state = this.controls.getState();
+
             this.lfos.forEach((lfo, index) => {
                 const lfoOut = lfo.update(deltaTime);
                 const sourceName = `lfo${index + 1}`;
                 if (this.pathYSource === sourceName) {
+                    state.position.y = lfoOut;
                     this.controls.updatePathY(lfoOut);
+                    pathModulated = true;
                 }
                 if (this.scanPhaseSource === sourceName) {
+                    state.scanPosition = lfoOut;
                     this.controls.updateScanPosition(lfoOut);
+                    pathModulated = true;
                 }
                 if (this.shapePhaseSource === sourceName) {
-                    const state = this.controls.getState();
                     state.shapePhase = lfoOut;
-                    this.renderer.updateReadingPath(state);
+                    pathModulated = true;
                 }
             });
+
+            if (pathModulated) {
+                this.renderer.updateReadingPath(state);
+            }
 
             this.renderer.render(deltaTime);
 

@@ -14,14 +14,22 @@
   - [x] Default filename to "preset name-basenote.wav" or "synthesistype-basenote.wav"
 
 ### LFO Enhancements
-- [ ] Extend frequency range down to 0.001 Hz
+- [x] Extend frequency range down to 0.001 Hz
       *→ update min in lfo.ts, ensure phase accumulator precision (use double or modulo)*
-- [ ] Add more decimal precision to frequency control and display
-- [ ] Implement logarithmic mode for knob control
+- [x] Add more decimal precision to frequency control and display
+- [x] Implement logarithmic mode for knob control
       *→ `value = min * Math.pow(max/min, normalized)` for log scaling*
-- [ ] Apply logarithmic scaling to LFO frequency dial
+- [x] enable logarithmic scaling option for dials
 
----
+### Tempo Sync LFO
+*→ extend LFO class with sync mode, compute freq from BPM*
+- [x] Add GLOBAL BPM input field (effects all)
+- [x] Add sync mode toggle (free / synced)
+- [x] Add beat division selector: 1/16, 1/8, 1/4, 1/2, 1/1
+      *→ freq = bpm / 60 * division (e.g. 1/4 = 0.25)*
+- [x] Add triplet variants for each division
+      *→ multiply division by 2/3*
+- [x] When rendering the length of render should be automatically adjusted to based on BPM and sample rate so that it is one BEAT long. (control unit should change from seconds to beats)
 
 ## Short-Term Features
 
@@ -66,14 +74,7 @@
   - [ ] Mix (dry/wet) control
 
 
-### Tempo Sync LFO
-*→ extend LFO class with sync mode, compute freq from BPM*
-- [ ] Add BPM input field
-- [ ] Add sync mode toggle (free / synced)
-- [ ] Add beat division selector: 1/16, 1/8, 1/4, 1/2, 1/1
-      *→ freq = bpm / 60 * division (e.g. 1/4 = 0.25)*
-- [ ] Add triplet variants for each division
-      *→ multiply division by 2/3*
+
 
 ### Additional Plot Types
 *→ add to reading-path.ts generatePlane() and generateReadingLine()*
