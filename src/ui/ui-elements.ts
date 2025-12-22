@@ -100,15 +100,23 @@ export function createSlider(
     slider.type = 'range';
     slider.id = id;
 
-    const isLog = scale === 'logarithmic' && min > 0 && max > 0;
+    // For logarithmic, we need a positive minimum for the log math. If 0 is provided, use an epsilon.
+    const effectiveMin = (scale === 'logarithmic' && min === 0) ? 0.001 : min;
+    const isLog = scale === 'logarithmic' && effectiveMin > 0 && max > effectiveMin;
+
     (slider as any).isLogarithmic = isLog;
     (slider as any).precision = precision;
+    (slider as any).realMin = min;
+    (slider as any).realMax = max;
+    (slider as any).realStep = step;
 
     if (isLog) {
-        slider.min = String(Math.log10(min));
-        slider.max = String(Math.log10(max));
+        slider.min = '0';
+        slider.max = '1';
         slider.step = 'any';
-        slider.value = String(Math.log10(value));
+        // Initial normalized pos
+        const initialP = value <= 0 ? 0 : (Math.log10(Math.max(effectiveMin, value)) - Math.log10(effectiveMin)) / (Math.log10(max) - Math.log10(effectiveMin));
+        slider.value = String(Math.max(0, Math.min(1, initialP)));
     } else {
         slider.min = String(min);
         slider.max = String(max);
@@ -118,13 +126,16 @@ export function createSlider(
 
     slider.className = 'slider';
 
-    const getActualValue = () => {
-        const v = parseFloat(slider.value);
-        return isLog ? Math.pow(10, v) : v;
+    const getActualValue = (normVal: number) => {
+        if (!isLog) return normVal;
+        if (normVal <= 0.005 && min === 0) return 0; // Snap bottom slice to 0
+        const logMin = Math.log10(effectiveMin);
+        const logMax = Math.log10(max);
+        return Math.pow(10, logMin + normVal * (logMax - logMin));
     };
 
     slider.addEventListener('input', () => {
-        const val = getActualValue();
+        const val = getActualValue(parseFloat(slider.value));
         updateDisplay(val);
         if (onInput) onInput(val);
     });
@@ -134,11 +145,23 @@ export function createSlider(
     Object.defineProperty(slider, 'value', {
         get: function () {
             const v = originalValueDescriptor!.get!.call(this);
-            return isLog ? String(Math.pow(10, parseFloat(v))) : v;
+            return String(getActualValue(parseFloat(v)));
         },
         set: function (v) {
             const num = parseFloat(v);
-            const valToSet = isLog ? String(Math.log10(num)) : String(num);
+            let valToSet: string;
+            if (isLog) {
+                if (num <= 0) {
+                    valToSet = '0';
+                } else {
+                    const logMin = Math.log10(effectiveMin);
+                    const logMax = Math.log10(max);
+                    const p = (Math.log10(Math.max(effectiveMin, num)) - logMin) / (logMax - logMin);
+                    valToSet = String(Math.max(0, Math.min(1, p)));
+                }
+            } else {
+                valToSet = String(num);
+            }
             originalValueDescriptor!.set!.call(this, valToSet);
             updateDisplay(num);
             if ((this as any).updateKnob) (this as any).updateKnob();
@@ -208,21 +231,28 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
     container.appendChild(svg);
 
     const updateKnob = () => {
-        // Now that we wrapped slider.value, it returns the ACTUAL value.
-        // But for internal knob calculations, we might want the normalized percent.
-        // We can get the raw internal value by reading from the prototype if needed,
-        // or just calculate from the actual value.
-
         const val = parseFloat(input.value);
-        const min = (input as any).isLogarithmic ? Math.pow(10, parseFloat(input.min)) : parseFloat(input.min);
-        const max = (input as any).isLogarithmic ? Math.pow(10, parseFloat(input.max)) : parseFloat(input.max);
-        const isLog = (input as any).isLogarithmic;
+        const inputAny = input as any;
+        const isLog = inputAny.isLogarithmic;
+        const realMin = inputAny.realMin;
+        const realMax = inputAny.realMax;
+        const effectiveMin = (isLog && realMin === 0) ? 0.001 : realMin;
+        const max = isLog ? realMax : parseFloat(input.max);
 
         let percent: number;
-        if (isLog && min > 0 && max > 0) {
-            percent = (Math.log10(val) - Math.log10(min)) / (Math.log10(max) - Math.log10(min));
+        if (isLog) {
+            // value is already actual. Convert to normalized 0-1
+            if (val <= 0) {
+                percent = 0;
+            } else {
+                const logMin = Math.log10(effectiveMin);
+                const logMax = Math.log10(max);
+                percent = (Math.log10(val) - logMin) / (logMax - logMin);
+            }
         } else {
-            percent = (val - min) / (max - min);
+            const minAttr = parseFloat(input.min);
+            const maxAttr = parseFloat(input.max);
+            percent = (val - minAttr) / (maxAttr - minAttr);
         }
         percent = Math.max(0, Math.min(1, percent));
 
@@ -231,7 +261,6 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
         valueArc.setAttribute('d', describeArc(24, 24, 18, 225, endAngle));
 
         // Update modulation range arc
-        const inputAny = input as any;
         if (inputAny.hasModulation) {
             const offset = typeof inputAny.modOffset === 'number' ? inputAny.modOffset : 0;
             const amp = typeof inputAny.modAmplitude === 'number' ? inputAny.modAmplitude : 0;
@@ -240,14 +269,17 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
             const endVal = offset + amp;
 
             let startP: number, endP: number;
-            if (isLog && min > 0 && max > 0) {
-                const logMin = Math.log10(min);
-                const logRange = Math.log10(max) - logMin;
-                startP = (Math.log10(Math.max(min, startVal)) - logMin) / logRange;
-                endP = (Math.log10(Math.max(min, endVal)) - logMin) / logRange;
+            if (isLog) {
+                const logMin = Math.log10(effectiveMin);
+                const logMax = Math.log10(realMax);
+                const logRange = logMax - logMin;
+                startP = (startVal <= 0) ? 0 : (Math.log10(Math.max(effectiveMin, startVal)) - logMin) / logRange;
+                endP = (endVal <= 0) ? 0 : (Math.log10(Math.max(effectiveMin, endVal)) - logMin) / logRange;
             } else {
-                startP = (startVal - min) / (max - min);
-                endP = (endVal - min) / (max - min);
+                const minAttr = parseFloat(input.min);
+                const maxAttr = parseFloat(input.max);
+                startP = (startVal - minAttr) / (maxAttr - minAttr);
+                endP = (endVal - minAttr) / (maxAttr - minAttr);
             }
 
             const sAngle = 225 + Math.max(0, Math.min(1, startP)) * 270;
@@ -293,29 +325,47 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
             // Interaction is always normalized 0-1
             const deltaP = deltaY / 200;
 
-            const min = (input as any).isLogarithmic ? Math.pow(10, parseFloat(input.min)) : parseFloat(input.min);
-            const max = (input as any).isLogarithmic ? Math.pow(10, parseFloat(input.max)) : parseFloat(input.max);
-            const isLog = (input as any).isLogarithmic;
-            const step = parseFloat(input.step) || 0.001;
+            const inputAny = input as any;
+            const isLog = inputAny.isLogarithmic;
+            const realMin = inputAny.realMin;
+            const realMax = inputAny.realMax;
+            const effectiveMin = (isLog && realMin === 0) ? 0.001 : realMin;
+            const max = isLog ? realMax : parseFloat(input.max);
+            const realStep = inputAny.realStep || 0.001;
 
             let newVal: number;
             if (isLog) {
-                const logMin = Math.log10(min);
+                const logMin = Math.log10(effectiveMin);
                 const logMax = Math.log10(max);
                 const logRange = logMax - logMin;
-                const startP = (Math.log10(startVal) - logMin) / logRange;
+
+                // Get current P
+                let startP: number;
+                if (startVal <= 0) {
+                    startP = 0;
+                } else {
+                    startP = (Math.log10(Math.max(effectiveMin, startVal)) - logMin) / logRange;
+                }
+
                 const newP = Math.max(0, Math.min(1, startP + deltaP));
-                newVal = Math.pow(10, logMin + newP * logRange);
+                if (newP <= 0.005 && realMin === 0) {
+                    newVal = 0;
+                } else {
+                    newVal = Math.pow(10, logMin + newP * logRange);
+                }
             } else {
-                const range = max - min;
+                const minAttr = parseFloat(input.min);
+                const maxAttr = parseFloat(input.max);
+                const range = maxAttr - minAttr;
                 newVal = startVal + deltaY * (range / 200);
             }
 
-            // Snap to step (only if not 'any')
-            if (input.step !== 'any') {
-                newVal = Math.round(newVal / step) * step;
+            // Snap to step
+            if (realStep > 0) {
+                newVal = Math.round(newVal / realStep) * realStep;
             }
-            newVal = Math.max(min, Math.min(max, newVal));
+            // Clamp to actual bounds
+            newVal = Math.max(realMin, Math.min(max, newVal));
 
             input.value = String(newVal); // This calls our wrapped setter
             input.dispatchEvent(new Event('input'));
@@ -490,15 +540,23 @@ export function createModulatableSlider(
     slider.type = 'range';
     slider.id = id;
 
-    const isLog = scale === 'logarithmic' && min > 0 && max > 0;
+    // For logarithmic, we need a positive minimum for the log math. If 0 is provided, use an epsilon.
+    const effectiveMin = (scale === 'logarithmic' && min === 0) ? 0.001 : min;
+    const isLog = scale === 'logarithmic' && effectiveMin > 0 && max > effectiveMin;
+
     (slider as any).isLogarithmic = isLog;
     (slider as any).precision = precision;
+    (slider as any).realMin = min;
+    (slider as any).realMax = max;
+    (slider as any).realStep = step;
 
     if (isLog) {
-        slider.min = String(Math.log10(min));
-        slider.max = String(Math.log10(max));
+        slider.min = '0';
+        slider.max = '1';
         slider.step = 'any';
-        slider.value = String(Math.log10(value));
+        // Initial normalized pos
+        const initialP = value <= 0 ? 0 : (Math.log10(Math.max(effectiveMin, value)) - Math.log10(effectiveMin)) / (Math.log10(max) - Math.log10(effectiveMin));
+        slider.value = String(Math.max(0, Math.min(1, initialP)));
     } else {
         slider.min = String(min);
         slider.max = String(max);
@@ -508,9 +566,12 @@ export function createModulatableSlider(
 
     slider.className = 'slider';
 
-    const getActualValue = () => {
-        const v = parseFloat(slider.value);
-        return isLog ? Math.pow(10, v) : v;
+    const getActualValue = (normVal: number) => {
+        if (!isLog) return normVal;
+        if (normVal <= 0.005 && min === 0) return 0; // Snap bottom slice to 0
+        const logMin = Math.log10(effectiveMin);
+        const logMax = Math.log10(max);
+        return Math.pow(10, logMin + normVal * (logMax - logMin));
     };
 
     // Wrap value property to handle actual values transparently
@@ -518,12 +579,23 @@ export function createModulatableSlider(
     Object.defineProperty(slider, 'value', {
         get: function () {
             const v = originalValueDescriptor!.get!.call(this);
-            const num = parseFloat(v);
-            return isLog ? String(Math.pow(10, num)) : v;
+            return String(getActualValue(parseFloat(v)));
         },
         set: function (v) {
             const num = parseFloat(v);
-            const valToSet = isLog ? String(Math.log10(num)) : String(num);
+            let valToSet: string;
+            if (isLog) {
+                if (num <= 0) {
+                    valToSet = '0';
+                } else {
+                    const logMin = Math.log10(effectiveMin);
+                    const logMax = Math.log10(max);
+                    const p = (Math.log10(Math.max(effectiveMin, num)) - logMin) / (logMax - logMin);
+                    valToSet = String(Math.max(0, Math.min(1, p)));
+                }
+            } else {
+                valToSet = String(num);
+            }
             originalValueDescriptor!.set!.call(this, valToSet);
             updateDisplay(num);
             if ((this as any).updateKnob) (this as any).updateKnob();
@@ -532,7 +604,7 @@ export function createModulatableSlider(
     });
 
     slider.addEventListener('input', () => {
-        const val = getActualValue();
+        const val = getActualValue(parseFloat(slider.value));
         updateDisplay(val);
         onSliderInput(val);
     });

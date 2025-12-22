@@ -49,6 +49,8 @@ class SpectralTableApp {
     // Modulation Logic
     private lfos: LFO[] = [
         new LFO(0.5),
+        new LFO(0.5),
+        new LFO(0.5),
         new LFO(0.5)
     ];
     private pathYSource: string = 'none'; // 'none', 'lfo1', 'lfo2'

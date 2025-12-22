@@ -225,25 +225,27 @@ export class ControlPanel {
         const nGroup = document.createElement('div');
         nGroup.className = 'control-group';
         container.appendChild(nGroup);
-        const pathYControl = createModulatableSlider(nGroup, 'path-y', 'Position Y (Morph)', -1, 1, 0, 0.01, lfoOptions,
+        const pathYControl = createModulatableSlider(nGroup, 'path-y', 'Position Y (Morph)', -1, 1, 0, 0.001, lfoOptions,
             (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
             (source) => {
                 this.modRoutingState.pathY = source;
                 if (this.onModulationRoutingChange) this.onModulationRoutingChange('pathY', source);
                 this.scheduleAutoSave();
                 this.updateModulationRanges();
-            }
+            },
+            CONTROL_STYLE, 'linear', 3
         );
         this.pathYSlider = pathYControl.slider;
         this.pathYSourceSelect = pathYControl.select;
-        const scanControl = createModulatableSlider(nGroup, 'scan-pos', 'Scan Phase', -1, 1, 0, 0.01, lfoOptions as any,
+        const scanControl = createModulatableSlider(nGroup, 'scan-pos', 'Scan Phase', -1, 1, 0, 0.001, lfoOptions as any,
             (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
             (source) => {
                 this.modRoutingState.scanPhase = source;
                 if (this.onModulationRoutingChange) this.onModulationRoutingChange('scanPhase', source);
                 this.scheduleAutoSave();
                 this.updateModulationRanges();
-            }
+            },
+            CONTROL_STYLE, 'linear', 3
         );
         this.scanPositionSlider = scanControl.slider;
         this.scanPhaseSourceSelect = scanControl.select;
@@ -279,7 +281,7 @@ export class ControlPanel {
         container.appendChild(subGroup2);
 
         // Interpolation samples control (all modes)
-        this.interpSamplesSlider = createSlider(subGroup2, 'interp-samples', 'Interp Samples', 16, 1024, 64, 16, (val) => {
+        this.interpSamplesSlider = createSlider(subGroup2, 'interp-samples', 'Interp Samples', 16, 1024, 64, 1, (val) => {
             if (this.onInterpSamplesChange) this.onInterpSamplesChange(val);
             this.scheduleAutoSave();
         });
@@ -308,10 +310,10 @@ export class ControlPanel {
             this.octaveDoublingState.highCount = val;
             octaveUpdate();
         });
-        this.octaveMultSlider = createSlider(subGroup3, 'octave-mult', 'Decay (per octave)', 0, 1, 0.5, 0.01, (val) => {
+        this.octaveMultSlider = createSlider(subGroup3, 'octave-mult', 'Decay (per octave)', 0, 1, 0.5, 0.001, (val) => {
             this.octaveDoublingState.multiplier = val;
             octaveUpdate();
-        });
+        }, undefined, 'linear', 3);
 
         // Initialize dynamic UI
         this.updateSynthModeUI(this.synthModeSelect.value as SynthMode);
@@ -418,20 +420,20 @@ export class ControlPanel {
 
         this.lfoWaveSelects[index] = waveSelect;
 
-        this.lfoFreqSliders[index] = createSlider(wrapper, `lfo-${index}-freq`, 'Freq', 0.001, 20.0, this.lfoState[index].frequency, 0.001, (val) => {
+        this.lfoFreqSliders[index] = createSlider(wrapper, `lfo-${index}-freq`, 'Freq', 0, 5.0, this.lfoState[index].frequency, 0.001, (val) => {
             this.lfoState[index].frequency = val;
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'frequency', val);
             this.scheduleAutoSave();
-        }, CONTROL_STYLE, 'logarithmic', 3);
+        }, CONTROL_STYLE, 'linear', 3);
 
-        this.lfoAmpSliders[index] = createSlider(wrapper, `lfo-${index}-amp`, 'Amp', 0, 1, this.lfoState[index].amplitude, 0.01, (val) => {
+        this.lfoAmpSliders[index] = createSlider(wrapper, `lfo-${index}-amp`, 'Amp', 0, 1, this.lfoState[index].amplitude, 0.001, (val) => {
             this.lfoState[index].amplitude = val;
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'amplitude', val);
             this.scheduleAutoSave();
             this.updateModulationRanges();
         });
 
-        this.lfoOffsetSliders[index] = createSlider(wrapper, `lfo-${index}-offset`, 'Offset', -1, 1, this.lfoState[index].offset, 0.01, (val) => {
+        this.lfoOffsetSliders[index] = createSlider(wrapper, `lfo-${index}-offset`, 'Offset', -1, 1, this.lfoState[index].offset, 0.001, (val) => {
             this.lfoState[index].offset = val;
             if (this.onLFOParamChange) this.onLFOParamChange(index, 'offset', val);
             this.scheduleAutoSave();
@@ -496,9 +498,9 @@ export class ControlPanel {
     }
 
     private createFeedbackSlider(container: HTMLElement): HTMLInputElement {
-        const slider = createSlider(container, 'feedback', 'Feedback', 0, 0.99, 0, 0.01, (val) => {
+        const slider = createSlider(container, 'feedback', 'Feedback', 0, 0.99, 0, 0.001, (val) => {
             if (this.onFeedbackChange) this.onFeedbackChange(val);
-        });
+        }, undefined, 'linear', 3);
         const group = slider.closest('.control-group') as HTMLElement;
         if (group) {
             group.id = 'feedback-container';
@@ -714,11 +716,11 @@ export class ControlPanel {
     private updateAllDisplays(): void {
         // Update path Y display
         const pathYDisplay = document.getElementById('path-y-value');
-        if (pathYDisplay) pathYDisplay.textContent = parseFloat(this.pathYSlider.value).toFixed(2);
+        if (pathYDisplay) pathYDisplay.textContent = parseFloat(this.pathYSlider.value).toFixed(3);
 
         // Update scan position display
         const scanDisplay = document.getElementById('scan-pos-value');
-        if (scanDisplay) scanDisplay.textContent = parseFloat(this.scanPositionSlider.value).toFixed(2);
+        if (scanDisplay) scanDisplay.textContent = parseFloat(this.scanPositionSlider.value).toFixed(3);
 
         // Update feedback display
         const fbDisplay = document.getElementById('feedback-value');
@@ -785,16 +787,16 @@ export class ControlPanel {
             case '3d-julia': {
                 const params = { ...(initialParams as JuliaParams || defaultJuliaParams) };
                 this.currentGeneratorParams = params;
-                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
-                createParamSlider('C Real', -1, 1, params.cReal, 0.05, (v) => { params.cReal = v; triggerUpdate(); });
-                createParamSlider('C Imaginary', -1, 1, params.cImag, 0.05, (v) => { params.cImag = v; triggerUpdate(); });
+                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.001, (v) => { params.scale = v; triggerUpdate(); });
+                createParamSlider('C Real', -1, 1, params.cReal, 0.001, (v) => { params.cReal = v; triggerUpdate(); });
+                createParamSlider('C Imaginary', -1, 1, params.cImag, 0.001, (v) => { params.cImag = v; triggerUpdate(); });
                 break;
             }
             case 'mandelbulb': {
                 const params = { ...(initialParams as MandelbulbParams || defaultMandelbulbParams) };
                 this.currentGeneratorParams = params;
-                createParamSlider('Power', 2, 12, params.power, 1, (v) => { params.power = v; triggerUpdate(); });
-                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
+                createParamSlider('Power', 2, 12, params.power, 0.001, (v) => { params.power = v; triggerUpdate(); });
+                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.001, (v) => { params.scale = v; triggerUpdate(); });
                 createParamSlider('Iterations', 4, 20, params.iterations, 1, (v) => { params.iterations = v; triggerUpdate(); });
                 break;
             }
@@ -802,22 +804,22 @@ export class ControlPanel {
                 const params = { ...(initialParams as MengerParams || defaultMengerParams) };
                 this.currentGeneratorParams = params;
                 createParamSlider('Iterations', 1, 5, params.iterations, 1, (v) => { params.iterations = v; triggerUpdate(); });
-                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.1, (v) => { params.scale = v; triggerUpdate(); });
-                createParamSlider('Hole Size', 0.2, 0.5, params.holeSize, 0.01, (v) => { params.holeSize = v; triggerUpdate(); });
+                createParamSlider('Scale', 0.5, 2.0, params.scale, 0.001, (v) => { params.scale = v; triggerUpdate(); });
+                createParamSlider('Hole Size', 0.2, 0.5, params.holeSize, 0.001, (v) => { params.holeSize = v; triggerUpdate(); });
                 break;
             }
             case 'sine-plasma': {
                 const params = { ...(initialParams as PlasmaParams || defaultPlasmaParams) };
                 this.currentGeneratorParams = params;
-                createParamSlider('Frequency', 1, 10, params.frequency, 0.5, (v) => { params.frequency = v; triggerUpdate(); });
+                createParamSlider('Frequency', 1, 10, params.frequency, 0.001, (v) => { params.frequency = v; triggerUpdate(); });
                 createParamSlider('Complexity', 1, 6, params.complexity, 1, (v) => { params.complexity = v; triggerUpdate(); });
-                createParamSlider('Contrast', 0.5, 3.0, params.contrast, 0.1, (v) => { params.contrast = v; triggerUpdate(); });
+                createParamSlider('Contrast', 0.5, 3.0, params.contrast, 0.001, (v) => { params.contrast = v; triggerUpdate(); });
                 break;
             }
             case 'game-of-life': {
                 const params = { ...(initialParams as GameOfLifeParams || defaultGameOfLifeParams) };
                 this.currentGeneratorParams = params;
-                createParamSlider('Density', 0.1, 0.5, params.density, 0.05, (v) => { params.density = v; triggerUpdate(); });
+                createParamSlider('Density', 0.1, 0.5, params.density, 0.001, (v) => { params.density = v; triggerUpdate(); });
                 createParamSlider('Birth Neighbors', 4, 6, params.birthMin, 1, (v) => { params.birthMin = v; triggerUpdate(); });
                 createParamSlider('Survive Neighbors', 3, 6, params.surviveMin, 1, (v) => { params.surviveMin = v; triggerUpdate(); });
                 break;
@@ -1099,7 +1101,7 @@ export class ControlPanel {
     public updateScanPosition(pos: number): void {
         this.scanPositionSlider.value = String(pos);
         const display = document.getElementById('scan-pos-value');
-        if (display) display.textContent = pos.toFixed(2);
+        if (display) display.textContent = pos.toFixed(3);
 
         if (this.onPathChange) {
             this.onPathChange(this.getState());
@@ -1109,7 +1111,7 @@ export class ControlPanel {
     public updatePathY(y: number): void {
         this.pathYSlider.value = String(y);
         const display = document.getElementById('path-y-value');
-        if (display) display.textContent = y.toFixed(2);
+        if (display) display.textContent = y.toFixed(3);
 
         if (this.onPathChange) {
             this.onPathChange(this.getState());
