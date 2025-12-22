@@ -254,7 +254,7 @@ export class SpectralVolume {
         const totalVoxels = x * y * z;
         const data = new Float32Array(totalVoxels * 4);
 
-        const { iterations, scale, holeSize } = params;
+        const { iterations, scale } = params;
         const maxIter = Math.round(iterations);
 
         // Menger sponge: at each level, divide into 3x3x3 grid
