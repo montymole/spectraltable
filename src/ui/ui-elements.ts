@@ -171,6 +171,114 @@ export function createSlider(
 
     if (mode === 'knob') {
         slider.style.display = 'none';
+        group.appendChild(slider); // Append even if hidden so parentElement works
+        group.appendChild(labelEl);
+        group.appendChild(createKnobElement(slider));
+        group.appendChild(valueDisplay);
+    } else {
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+        labelRow.appendChild(valueDisplay);
+        group.appendChild(labelRow);
+        group.appendChild(slider);
+    }
+    parent.appendChild(group);
+    return slider;
+}
+
+/**
+ * Creates a discrete value slider (e.g. for beat divisions).
+ */
+export function createEnumSlider(
+    parent: HTMLElement,
+    id: string,
+    label: string,
+    options: string[],
+    initialValue: string,
+    onInput?: (val: string) => void,
+    mode: 'slider' | 'knob' = CONTROL_STYLE,
+    displayFormatter?: (val: string) => string
+): HTMLInputElement {
+    const group = document.createElement('div');
+    group.className = 'control-group';
+    if (mode === 'knob') group.classList.add('knob-centered');
+
+    const labelEl = document.createElement('label');
+    labelEl.htmlFor = id;
+    labelEl.textContent = label;
+
+    const valueDisplay = document.createElement('span');
+    valueDisplay.className = 'value-display';
+    valueDisplay.id = `${id}-value`;
+
+    const updateDisplay = (idx: number) => {
+        const val = options[idx] || '';
+        valueDisplay.textContent = displayFormatter ? displayFormatter(val) : val;
+    };
+
+    const initialIdx = options.indexOf(initialValue);
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.id = id;
+    slider.min = '0';
+    slider.max = String(options.length - 1);
+    slider.step = '1';
+    slider.value = String(initialIdx >= 0 ? initialIdx : 0);
+    slider.className = 'slider';
+
+    const sliderAny = slider as any;
+    sliderAny.isEnum = true;
+    sliderAny.enumOptions = options;
+    sliderAny._enumIdx = initialIdx >= 0 ? initialIdx : 0;
+
+    updateDisplay(sliderAny._enumIdx);
+
+    // Get the original value descriptor for HTMLInputElement.prototype.value
+    const originalValueDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!;
+
+    slider.addEventListener('input', () => {
+        // Use the raw range input value (which is always the index)
+        const rawVal = originalValueDescriptor.get!.call(slider);
+        const idx = parseInt(rawVal);
+        if (!isNaN(idx)) {
+            sliderAny._enumIdx = idx;
+            updateDisplay(idx);
+            if (onInput) onInput(options[idx]);
+        }
+    });
+
+    // Wrap value property to handle strings
+    Object.defineProperty(slider, 'value', {
+        get: function () {
+            return options[this._enumIdx] || '';
+        },
+        set: function (v) {
+            let idx = options.indexOf(v);
+            if (idx === -1) {
+                // If not a string option, check if it's a numeric index
+                const num = parseInt(v);
+                if (!isNaN(num) && String(num) === String(v)) {
+                    idx = num;
+                }
+            }
+
+            if (idx >= 0 && idx < options.length) {
+                this._enumIdx = idx;
+                originalValueDescriptor.set!.call(this, String(idx));
+                updateDisplay(idx);
+                if (this.updateKnob) this.updateKnob();
+            }
+        },
+        configurable: true
+    });
+
+    // Initialize the range value
+    originalValueDescriptor.set!.call(slider, String(sliderAny._enumIdx));
+
+    if (mode === 'knob') {
+        slider.style.display = 'none';
+        group.appendChild(slider); // Append even if hidden so parentElement works
         group.appendChild(labelEl);
         group.appendChild(createKnobElement(slider));
         group.appendChild(valueDisplay);
@@ -240,7 +348,11 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
         const max = isLog ? realMax : parseFloat(input.max);
 
         let percent: number;
-        if (isLog) {
+        if (inputAny.isEnum) {
+            const idx = inputAny._enumIdx ?? 0;
+            const maxIdx = parseFloat(input.max);
+            percent = maxIdx > 0 ? idx / maxIdx : 0;
+        } else if (isLog) {
             // value is already actual. Convert to normalized 0-1
             if (val <= 0) {
                 percent = 0;
@@ -315,7 +427,8 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
         if (input.disabled) return;
         isDragging = true;
         startY = e.clientY;
-        startVal = parseFloat(input.value);
+        const inputAny = input as any;
+        startVal = inputAny.isEnum ? (inputAny._enumIdx ?? 0) : parseFloat(input.value);
         document.body.style.cursor = 'ns-resize';
 
         const onMouseMove = (moveEvent: MouseEvent) => {
@@ -334,7 +447,15 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
             const realStep = inputAny.realStep || 0.001;
 
             let newVal: number;
-            if (isLog) {
+            if (inputAny.isEnum) {
+                const maxIdx = parseFloat(input.max);
+                // Discrete steps
+                newVal = Math.round(startVal + deltaP * maxIdx);
+                newVal = Math.max(0, Math.min(maxIdx, newVal));
+
+                // Set normalized value to input
+                input.value = inputAny.enumOptions[newVal];
+            } else if (isLog) {
                 const logMin = Math.log10(effectiveMin);
                 const logMax = Math.log10(max);
                 const logRange = logMax - logMin;
@@ -348,26 +469,26 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
                 }
 
                 const newP = Math.max(0, Math.min(1, startP + deltaP));
-                if (newP <= 0.005 && realMin === 0) {
-                    newVal = 0;
-                } else {
-                    newVal = Math.pow(10, logMin + newP * logRange);
-                }
+                newVal = Math.pow(10, logMin + newP * logRange);
+
+                // Zero snapping
+                if (newP < 0.005 && realMin === 0) newVal = 0;
+                input.value = String(newVal);
             } else {
-                const minAttr = parseFloat(input.min);
-                const maxAttr = parseFloat(input.max);
-                const range = maxAttr - minAttr;
-                newVal = startVal + deltaY * (range / 200);
+                const min = parseFloat(input.min);
+                const maxVal = parseFloat(input.max);
+                const step = realStep;
+                newVal = startVal + deltaP * (maxVal - min);
+                newVal = Math.round(newVal / step) * step;
+                newVal = Math.max(min, Math.min(maxVal, newVal));
+                input.value = String(newVal);
             }
 
-            // Snap to step
-            if (realStep > 0) {
-                newVal = Math.round(newVal / realStep) * realStep;
-            }
-            // Clamp to actual bounds
-            newVal = Math.max(realMin, Math.min(max, newVal));
-
-            input.value = String(newVal); // This calls our wrapped setter
+            // For enum, input.value returns label but onInput needs label too?
+            // Actually input.value is wrapped to return actual value.
+            // But createSlider's onInput expects numeric value.
+            // createEnumSlider's onInput (defined below) expects string.
+            // Let's rely on the input listener in factory functions.
             input.dispatchEvent(new Event('input'));
         };
 
@@ -386,19 +507,8 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
     const observer = new MutationObserver(() => updateKnob());
     observer.observe(input, { attributes: true, attributeFilter: ['value', 'disabled'] });
 
-    // Also poll/check for value changes if MutationObserver doesn't catch .value assignment
-    // (In many cases, setting .value doesn't trigger MutationObserver)
-    const originalValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    if (originalValueSetter) {
-        Object.defineProperty(input, 'value', {
-            set: function (v) {
-                originalValueSetter.call(this, v);
-                updateKnob();
-            },
-            get: Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.get,
-            configurable: true
-        });
-    }
+    // Poll/check for value changes if MutationObserver doesn't catch .value assignment
+    // Factories (createSlider/createEnumSlider) already override value setter to call updateKnob.
 
     (input as any).updateKnob = updateKnob;
     updateKnob();
@@ -744,7 +854,7 @@ export interface ProgressUI {
     text: HTMLElement;
     show: () => void;
     hide: () => void;
-    update: (percent: number) => void;
+    update: (percent: number, statusText?: string) => void;
 }
 
 /**
@@ -778,10 +888,10 @@ export function createProgressUI(parent: HTMLElement): ProgressUI {
         text,
         show: () => { container.style.display = 'flex'; },
         hide: () => { container.style.display = 'none'; },
-        update: (percent: number) => {
+        update: (percent: number, statusText?: string) => {
             const p = Math.max(0, Math.min(100, percent));
             fill.style.width = `${p}%`;
-            text.textContent = `${Math.round(p)}%`;
+            text.textContent = statusText || `${Math.round(p)}%`;
         }
     };
 }

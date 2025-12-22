@@ -73,6 +73,8 @@ export interface LFOState {
     frequency: number;
     amplitude: number;
     offset: number;
+    isSynced: boolean;
+    division: string;
 }
 
 // Octave doubling state for octave layering
@@ -142,12 +144,13 @@ export interface PresetControls {
     densityZ: number;
     spectralData: string;
     generatorParams?: GeneratorParams;
-    lfos: { waveform: string; frequency: number; amplitude: number; offset: number }[];
+    lfos: LFOState[];
     envelopes: { attack: number; decay: number; sustain: number; release: number }[];
     modRouting: { pathY: string; scanPhase: string; shapePhase: string };
     octave: number;
     octaveDoubling?: OctaveDoublingState;
     interpSamples: number;
+    bpm: number;
 }
 
 export interface PresetData {
