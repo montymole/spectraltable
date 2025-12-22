@@ -255,7 +255,7 @@ export class ControlPanel {
         container.appendChild(subGroup);
 
         this.synthModeSelect = createSelect(subGroup, 'synth-mode', 'Mode', [
-            SynthMode.WAVETABLE, SynthMode.SPECTRAL, SynthMode.WHITENOISE_BAND_Q_FILTER
+            SynthMode.WAVETABLE, SynthMode.SPECTRAL, SynthMode.SPECTRAL_CHIRP, SynthMode.WHITENOISE_BAND_Q_FILTER
         ], (val) => {
             const mode = val as SynthMode;
             this.updateSynthModeUI(mode);

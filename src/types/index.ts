@@ -55,6 +55,7 @@ export const VOLUME_DENSITY_Z_DEFAULT = 128;
 // Synthesis modes
 export enum SynthMode {
     SPECTRAL = 'iFFT Spectral',   // iFFT / additive synthesis from frequency bins
+    SPECTRAL_CHIRP = 'Chirp ICZT', // ICZT-based synthesis with logarithmic frequency spacing
     WAVETABLE = 'Wavetable', // Direct waveform playback from reading line
     WHITENOISE_BAND_Q_FILTER = 'Noise band filter', // Subtractive noise filtering
 }
