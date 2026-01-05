@@ -35,12 +35,17 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
                 this.timelineNumFrames = e.data.numFrames;
                 this.timelineTotalSamples = e.data.totalSamples;
                 this.sampleCount = 0;
+                const numPoints = this.timelineFrameSize / 4;
+                this.ensureBufferSizes(numPoints);
                 for (let i = 0; i < this.timelineFrameSize; i++) {
                     this.spectralData[i] = this.timeline![i];
                 }
                 this.port.postMessage({ type: 'ready' });
             } else if (e.data.type === 'spectral-data') {
                 const data = e.data.data;
+                const numPoints = data.length / 4;
+                this.ensureBufferSizes(numPoints);
+
                 if (this.interpSamples === 0) {
                     this.spectralData.set(data);
                     this.targetData.set(data);
@@ -59,49 +64,57 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
         };
     }
 
+    private ensureBufferSizes(numPoints: number): void {
+        if (this.spectralData.length < numPoints * 4) {
+            this.spectralData = new Float32Array(numPoints * 4);
+            this.prevData = new Float32Array(numPoints * 4);
+            this.targetData = new Float32Array(numPoints * 4);
+            this.lowStates = new Float32Array(numPoints);
+            this.bandStates = new Float32Array(numPoints);
+        }
+    }
+
     process(_inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
         const output = outputs[0];
         const channelL = output[0];
         const channelR = output[1];
+        const length = channelL.length;
 
         const numPoints = this.spectralData.length / 4;
 
-        for (let i = 0; i < channelL.length; i++) {
-            // Timeline mode: step through pre-computed frames
-            if (this.timeline && this.timelineNumFrames > 1) {
-                const progress = this.sampleCount / this.timelineTotalSamples;
-                const framePos = progress * (this.timelineNumFrames - 1);
-                const frame0 = Math.floor(framePos);
-                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
-                const t = framePos - frame0;
-                const offset0 = frame0 * this.timelineFrameSize;
-                const offset1 = frame1 * this.timelineFrameSize;
-                for (let j = 0; j < this.timelineFrameSize; j++) {
-                    this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
-                }
-                this.sampleCount++;
+        // 1. Update Interpolation (Block level)
+        if (this.timeline && this.timelineNumFrames > 1) {
+            const progress = this.sampleCount / this.timelineTotalSamples;
+            const framePos = progress * (this.timelineNumFrames - 1);
+            const frame0 = Math.floor(framePos);
+            const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
+            const t = framePos - frame0;
+            const offset0 = frame0 * this.timelineFrameSize;
+            const offset1 = frame1 * this.timelineFrameSize;
+            for (let j = 0; j < this.timelineFrameSize; j++) {
+                this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
             }
-            // Per-sample interpolation
-            else if (this.interpSamples > 0 && this.interpT < 1.0) {
-                this.interpT += this.interpStep;
-                if (this.interpT > 1.0) this.interpT = 1.0;
-                const t = this.interpT;
-                const invT = 1.0 - t;
-                for (let j = 0; j < this.spectralData.length; j++) {
-                    this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
-                }
+            this.sampleCount += length;
+        } else if (this.interpSamples > 0 && this.interpT < 1.0) {
+            this.interpT = Math.min(1.0, this.interpT + this.interpStep * length);
+            const t = this.interpT;
+            const invT = 1.0 - t;
+            for (let j = 0; j < this.spectralData.length; j++) {
+                this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
             }
+        }
 
+        // 2. Filter Bank Processing
+        const minFreq = 20;
+        const maxFreq = 20000;
+        const freqRange = maxFreq - minFreq;
+        const binWidth = freqRange / numPoints;
+
+        for (let i = 0; i < length; i++) {
             // Source: White Noise
             const noise = Math.random() * 2 - 1;
             let sumSubtracted = 0;
 
-            const minFreq = 20;
-            const maxFreq = 20000;
-            const freqRange = maxFreq - minFreq;
-            const binWidth = freqRange / numPoints;
-
-            // Subtractive Filtering (Parallel Bank of SVF Band-Pass filters subtracted from noise)
             for (let bin = 0; bin < numPoints; bin++) {
                 const idx = bin * 4;
                 const suppression = this.spectralData[idx];
@@ -113,7 +126,8 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
                 const baseFreq = minFreq + freqRange * normalizedBin;
                 const freq = baseFreq * this.frequencyMultiplier;
 
-                if (freq >= sampleRate * 0.48) continue;
+                // Cap frequency to avoid SVF instability
+                if (freq >= sampleRate * 0.45) continue;
 
                 const widthInBins = qVal * 10 + 0.1;
                 const BW = binWidth * widthInBins;
@@ -131,7 +145,6 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
             }
 
             const sample = noise - sumSubtracted;
-
             const gain = 0.01;
             channelL[i] = sample * gain;
             channelR[i] = sample * gain;

@@ -293,24 +293,85 @@ export class AudioAnalyzer {
     }
 
     private simpleFFT(signal: Float32Array): Float32Array {
-        // Simple DFT for magnitude spectrum
-        // For production, consider using a proper FFT library
+        // Cooley-Tukey FFT implementation (Radix-2 Recursive)
+        // Note: signal length N must be a power of 2
         const N = signal.length;
+        if (N <= 1) return new Float32Array(0);
+
+        // Prepare complex numbers (real and imaginary arrays)
+        const re = new Float32Array(signal);
+        const im = new Float32Array(N);
+
+        this.fftRecursive(re, im, N);
+
+        // Calculate magnitude spectrum for the first N/2 bins
         const spectrum = new Float32Array(N / 2);
-
         for (let k = 0; k < N / 2; k++) {
-            let real = 0;
-            let imag = 0;
-
-            for (let n = 0; n < N; n++) {
-                const angle = -2 * Math.PI * k * n / N;
-                real += signal[n] * Math.cos(angle);
-                imag += signal[n] * Math.sin(angle);
-            }
-
-            spectrum[k] = Math.sqrt(real * real + imag * imag) / N;
+            spectrum[k] = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / N;
         }
 
         return spectrum;
+    }
+
+    /**
+     * In-place Radix-2 FFT
+     */
+    private fftRecursive(re: Float32Array, im: Float32Array, n: number): void {
+        if (n <= 1) return;
+
+        // Bit-reversal permutation (iterative approach to reorder elements)
+        let j = 0;
+        for (let i = 0; i < n; i++) {
+            if (i < j) {
+                // Swap real
+                let tempRe = re[i];
+                re[i] = re[j];
+                re[j] = tempRe;
+                // Swap imag
+                let tempIm = im[i];
+                im[i] = im[j];
+                im[j] = tempIm;
+            }
+            let m = n >> 1;
+            while (m >= 1 && j >= m) {
+                j -= m;
+                m >>= 1;
+            }
+            j += m;
+        }
+
+        // Cooley-Tukey Butterflies
+        for (let s = 2; s <= n; s <<= 1) {
+            const angle = -2 * Math.PI / s;
+            const wLenRe = Math.cos(angle);
+            const wLenIm = Math.sin(angle);
+
+            for (let i = 0; i < n; i += s) {
+                let wRe = 1;
+                let wIm = 0;
+                const half = s >> 1;
+                for (let k = 0; k < half; k++) {
+                    const idx1 = i + k;
+                    const idx2 = i + k + half;
+
+                    const uRe = re[idx1];
+                    const uIm = im[idx1];
+
+                    // Complex multiplication: v = w * data[idx2]
+                    const vRe = wRe * re[idx2] - wIm * im[idx2];
+                    const vIm = wRe * im[idx2] + wIm * re[idx2];
+
+                    re[idx1] = uRe + vRe;
+                    im[idx1] = uIm + vIm;
+                    re[idx2] = uRe - vRe;
+                    im[idx2] = uIm - vIm;
+
+                    // Update w
+                    const nextWRe = wRe * wLenRe - wIm * wLenIm;
+                    wIm = wRe * wLenIm + wIm * wLenRe;
+                    wRe = nextWRe;
+                }
+            }
+        }
     }
 }

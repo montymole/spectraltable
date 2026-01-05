@@ -51,6 +51,7 @@ class WavetableProcessor extends AudioWorkletProcessor {
                     this.timelineTotalSamples = e.data.totalSamples;
                     this.sampleCount = 0;
                     this.envelopeSize = this.timelineFrameSize / 4;
+                    this.ensureBufferSizes(this.envelopeSize);
                     let maxMag = 0;
                     for (let i = 0; i < this.envelopeSize; i++) {
                         const mag = this.timeline![i * 4];
@@ -67,6 +68,7 @@ class WavetableProcessor extends AudioWorkletProcessor {
                     const data = e.data.data;
                     const numPoints = data.length / 4;
                     this.envelopeSize = numPoints;
+                    this.ensureBufferSizes(numPoints);
 
                     let maxMag = 0;
                     for (let i = 0; i < numPoints; i++) {
@@ -117,7 +119,15 @@ class WavetableProcessor extends AudioWorkletProcessor {
         };
     }
 
-    carrier(phase: number, type: number): number {
+    private ensureBufferSizes(size: number): void {
+        if (this.envelope.length < size) {
+            this.envelope = new Float32Array(size);
+            this.prevEnvelope = new Float32Array(size);
+            this.targetEnvelope = new Float32Array(size);
+        }
+    }
+
+    private carrier(phase: number, type: number): number {
         switch (type) {
             case 0: // Sine
                 return Math.sin(phase * 2 * Math.PI);
@@ -138,9 +148,10 @@ class WavetableProcessor extends AudioWorkletProcessor {
         const output = outputs[0];
         const channelL = output[0];
         const channelR = output[1];
+        const length = channelL.length;
 
         if (this.envelopeSize < 2) {
-            for (let i = 0; i < channelL.length; i++) {
+            for (let i = 0; i < length; i++) {
                 channelL[i] = 0;
                 channelR[i] = 0;
             }
@@ -151,43 +162,40 @@ class WavetableProcessor extends AudioWorkletProcessor {
         const envPhaseInc = carrierPhaseInc;
         const nyquist = sampleRate * 0.5;
 
-        for (let i = 0; i < channelL.length; i++) {
-            // Timeline mode: step through pre-computed frames
-            if (this.timeline && this.timelineNumFrames > 1) {
-                const progress = this.sampleCount / this.timelineTotalSamples;
-                const framePos = progress * (this.timelineNumFrames - 1);
-                const frame0 = Math.floor(framePos);
-                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
-                const t = framePos - frame0;
-                const offset0 = frame0 * this.timelineFrameSize;
-                const offset1 = frame1 * this.timelineFrameSize;
-                let maxMag = 0;
-                for (let j = 0; j < this.envelopeSize; j++) {
-                    const mag0 = this.timeline[offset0 + j * 4];
-                    const mag1 = this.timeline[offset1 + j * 4];
-                    const mag = mag0 * (1 - t) + mag1 * t;
-                    if (mag > maxMag) maxMag = mag;
-                }
-                const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
-                for (let j = 0; j < this.envelopeSize; j++) {
-                    const mag0 = this.timeline[offset0 + j * 4];
-                    const mag1 = this.timeline[offset1 + j * 4];
-                    this.envelope[j] = (mag0 * (1 - t) + mag1 * t) * scale;
-                }
-                this.sampleCount++;
+        // 1. Update Interpolation (Block level)
+        if (this.timeline && this.timelineNumFrames > 1) {
+            const progress = this.sampleCount / this.timelineTotalSamples;
+            const framePos = progress * (this.timelineNumFrames - 1);
+            const frame0 = Math.floor(framePos);
+            const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
+            const t = framePos - frame0;
+            const offset0 = frame0 * this.timelineFrameSize;
+            const offset1 = frame1 * this.timelineFrameSize;
+            let maxMag = 0;
+            for (let j = 0; j < this.envelopeSize; j++) {
+                const mag0 = this.timeline[offset0 + j * 4];
+                const mag1 = this.timeline[offset1 + j * 4];
+                const mag = mag0 * (1 - t) + mag1 * t;
+                if (mag > maxMag) maxMag = mag;
             }
-            // Per-sample interpolation advance
-            else if (this.interpSamples > 0 && this.interpT < 1.0) {
-                this.interpT += this.interpStep;
-                if (this.interpT > 1.0) this.interpT = 1.0;
-
-                const t = this.interpT;
-                const invT = 1.0 - t;
-                for (let j = 0; j < this.envelopeSize; j++) {
-                    this.envelope[j] = this.prevEnvelope[j] * invT + this.targetEnvelope[j] * t;
-                }
+            const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
+            for (let j = 0; j < this.envelopeSize; j++) {
+                const mag0 = this.timeline[offset0 + j * 4];
+                const mag1 = this.timeline[offset1 + j * 4];
+                this.envelope[j] = (mag0 * (1 - t) + mag1 * t) * scale;
             }
+            this.sampleCount += length;
+        } else if (this.interpSamples > 0 && this.interpT < 1.0) {
+            this.interpT = Math.min(1.0, this.interpT + this.interpStep * length);
+            const t = this.interpT;
+            const invT = 1.0 - t;
+            for (let j = 0; j < this.envelopeSize; j++) {
+                this.envelope[j] = this.prevEnvelope[j] * invT + this.targetEnvelope[j] * t;
+            }
+        }
 
+        // 2. Synthesize Per Sample
+        for (let i = 0; i < length; i++) {
             // Get envelope with linear interpolation
             const envPos = this.envPhase * this.envelopeSize;
             const envIdx0 = Math.floor(envPos) % this.envelopeSize;
@@ -206,56 +214,52 @@ class WavetableProcessor extends AudioWorkletProcessor {
             // AM synthesis: carrier * envelope
             let totalSample = carrierSample * amplitude;
 
-            // Add low octaves (doubling below)
-            let harmGain = this.octaveMult;
-            for (let h = 1; h <= this.octaveLow; h++) {
-                const harmFreq = this.frequency / Math.pow(2, h);
-                if (harmFreq < 20) break;
-                const phaseIdx = h - 1;
-                const harmPhaseInc = harmFreq / sampleRate;
+            // Add low octaves
+            if (this.octaveLow > 0) {
+                let harmGain = this.octaveMult;
+                for (let h = 1; h <= this.octaveLow; h++) {
+                    const hScale = Math.pow(2, h);
+                    const harmFreq = this.frequency / hScale;
+                    if (harmFreq < 20) break;
+                    const phaseIdx = h - 1;
+                    const hPhaseInc = harmFreq / sampleRate;
 
-                const harmCarrier = this.carrier(this.harmonicPhases[phaseIdx], this.carrierType);
+                    const hSample = this.carrier(this.harmonicPhases[phaseIdx], this.carrierType);
+                    const hEnvPos = this.harmonicEnvPhases[phaseIdx] * this.envelopeSize;
+                    const hIdx0 = Math.floor(hEnvPos) % this.envelopeSize;
+                    const hIdx1 = (hIdx0 + 1) % this.envelopeSize;
+                    const hFrac = hEnvPos - Math.floor(hEnvPos);
+                    const hAmp = this.envelope[hIdx0] * (1 - hFrac) + this.envelope[hIdx1] * hFrac;
 
-                const harmEnvPos = this.harmonicEnvPhases[phaseIdx] * this.envelopeSize;
-                const hEnvIdx0 = Math.floor(harmEnvPos) % this.envelopeSize;
-                const hEnvIdx1 = (hEnvIdx0 + 1) % this.envelopeSize;
-                const hEnvFrac = harmEnvPos - Math.floor(harmEnvPos);
-                const harmAmp = this.envelope[hEnvIdx0] * (1 - hEnvFrac) + this.envelope[hEnvIdx1] * hEnvFrac;
-
-                totalSample += harmCarrier * harmAmp * harmGain;
-
-                this.harmonicPhases[phaseIdx] += harmPhaseInc;
-                if (this.harmonicPhases[phaseIdx] >= 1.0) this.harmonicPhases[phaseIdx] -= 1.0;
-                this.harmonicEnvPhases[phaseIdx] += harmPhaseInc;
-                if (this.harmonicEnvPhases[phaseIdx] >= 1.0) this.harmonicEnvPhases[phaseIdx] -= 1.0;
-
-                harmGain *= this.octaveMult;
+                    totalSample += hSample * hAmp * harmGain;
+                    this.harmonicPhases[phaseIdx] = (this.harmonicPhases[phaseIdx] + hPhaseInc) % 1.0;
+                    this.harmonicEnvPhases[phaseIdx] = (this.harmonicEnvPhases[phaseIdx] + hPhaseInc) % 1.0;
+                    harmGain *= this.octaveMult;
+                }
             }
 
-            // Add high octaves (doubling above)
-            harmGain = this.octaveMult;
-            for (let h = 1; h <= this.octaveHigh; h++) {
-                const harmFreq = this.frequency * Math.pow(2, h);
-                if (harmFreq >= nyquist) break;
-                const phaseIdx = 10 + (h - 1);
-                const harmPhaseInc = harmFreq / sampleRate;
+            // Add high octaves
+            if (this.octaveHigh > 0) {
+                let harmGain = this.octaveMult;
+                for (let h = 1; h <= this.octaveHigh; h++) {
+                    const hScale = Math.pow(2, h);
+                    const harmFreq = this.frequency * hScale;
+                    if (harmFreq >= nyquist) break;
+                    const phaseIdx = 10 + (h - 1);
+                    const hPhaseInc = harmFreq / sampleRate;
 
-                const harmCarrier = this.carrier(this.harmonicPhases[phaseIdx], this.carrierType);
+                    const hSample = this.carrier(this.harmonicPhases[phaseIdx], this.carrierType);
+                    const hEnvPos = this.harmonicEnvPhases[phaseIdx] * this.envelopeSize;
+                    const hIdx0 = Math.floor(hEnvPos) % this.envelopeSize;
+                    const hIdx1 = (hIdx0 + 1) % this.envelopeSize;
+                    const hFrac = hEnvPos - Math.floor(hEnvPos);
+                    const hAmp = this.envelope[hIdx0] * (1 - hFrac) + this.envelope[hIdx1] * hFrac;
 
-                const harmEnvPos = this.harmonicEnvPhases[phaseIdx] * this.envelopeSize;
-                const hEnvIdx0 = Math.floor(harmEnvPos) % this.envelopeSize;
-                const hEnvIdx1 = (hEnvIdx0 + 1) % this.envelopeSize;
-                const hEnvFrac = harmEnvPos - Math.floor(harmEnvPos);
-                const harmAmp = this.envelope[hEnvIdx0] * (1 - hEnvFrac) + this.envelope[hEnvIdx1] * hEnvFrac;
-
-                totalSample += harmCarrier * harmAmp * harmGain;
-
-                this.harmonicPhases[phaseIdx] += harmPhaseInc;
-                if (this.harmonicPhases[phaseIdx] >= 1.0) this.harmonicPhases[phaseIdx] -= 1.0;
-                this.harmonicEnvPhases[phaseIdx] += harmPhaseInc;
-                if (this.harmonicEnvPhases[phaseIdx] >= 1.0) this.harmonicEnvPhases[phaseIdx] -= 1.0;
-
-                harmGain *= this.octaveMult;
+                    totalSample += hSample * hAmp * harmGain;
+                    this.harmonicPhases[phaseIdx] = (this.harmonicPhases[phaseIdx] + hPhaseInc) % 1.0;
+                    this.harmonicEnvPhases[phaseIdx] = (this.harmonicEnvPhases[phaseIdx] + hPhaseInc) % 1.0;
+                    harmGain *= this.octaveMult;
+                }
             }
 
             // Integer Harmonics (Injection)
@@ -263,27 +267,21 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 for (let h = 2; h <= this.harmonicCount + 1; h++) {
                     const harmFreq = this.frequency * h;
                     if (harmFreq >= nyquist) break;
-
                     const gain = Math.pow(h, -this.harmonicFalloff);
-                    // Use a separate phase space, allocating 32 slots (h ranges from 2..33 basically)
                     const phaseIdx = h - 2;
                     if (phaseIdx >= this.harmonicPhasesInj.length) break;
 
-                    const harmPhaseInc = harmFreq / sampleRate;
-                    const harmCarrier = this.carrier(this.harmonicPhasesInj[phaseIdx], this.carrierType);
+                    const hPhaseInc = harmFreq / sampleRate;
+                    const hSample = this.carrier(this.harmonicPhasesInj[phaseIdx], this.carrierType);
+                    const hEnvPos = this.harmonicEnvPhasesInj[phaseIdx] * this.envelopeSize;
+                    const hIdx0 = Math.floor(hEnvPos) % this.envelopeSize;
+                    const hIdx1 = (hIdx0 + 1) % this.envelopeSize;
+                    const hFrac = hEnvPos - Math.floor(hEnvPos);
+                    const hAmp = this.envelope[hIdx0] * (1 - hFrac) + this.envelope[hIdx1] * hFrac;
 
-                    const harmEnvPos = this.harmonicEnvPhasesInj[phaseIdx] * this.envelopeSize;
-                    const hEnvIdx0 = Math.floor(harmEnvPos) % this.envelopeSize;
-                    const hEnvIdx1 = (hEnvIdx0 + 1) % this.envelopeSize;
-                    const hEnvFrac = harmEnvPos - Math.floor(harmEnvPos);
-                    const harmAmp = this.envelope[hEnvIdx0] * (1 - hEnvFrac) + this.envelope[hEnvIdx1] * hEnvFrac;
-
-                    totalSample += harmCarrier * harmAmp * gain;
-
-                    this.harmonicPhasesInj[phaseIdx] += harmPhaseInc;
-                    if (this.harmonicPhasesInj[phaseIdx] >= 1.0) this.harmonicPhasesInj[phaseIdx] -= 1.0;
-                    this.harmonicEnvPhasesInj[phaseIdx] += harmPhaseInc;
-                    if (this.harmonicEnvPhasesInj[phaseIdx] >= 1.0) this.harmonicEnvPhasesInj[phaseIdx] -= 1.0;
+                    totalSample += hSample * hAmp * gain;
+                    this.harmonicPhasesInj[phaseIdx] = (this.harmonicPhasesInj[phaseIdx] + hPhaseInc) % 1.0;
+                    this.harmonicEnvPhasesInj[phaseIdx] = (this.harmonicEnvPhasesInj[phaseIdx] + hPhaseInc) % 1.0;
                 }
             }
 
@@ -293,11 +291,8 @@ class WavetableProcessor extends AudioWorkletProcessor {
             channelL[i] = totalSample * gain;
             channelR[i] = totalSample * gain;
 
-            this.phase += carrierPhaseInc;
-            if (this.phase >= 1.0) this.phase -= 1.0;
-
-            this.envPhase += envPhaseInc;
-            if (this.envPhase >= 1.0) this.envPhase -= 1.0;
+            this.phase = (this.phase + carrierPhaseInc) % 1.0;
+            this.envPhase = (this.envPhase + envPhaseInc) % 1.0;
         }
 
         return true;

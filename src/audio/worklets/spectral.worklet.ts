@@ -39,6 +39,7 @@ function computeRolloff(normalizedFreq: number, mode: number): number {
 }
 
 const SPECTRAL_INTERP_SAMPLES = 64;
+const SPECTRAL_MAX_BLOCK_SIZE = 128;
 
 class SpectralProcessor extends AudioWorkletProcessor {
     private interpSamples = SPECTRAL_INTERP_SAMPLES;
@@ -66,13 +67,15 @@ class SpectralProcessor extends AudioWorkletProcessor {
     private harmonicCount = 0;
     private harmonicFalloff = 1.0;
     private harmonicPhasesExtra = new Float32Array(1024 * 32);
-    // We use a separate array for injected harmonics to avoid touching the octave ones
 
     // Spectral Copy
     private spectralCopyShift = 12; // Semitones
     private spectralCopyMix = 0.0;
     private spectralCopyPhases = new Float32Array(1024);
 
+    // Pre-allocated block buffers
+    private blockL = new Float32Array(SPECTRAL_MAX_BLOCK_SIZE);
+    private blockR = new Float32Array(SPECTRAL_MAX_BLOCK_SIZE);
 
     constructor() {
         super();
@@ -87,15 +90,7 @@ class SpectralProcessor extends AudioWorkletProcessor {
                     this.timelineTotalSamples = e.data.totalSamples;
                     this.sampleCount = 0;
                     const numPoints = this.timelineFrameSize / 4;
-                    if (this.harmonicPhases.length !== numPoints * 20) {
-                        this.harmonicPhases = new Float32Array(numPoints * 20);
-                    }
-                    if (this.harmonicPhasesExtra.length !== numPoints * 32) {
-                        this.harmonicPhasesExtra = new Float32Array(numPoints * 32);
-                    }
-                    if (this.spectralCopyPhases.length !== numPoints) {
-                        this.spectralCopyPhases = new Float32Array(numPoints);
-                    }
+                    this.ensureBufferSizes(numPoints);
                     for (let i = 0; i < this.timelineFrameSize; i++) {
                         this.spectralData[i] = this.timeline![i];
                     }
@@ -108,16 +103,7 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 case 'spectral-data': {
                     const data = e.data.data;
                     const numPoints = data.length / 4;
-
-                    if (this.harmonicPhases.length !== numPoints * 20) {
-                        this.harmonicPhases = new Float32Array(numPoints * 20);
-                    }
-                    if (this.harmonicPhasesExtra.length !== numPoints * 32) {
-                        this.harmonicPhasesExtra = new Float32Array(numPoints * 32);
-                    }
-                    if (this.spectralCopyPhases.length !== numPoints) {
-                        this.spectralCopyPhases = new Float32Array(numPoints);
-                    }
+                    this.ensureBufferSizes(numPoints);
 
                     if (this.interpSamples === 0) {
                         this.spectralData.set(data);
@@ -163,156 +149,205 @@ class SpectralProcessor extends AudioWorkletProcessor {
         };
     }
 
+    private ensureBufferSizes(numPoints: number): void {
+        if (this.spectralData.length < numPoints * 4) {
+            this.spectralData = new Float32Array(numPoints * 4);
+            this.prevData = new Float32Array(numPoints * 4);
+            this.targetData = new Float32Array(numPoints * 4);
+            this.phaseAccumulators = new Float32Array(numPoints);
+            this.prevPhaseOffsets = new Float32Array(numPoints);
+            this.targetPhaseOffsets = new Float32Array(numPoints);
+            this.currentPhaseOffsets = new Float32Array(numPoints);
+            this.spectralCopyPhases = new Float32Array(numPoints);
+        }
+        if (this.harmonicPhases.length < numPoints * 20) {
+            this.harmonicPhases = new Float32Array(numPoints * 20);
+        }
+        if (this.harmonicPhasesExtra.length < numPoints * 32) {
+            this.harmonicPhasesExtra = new Float32Array(numPoints * 32);
+        }
+    }
+
     process(_inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
         const output = outputs[0];
         const channelL = output[0];
         const channelR = output[1];
+        const length = channelL.length;
 
         const numPoints = this.spectralData.length / 4;
         const nyquist = sampleRate * 0.5;
         const PI2_SR = (2 * Math.PI) / sampleRate;
         const PI2 = 2 * Math.PI;
 
-        for (let i = 0; i < channelL.length; i++) {
-            // Timeline mode: step through pre-computed frames
-            if (this.timeline && this.timelineNumFrames > 1) {
-                const progress = this.sampleCount / this.timelineTotalSamples;
-                const framePos = progress * (this.timelineNumFrames - 1);
-                const frame0 = Math.floor(framePos);
-                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
-                const t = framePos - frame0;
-                const offset0 = frame0 * this.timelineFrameSize;
-                const offset1 = frame1 * this.timelineFrameSize;
-                for (let j = 0; j < this.timelineFrameSize; j++) {
-                    this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
-                }
-                const np = this.timelineFrameSize / 4;
-                for (let bin = 0; bin < np; bin++) {
-                    this.currentPhaseOffsets[bin] = this.spectralData[bin * 4 + 1];
-                }
-                this.sampleCount++;
+        // 1. Update Interpolation (Block level)
+        if (this.timeline && this.timelineNumFrames > 1) {
+            const progress = this.sampleCount / this.timelineTotalSamples;
+            const framePos = progress * (this.timelineNumFrames - 1);
+            const frame0 = Math.floor(framePos);
+            const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
+            const t = framePos - frame0;
+            const offset0 = frame0 * this.timelineFrameSize;
+            const offset1 = frame1 * this.timelineFrameSize;
+            for (let j = 0; j < this.timelineFrameSize; j++) {
+                this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
             }
-            // Per-sample interpolation advance
-            else if (this.interpSamples > 0 && this.interpT < 1.0) {
-                this.interpT += this.interpStep;
-                if (this.interpT > 1.0) this.interpT = 1.0;
-
-                const t = this.interpT;
-                const invT = 1.0 - t;
-
-                for (let j = 0; j < this.spectralData.length; j++) {
-                    this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
-                }
-
-                for (let bin = 0; bin < numPoints; bin++) {
-                    this.currentPhaseOffsets[bin] =
-                        this.prevPhaseOffsets[bin] * invT + this.targetPhaseOffsets[bin] * t;
-                }
+            const np = this.timelineFrameSize / 4;
+            for (let bin = 0; bin < np; bin++) {
+                this.currentPhaseOffsets[bin] = this.spectralData[bin * 4 + 1];
             }
+            this.sampleCount += length;
+        } else if (this.interpSamples > 0 && this.interpT < 1.0) {
+            this.interpT = Math.min(1.0, this.interpT + this.interpStep * length);
+            const t = this.interpT;
+            const invT = 1.0 - t;
 
-            let sumL = 0;
-            let sumR = 0;
+            for (let j = 0; j < this.spectralData.length; j++) {
+                this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
+            }
 
             for (let bin = 0; bin < numPoints; bin++) {
-                const idx = bin * 4;
-                const mag = this.spectralData[idx];
-                const phaseOffset = this.currentPhaseOffsets[bin];
-                const custom1 = this.spectralData[idx + 2];
+                this.currentPhaseOffsets[bin] =
+                    this.prevPhaseOffsets[bin] * invT + this.targetPhaseOffsets[bin] * t;
+            }
+        }
 
-                if (mag < 0.001) continue;
+        // 2. Clear pre-allocated block buffers
+        for (let i = 0; i < length; i++) {
+            this.blockL[i] = 0;
+            this.blockR[i] = 0;
+        }
 
-                const minFreq = 20;
-                const maxFreq = 20000;
-                const normalizedBin = bin / numPoints;
-                const baseFreq = minFreq + (maxFreq - minFreq) * normalizedBin;
-                const freq = baseFreq * this.frequencyMultiplier;
+        // 3. Additive Synthesis
+        for (let bin = 0; bin < numPoints; bin++) {
+            const idx = bin * 4;
+            const mag = this.spectralData[idx];
+            if (mag < 0.001) continue;
 
-                const normalizedFreq = freq / nyquist;
-                if (normalizedFreq >= 1.0) continue;
+            const phaseOffset = this.currentPhaseOffsets[bin];
+            const pan = this.spectralData[idx + 2];
 
-                const rolloffGain = computeRolloff(normalizedFreq, ROLLOFF_MODE);
-                if (rolloffGain < 0.001) continue;
+            const minFreq = 20;
+            const maxFreq = 20000;
+            const normalizedBin = bin / numPoints;
+            const baseFreq = minFreq + (maxFreq - minFreq) * normalizedBin;
+            const freq = baseFreq * this.frequencyMultiplier;
 
-                const db = mag * 60 - 60;
-                const linearMag = Math.pow(10, db / 20) * rolloffGain;
+            const normalizedFreq = freq / nyquist;
+            if (normalizedFreq >= 1.0) continue;
 
-                const p = (custom1 - 0.5) * 2;
-                const baseGainL = Math.min(1, 1 - p) * linearMag;
-                const baseGainR = Math.min(1, 1 + p) * linearMag;
+            const rolloffGain = computeRolloff(normalizedFreq, ROLLOFF_MODE);
+            if (rolloffGain < 0.001) continue;
 
-                const generateOsc = (oscFreq: number, gain: number, phaseIdx: number, phasesArray: Float32Array) => {
-                    if (gain < 0.001) return;
-                    const nf = oscFreq / nyquist;
-                    if (nf >= 1.0) return;
-                    const rf = computeRolloff(nf, ROLLOFF_MODE);
-                    if (rf < 0.001) return;
+            const db = mag * 60 - 60;
+            const linearMag = Math.pow(10, db / 20) * rolloffGain;
 
-                    phasesArray[phaseIdx] += (oscFreq * PI2_SR);
-                    if (phasesArray[phaseIdx] > PI2) {
-                        phasesArray[phaseIdx] -= PI2;
-                    }
-                    const sample = Math.sin(phasesArray[phaseIdx] + phaseOffset * PI2);
-                    sumL += sample * baseGainL * gain * rf;
-                    sumR += sample * baseGainR * gain * rf;
-                };
+            const p = (pan - 0.5) * 2;
+            const baseGainL = Math.min(1, 1 - p) * linearMag;
+            const baseGainR = Math.min(1, 1 + p) * linearMag;
 
-                // Base oscillator (fundamental)
-                this.phaseAccumulators[bin] += (freq * PI2_SR);
-                if (this.phaseAccumulators[bin] > PI2) {
-                    this.phaseAccumulators[bin] -= PI2;
-                }
-                const currentPhase = this.phaseAccumulators[bin] + (phaseOffset * PI2);
-                const sample = Math.sin(currentPhase);
-                sumL += sample * baseGainL;
-                sumR += sample * baseGainR;
+            const phaseInc = freq * PI2_SR;
+            const offsetInRad = phaseOffset * PI2;
 
-                // Low octaves (doubling below)
+            // Base oscillator
+            let phase = this.phaseAccumulators[bin];
+            for (let i = 0; i < length; i++) {
+                const sample = Math.sin(phase + offsetInRad);
+                this.blockL[i] += sample * baseGainL;
+                this.blockR[i] += sample * baseGainR;
+                phase += phaseInc;
+            }
+            this.phaseAccumulators[bin] = phase % PI2;
+
+            // Low octaves
+            if (this.octaveLow > 0) {
                 let harmGain = this.octaveMult;
                 for (let h = 1; h <= this.octaveLow; h++) {
-                    const harmFreq = freq / Math.pow(2, h);
-                    if (harmFreq < 20) break;
+                    const hScale = Math.pow(2, h);
+                    const hFreq = freq / hScale;
+                    if (hFreq < 20) break;
+
+                    const hPhaseInc = hFreq * PI2_SR;
                     const phaseIdx = bin * 20 + (h - 1);
-                    generateOsc(harmFreq, harmGain, phaseIdx, this.harmonicPhases);
-                    harmGain *= this.octaveMult;
-                }
+                    let hPhase = this.harmonicPhases[phaseIdx];
 
-                // High octaves (doubling above)
-                harmGain = this.octaveMult;
-                for (let h = 1; h <= this.octaveHigh; h++) {
-                    const harmFreq = freq * Math.pow(2, h);
-                    const phaseIdx = bin * 20 + 10 + (h - 1);
-                    generateOsc(harmFreq, harmGain, phaseIdx, this.harmonicPhases);
-                    harmGain *= this.octaveMult;
-                }
-
-                // Integer Harmonics (Injection)
-                if (this.harmonicCount > 0) {
-                    for (let h = 2; h <= this.harmonicCount + 1; h++) {
-                        const harmFreq = freq * h;
-                        const gain = Math.pow(h, -this.harmonicFalloff);
-                        // We use a separate phase space, allocating 32 slots per bin
-                        // Indexing: bin * 32 + (h - 2)
-                        const phaseIdx = bin * 32 + (h - 2);
-                        if (phaseIdx < this.harmonicPhasesExtra.length) {
-                            generateOsc(harmFreq, gain, phaseIdx, this.harmonicPhasesExtra);
-                        }
+                    for (let i = 0; i < length; i++) {
+                        const sample = Math.sin(hPhase + offsetInRad);
+                        this.blockL[i] += sample * baseGainL * harmGain;
+                        this.blockR[i] += sample * baseGainR * harmGain;
+                        hPhase += hPhaseInc;
                     }
-                }
-
-                // Spectral Copy (Shifted Layer)
-                if (this.spectralCopyMix > 0.001) {
-                    const shiftScale = Math.pow(2, this.spectralCopyShift / 12.0);
-                    const copyFreq = freq * shiftScale;
-                    // Start phase tracking from bin index
-                    if (bin < this.spectralCopyPhases.length) {
-                        generateOsc(copyFreq, this.spectralCopyMix, bin, this.spectralCopyPhases);
-                    }
+                    this.harmonicPhases[phaseIdx] = hPhase % PI2;
+                    harmGain *= this.octaveMult;
                 }
             }
 
-            const scale = 0.1;
-            channelL[i] = sumL * scale;
-            channelR[i] = sumR * scale;
+            // High octaves
+            if (this.octaveHigh > 0) {
+                let harmGain = this.octaveMult;
+                for (let h = 1; h <= this.octaveHigh; h++) {
+                    const hScale = Math.pow(2, h);
+                    const hFreq = freq * hScale;
+                    if (hFreq >= nyquist) break;
+
+                    const hPhaseInc = hFreq * PI2_SR;
+                    const phaseIdx = bin * 20 + 10 + (h - 1);
+                    let hPhase = this.harmonicPhases[phaseIdx];
+
+                    for (let i = 0; i < length; i++) {
+                        const sample = Math.sin(hPhase + offsetInRad);
+                        this.blockL[i] += sample * baseGainL * harmGain;
+                        this.blockR[i] += sample * baseGainR * harmGain;
+                        hPhase += hPhaseInc;
+                    }
+                    this.harmonicPhases[phaseIdx] = hPhase % PI2;
+                    harmGain *= this.octaveMult;
+                }
+            }
+
+            // Integer Harmonics (Injection)
+            if (this.harmonicCount > 0) {
+                for (let h = 2; h <= this.harmonicCount + 1; h++) {
+                    const hFreq = freq * h;
+                    if (hFreq >= nyquist) break;
+
+                    const injGain = Math.pow(h, -this.harmonicFalloff);
+                    const hPhaseInc = hFreq * PI2_SR;
+                    const phaseIdx = bin * 32 + (h - 2);
+                    let hPhase = this.harmonicPhasesExtra[phaseIdx];
+
+                    for (let i = 0; i < length; i++) {
+                        const sample = Math.sin(hPhase + offsetInRad);
+                        this.blockL[i] += sample * baseGainL * injGain;
+                        this.blockR[i] += sample * baseGainR * injGain;
+                        hPhase += hPhaseInc;
+                    }
+                    this.harmonicPhasesExtra[phaseIdx] = hPhase % PI2;
+                }
+            }
+
+            // Spectral Copy
+            if (this.spectralCopyMix > 0.001) {
+                const shiftScale = Math.pow(2, this.spectralCopyShift / 12.0);
+                const cFreq = freq * shiftScale;
+                if (cFreq < nyquist) {
+                    const cPhaseInc = cFreq * PI2_SR;
+                    let cPhase = this.spectralCopyPhases[bin];
+                    for (let i = 0; i < length; i++) {
+                        const sample = Math.sin(cPhase + offsetInRad);
+                        this.blockL[i] += sample * baseGainL * this.spectralCopyMix;
+                        this.blockR[i] += sample * baseGainR * this.spectralCopyMix;
+                        cPhase += cPhaseInc;
+                    }
+                    this.spectralCopyPhases[bin] = cPhase % PI2;
+                }
+            }
+        }
+
+        // 4. Output with master scaling
+        const scale = 0.1;
+        for (let i = 0; i < length; i++) {
+            channelL[i] = this.blockL[i] * scale;
+            channelR[i] = this.blockR[i] * scale;
         }
 
         return true;

@@ -215,7 +215,7 @@ export class AudioEngine {
         this.workletNode.port.postMessage({
             type: 'spectral-data',
             data: data
-        });
+        }, [data.buffer]);
     }
 
     public setOctaveDoubling(low: number, high: number, multiplier: number): void {
