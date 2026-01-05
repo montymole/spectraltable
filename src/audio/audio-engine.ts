@@ -1,1183 +1,29 @@
-
-// Audio Engine for Spectral Table
-// Handles AudioContext, Worklet loading, and synthesis modes (spectral/wavetable)
+/**
+ * Audio Engine for Spectral Table
+ * Handles AudioContext, Worklet loading, and synthesis modes.
+ * 
+ * Synthesis Modes:
+ * - SPECTRAL: iFFT/additive synthesis from frequency bins
+ * - SPECTRAL_CHIRP: Log-frequency spaced additive synthesis
+ * - WAVETABLE: Carrier wave AM synthesis with optional feedback
+ * - WHITENOISE_BAND_Q_FILTER: Subtractive noise filtering
+ */
 
 import { SynthMode } from '../types';
 
-// Chirp Z-Transform based spectral processor
-// Uses ICZT for O(n log n) synthesis with logarithmic frequency spacing
-// Reference: Sukhoy & Stoytchev, "Generalizing the inverse FFT off the unit circle" (2019)
-// https://www.nature.com/articles/s41598-019-50234-9
-const SPECTRAL_PROCESSOR_CODE_CHIRP = `
-// Chirp Z-Transform (CZT) based additive synthesis
-// Key insight: CZT uses jk = (j² + k² - (k-j)²)/2 identity for O(n log n) via convolution
-// ICZT enables logarithmic frequency spacing matching human pitch perception
-
-// FFT implementation for AudioWorklet (Cooley-Tukey radix-2)
-function fft(real, imag, inverse) {
-    const n = real.length;
-    if (n <= 1) return;
-    
-    // Bit-reversal permutation
-    let j = 0;
-    for (let i = 0; i < n - 1; i++) {
-        if (i < j) {
-            let tr = real[i]; real[i] = real[j]; real[j] = tr;
-            let ti = imag[i]; imag[i] = imag[j]; imag[j] = ti;
-        }
-        let k = n >> 1;
-        while (k <= j) { j -= k; k >>= 1; }
-        j += k;
-    }
-    
-    // Cooley-Tukey butterflies
-    const sign = inverse ? 1 : -1;
-    for (let len = 2; len <= n; len <<= 1) {
-        const halfLen = len >> 1;
-        const angle = sign * Math.PI / halfLen;
-        const wReal = Math.cos(angle);
-        const wImag = Math.sin(angle);
-        
-        for (let i = 0; i < n; i += len) {
-            let curReal = 1, curImag = 0;
-            for (let k = 0; k < halfLen; k++) {
-                const evenIdx = i + k;
-                const oddIdx = i + k + halfLen;
-                
-                const tr = curReal * real[oddIdx] - curImag * imag[oddIdx];
-                const ti = curReal * imag[oddIdx] + curImag * real[oddIdx];
-                
-                real[oddIdx] = real[evenIdx] - tr;
-                imag[oddIdx] = imag[evenIdx] - ti;
-                real[evenIdx] += tr;
-                imag[evenIdx] += ti;
-                
-                const nextReal = curReal * wReal - curImag * wImag;
-                curImag = curReal * wImag + curImag * wReal;
-                curReal = nextReal;
-            }
-        }
-    }
-    
-    if (inverse) {
-        for (let i = 0; i < n; i++) {
-            real[i] /= n;
-            imag[i] /= n;
-        }
-    }
-}
-
-// Compute CZT using Bluestein's algorithm
-// X(z_k) = sum_n x[n] * A^(-n) * W^(nk) for k = 0..M-1
-// A and W define the spiral contour in complex plane
-function czt(xReal, xImag, M, aReal, aImag, wReal, wImag) {
-    const N = xReal.length;
-    
-    // Compute chirp sequence: W^(n²/2)
-    const chirpReal = new Float32Array(N);
-    const chirpImag = new Float32Array(N);
-    for (let n = 0; n < N; n++) {
-        const angle = -Math.PI * n * n / N;  // W^(n²/2) for W = e^(-i*2π/N)
-        chirpReal[n] = Math.cos(angle);
-        chirpImag[n] = Math.sin(angle);
-    }
-    
-    // y[n] = x[n] * A^(-n) * chirp[n]
-    const yReal = new Float32Array(N);
-    const yImag = new Float32Array(N);
-    
-    let aInvReal = aReal, aInvImag = -aImag;  // A^(-1)
-    let aPowReal = 1, aPowImag = 0;  // A^(-n), start at n=0
-    
-    for (let n = 0; n < N; n++) {
-        // x[n] * A^(-n)
-        const xaReal = xReal[n] * aPowReal - xImag[n] * aPowImag;
-        const xaImag = xReal[n] * aPowImag + xImag[n] * aPowReal;
-        
-        // * chirp[n]
-        yReal[n] = xaReal * chirpReal[n] - xaImag * chirpImag[n];
-        yImag[n] = xaReal * chirpImag[n] + xaImag * chirpReal[n];
-        
-        // Update A^(-n) -> A^(-(n+1))
-        const nextReal = aPowReal * aInvReal - aPowImag * aInvImag;
-        aPowImag = aPowReal * aInvImag + aPowImag * aInvReal;
-        aPowReal = nextReal;
-    }
-    
-    // Convolve with conjugate chirp
-    // This is the Bluestein trick: convolution via FFT
-    const L = 1 << Math.ceil(Math.log2(N + M - 1));  // Next power of 2
-    
-    // Pad y
-    const yPadReal = new Float32Array(L);
-    const yPadImag = new Float32Array(L);
-    for (let i = 0; i < N; i++) {
-        yPadReal[i] = yReal[i];
-        yPadImag[i] = yImag[i];
-    }
-    
-    // Conjugate chirp filter: chirp^(-n²/2) for convolution
-    const hReal = new Float32Array(L);
-    const hImag = new Float32Array(L);
-    for (let n = 0; n < M; n++) {
-        const angle = Math.PI * n * n / N;
-        hReal[n] = Math.cos(angle);
-        hImag[n] = Math.sin(angle);
-    }
-    // Wrap for circular convolution
-    for (let n = 1; n < N; n++) {
-        const angle = Math.PI * n * n / N;
-        hReal[L - n] = Math.cos(angle);
-        hImag[L - n] = Math.sin(angle);
-    }
-    
-    // FFT both
-    fft(yPadReal, yPadImag, false);
-    fft(hReal, hImag, false);
-    
-    // Multiply in frequency domain
-    for (let i = 0; i < L; i++) {
-        const re = yPadReal[i] * hReal[i] - yPadImag[i] * hImag[i];
-        const im = yPadReal[i] * hImag[i] + yPadImag[i] * hReal[i];
-        yPadReal[i] = re;
-        yPadImag[i] = im;
-    }
-    
-    // IFFT
-    fft(yPadReal, yPadImag, true);
-    
-    // Extract and apply final chirp
-    const outReal = new Float32Array(M);
-    const outImag = new Float32Array(M);
-    for (let k = 0; k < M; k++) {
-        const angle = -Math.PI * k * k / N;
-        const cReal = Math.cos(angle);
-        const cImag = Math.sin(angle);
-        outReal[k] = yPadReal[k] * cReal - yPadImag[k] * cImag;
-        outImag[k] = yPadReal[k] * cImag + yPadImag[k] * cReal;
-    }
-    
-    return { real: outReal, imag: outImag };
-}
-
-// Inverse CZT via Bluestein approach
-// Given spectrum X at logarithmically-spaced frequencies, reconstruct time-domain signal
-function iczt(specReal, specImag, N, aReal, aImag, wReal, wImag) {
-    const M = specReal.length;
-    
-    // For ICZT, we essentially solve X = CZT(x) for x
-    // Using the Gohberg-Semencul formula for Vandermonde inversion
-    // Simplified: ICZT(X) ≈ CZT(X) with conjugate parameters and scaling
-    
-    // Apply inverse chirp z-transform using conjugate spiral
-    const wConjReal = wReal;
-    const wConjImag = -wImag;
-    const aConjReal = aReal;
-    const aConjImag = -aImag;
-    
-    // Use CZT with conjugate parameters
-    const result = czt(specReal, specImag, N, aConjReal, aConjImag, wConjReal, wConjImag);
-    
-    // Scale by 1/M
-    for (let i = 0; i < N; i++) {
-        result.real[i] /= M;
-        result.imag[i] /= M;
-    }
-    
-    return result;
-}
-
-// Block processing constants
-const BLOCK_SIZE = 512;
-const HOP_SIZE = 128;  // Matches AudioWorklet quantum
-const OVERLAP_FACTOR = BLOCK_SIZE / HOP_SIZE;
-
-// Hann window for smooth overlap-add
-function createHannWindow(size) {
-    const w = new Float32Array(size);
-    for (let i = 0; i < size; i++) {
-        w[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / size));
-    }
-    return w;
-}
-
-class ChirpSpectralProcessor extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        
-        // Spectral data: [mag, phase, pan, custom] per bin
-        this.numBins = 256;  // Logarithmically spaced bins
-        this.spectralData = new Float32Array(this.numBins * 4);
-        this.prevData = new Float32Array(this.numBins * 4);
-        this.targetData = new Float32Array(this.numBins * 4);
-        
-        // Output buffer for overlap-add
-        this.outputBuffer = new Float32Array(BLOCK_SIZE * 2);
-        this.outputPhase = 0;
-        this.window = createHannWindow(BLOCK_SIZE);
-        
-        // Phase accumulators for continuous synthesis
-        this.phases = new Float32Array(this.numBins);
-        
-        // Interpolation
-        this.interpSamples = 64;
-        this.interpT = 1.0;
-        this.interpStep = 1.0 / (this.interpSamples + 1);
-        
-        this.frequencyMultiplier = 1.0;
-        
-        // Octave doubling
-        this.octaveLow = 0;
-        this.octaveHigh = 0;
-        this.octaveMult = 0.5;
-        
-        // Chirp spiral parameters for log frequency spacing
-        // f_k = f_min * (f_max/f_min)^(k/(M-1)) for k = 0..M-1
-        // This maps to W = e^(i * 2π * log(fmax/fmin) / (M * sr))
-        this.fMin = 20;
-        this.fMax = 20000;
-        
-        // Timeline for offline rendering
-        this.timeline = null;
-        this.timelineFrameSize = 0;
-        this.timelineNumFrames = 0;
-        this.timelineTotalSamples = 0;
-        this.sampleCount = 0;
-        
-        this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-timeline') {
-                this.timeline = e.data.frames;
-                this.timelineFrameSize = e.data.frameSize;
-                this.timelineNumFrames = e.data.numFrames;
-                this.timelineTotalSamples = e.data.totalSamples;
-                this.sampleCount = 0;
-                this.numBins = this.timelineFrameSize / 4;
-                for (let i = 0; i < this.timelineFrameSize; i++) {
-                    this.spectralData[i] = this.timeline[i];
-                }
-                this.port.postMessage({ type: 'ready' });
-            } else if (e.data.type === 'spectral-data') {
-                const data = e.data.data;
-                this.numBins = data.length / 4;
-                
-                if (this.interpSamples === 0) {
-                    this.spectralData.set(data);
-                    this.targetData.set(data);
-                    this.port.postMessage({ type: 'ready' });
-                } else {
-                    this.prevData.set(this.spectralData);
-                    this.targetData.set(data);
-                    this.interpT = 0.0;
-                }
-            } else if (e.data.type === 'frequency-multiplier') {
-                this.frequencyMultiplier = e.data.value;
-            } else if (e.data.type === 'octave-doubling') {
-                this.octaveLow = e.data.low;
-                this.octaveHigh = e.data.high;
-                this.octaveMult = e.data.multiplier;
-            } else if (e.data.type === 'interp-samples') {
-                this.interpSamples = e.data.value;
-                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
-            }
-        };
-    }
-    
-    // Get logarithmically spaced frequency for bin k
-    getLogFreq(k) {
-        const ratio = this.fMax / this.fMin;
-        return this.fMin * Math.pow(ratio, k / (this.numBins - 1)) * this.frequencyMultiplier;
-    }
-    
-    // Synthesize a block using chirp-based approach
-    synthesizeBlock() {
-        const blockReal = new Float32Array(BLOCK_SIZE);
-        const blockImag = new Float32Array(BLOCK_SIZE);
-        const blockL = new Float32Array(BLOCK_SIZE);
-        const blockR = new Float32Array(BLOCK_SIZE);
-        
-        const nyquist = sampleRate * 0.5;
-        const pi2 = 2 * Math.PI;
-        const pi2Sr = pi2 / sampleRate;
-        
-        // Build spectral representation in chirp domain
-        // For each bin, compute phase-coherent contribution
-        for (let bin = 0; bin < this.numBins; bin++) {
-            const idx = bin * 4;
-            const mag = this.spectralData[idx];
-            const phaseOffset = this.spectralData[idx + 1];
-            const pan = this.spectralData[idx + 2];
-            
-            if (mag < 0.001) continue;
-            
-            const freq = this.getLogFreq(bin);
-            if (freq >= nyquist) continue;
-            
-            // Convert magnitude to linear amplitude
-            const db = mag * 60 - 60;
-            const amp = Math.pow(10, db / 20);
-            
-            // Pan law (constant power)
-            const panVal = (pan - 0.5) * 2;
-            const gainL = Math.min(1, 1 - panVal) * amp;
-            const gainR = Math.min(1, 1 + panVal) * amp;
-            
-            // Phase increment per sample
-            const phaseInc = freq * pi2Sr;
-            
-            // Synthesize this bin's contribution
-            let phase = this.phases[bin];
-            for (let s = 0; s < BLOCK_SIZE; s++) {
-                const sample = Math.sin(phase + phaseOffset * pi2);
-                blockL[s] += sample * gainL;
-                blockR[s] += sample * gainR;
-                
-                phase += phaseInc;
-                if (phase > pi2) phase -= pi2;
-            }
-            this.phases[bin] = phase;
-            
-            // Octave doubling (sub-harmonics)
-            let harmGain = this.octaveMult;
-            for (let h = 1; h <= this.octaveLow; h++) {
-                const harmFreq = freq / Math.pow(2, h);
-                if (harmFreq < 20) break;
-                
-                const harmPhaseInc = harmFreq * pi2Sr;
-                let harmPhase = this.phases[bin] / Math.pow(2, h);  // Derive from base
-                
-                for (let s = 0; s < BLOCK_SIZE; s++) {
-                    const sample = Math.sin(harmPhase + phaseOffset * pi2);
-                    blockL[s] += sample * gainL * harmGain;
-                    blockR[s] += sample * gainR * harmGain;
-                    harmPhase += harmPhaseInc;
-                }
-                harmGain *= this.octaveMult;
-            }
-            
-            // Octave doubling (harmonics)
-            harmGain = this.octaveMult;
-            for (let h = 1; h <= this.octaveHigh; h++) {
-                const harmFreq = freq * Math.pow(2, h);
-                if (harmFreq >= nyquist) break;
-                
-                const harmPhaseInc = harmFreq * pi2Sr;
-                let harmPhase = this.phases[bin] * Math.pow(2, h);
-                
-                for (let s = 0; s < BLOCK_SIZE; s++) {
-                    const sample = Math.sin(harmPhase + phaseOffset * pi2);
-                    blockL[s] += sample * gainL * harmGain;
-                    blockR[s] += sample * gainR * harmGain;
-                    harmPhase += harmPhaseInc;
-                }
-                harmGain *= this.octaveMult;
-            }
-        }
-        
-        return { left: blockL, right: blockR };
-    }
-
-    process(inputs, outputs, parameters) {
-        const output = outputs[0];
-        const channelL = output[0];
-        const channelR = output[1];
-        
-        for (let i = 0; i < channelL.length; i++) {
-            // Timeline mode interpolation
-            if (this.timeline && this.timelineNumFrames > 1) {
-                const progress = this.sampleCount / this.timelineTotalSamples;
-                const framePos = progress * (this.timelineNumFrames - 1);
-                const frame0 = Math.floor(framePos);
-                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
-                const t = framePos - frame0;
-                const offset0 = frame0 * this.timelineFrameSize;
-                const offset1 = frame1 * this.timelineFrameSize;
-                for (let j = 0; j < this.timelineFrameSize; j++) {
-                    this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
-                }
-                this.sampleCount++;
-            }
-            // Per-sample interpolation
-            else if (this.interpSamples > 0 && this.interpT < 1.0) {
-                this.interpT += this.interpStep;
-                if (this.interpT > 1.0) this.interpT = 1.0;
-                const t = this.interpT;
-                const invT = 1.0 - t;
-                for (let j = 0; j < this.spectralData.length; j++) {
-                    this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
-                }
-            }
-        }
-        
-        // Synthesize using chirp-based logarithmic frequency spacing
-        const block = this.synthesizeBlock();
-        
-        // Output (simplified - taking first HOP_SIZE samples)
-        // Full overlap-add would require buffering across process() calls
-        const scale = 0.1;
-        for (let i = 0; i < channelL.length; i++) {
-            channelL[i] = block.left[i] * scale;
-            channelR[i] = block.right[i] * scale;
-        }
-        
-        return true;
-    }
-}
-registerProcessor('chirp-spectral-processor', ChirpSpectralProcessor);
-`;
-
-// Processor code for spectral (additive/iFFT) synthesis
-const SPECTRAL_PROCESSOR_CODE = `
-// Band-limiting constants
-const NYQUIST_LIMIT = 0.45;  // 0.45 = 45% of Nyquist (conservative margin)
-const ROLLOFF_MODE = 2;       // 0=hard, 1=smoothstep, 2=cosine, 3=hann
-
-// Rolloff functions: t in [0,1], returns attenuation factor [0,1]
-// t=0 means at limit edge (full signal), t=1 means at Nyquist (zero signal)
-function rolloffHard(t) {
-    return t < 0.001 ? 1.0 : 0.0;
-}
-function rolloffSmoothstep(t) {
-    const x = 1.0 - t;
-    return x * x * (3.0 - 2.0 * x);
-}
-function rolloffCosine(t) {
-    return 0.5 * (1.0 + Math.cos(t * Math.PI));
-}
-function rolloffHann(t) {
-    return 0.5 * (1.0 - Math.cos((1.0 - t) * Math.PI));
-}
-
-function computeRolloff(normalizedFreq, mode) {
-    // normalizedFreq = freq / nyquist, range [0, 1+]
-    if (normalizedFreq <= NYQUIST_LIMIT) return 1.0;
-    if (normalizedFreq >= 1.0) return 0.0;
-    
-    // t: 0 at limit, 1 at nyquist
-    const t = (normalizedFreq - NYQUIST_LIMIT) / (1.0 - NYQUIST_LIMIT);
-    
-    switch (mode) {
-        case 0: return rolloffHard(t);
-        case 1: return rolloffSmoothstep(t);
-        case 2: return rolloffCosine(t);
-        case 3: return rolloffHann(t);
-        default: return rolloffSmoothstep(t);
-    }
-}
-
-// Default interpolation samples (can be changed dynamically)
-const DEFAULT_INTERP_SAMPLES = 64;
-
-class SpectralProcessor extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        // Interpolation setting
-        this.interpSamples = DEFAULT_INTERP_SAMPLES;
-        
-        // Current working spectral data (interpolated)
-        this.spectralData = new Float32Array(1024 * 4);
-        // Previous frame (start of interpolation)
-        this.prevData = new Float32Array(1024 * 4);
-        // Target frame (end of interpolation)  
-        this.targetData = new Float32Array(1024 * 4);
-        
-        // Phase accumulator per bin - runs continuously, never reset
-        this.phaseAccumulators = new Float32Array(1024);
-        
-        // Per-bin phase offset targets (from spectral data)
-        // We interpolate toward these to avoid discontinuities
-        this.prevPhaseOffsets = new Float32Array(1024);
-        this.targetPhaseOffsets = new Float32Array(1024);
-        this.currentPhaseOffsets = new Float32Array(1024);
-        
-        this.frequencyMultiplier = 1.0;
-        
-        // Octave Doubling: layering octaves
-        this.octaveLow = 0;      // 0-10 octaves below
-        this.octaveHigh = 0;     // 0-10 octaves above
-        this.octaveMult = 0.5;   // Volume decay per octave
-        
-        // Extra phase accumulators for octave doubling (10 low + 10 high per bin)
-        this.harmonicPhases = new Float32Array(1024 * 20); // This will be resized based on numPoints
-        
-        // Interpolation state: 0 = at prev, 1 = at target
-        this.interpT = 1.0;
-        // Recalculate step based on current interpSamples
-        this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
-        
-        // Timeline mode for offline rendering (LFO simulation)
-        this.timeline = null;
-        this.timelineFrameSize = 0;
-        this.timelineNumFrames = 0;
-        this.timelineTotalSamples = 0;
-        this.sampleCount = 0;
-        
-        this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-timeline') {
-                // Timeline of spectral frames for offline rendering
-                this.timeline = e.data.frames;
-                this.timelineFrameSize = e.data.frameSize;
-                this.timelineNumFrames = e.data.numFrames;
-                this.timelineTotalSamples = e.data.totalSamples;
-                this.sampleCount = 0;
-                // Initialize with first frame
-                const numPoints = this.timelineFrameSize / 4;
-                if (this.harmonicPhases.length !== numPoints * 20) {
-                    this.harmonicPhases = new Float32Array(numPoints * 20);
-                }
-                for (let i = 0; i < this.timelineFrameSize; i++) {
-                    this.spectralData[i] = this.timeline[i];
-                }
-                for (let bin = 0; bin < numPoints; bin++) {
-                    this.currentPhaseOffsets[bin] = this.timeline[bin * 4 + 1];
-                }
-                this.port.postMessage({ type: 'ready' });
-            } else if (e.data.type === 'spectral-data') {
-                const data = e.data.data;
-                const numPoints = data.length / 4;
-                
-                // Resize harmonicPhases if numPoints changed
-                if (this.harmonicPhases.length !== numPoints * 20) {
-                    this.harmonicPhases = new Float32Array(numPoints * 20);
-                }
-
-                if (this.interpSamples === 0) {
-                    // No interpolation - instant update
-                    this.spectralData.set(data);
-                    this.targetData.set(data);
-                    // Extract phase offsets
-                    for (let bin = 0; bin < numPoints; bin++) {
-                        const offset = data[bin * 4 + 1];
-                        this.currentPhaseOffsets[bin] = offset;
-                        this.targetPhaseOffsets[bin] = offset;
-                    }
-                    // Acknowledge data received for offline rendering sync
-                    this.port.postMessage({ type: 'ready' });
-                } else {
-                    // Snapshot current state as previous
-                    this.prevData.set(this.spectralData);
-                    this.prevPhaseOffsets.set(this.currentPhaseOffsets);
-                    
-                    // New incoming data is target
-                    this.targetData.set(data);
-                    for (let bin = 0; bin < numPoints; bin++) {
-                        this.targetPhaseOffsets[bin] = data[bin * 4 + 1];
-                    }
-                    
-                    // Reset interpolation
-                    this.interpT = 0.0;
-                }
-            } else if (e.data.type === 'frequency-multiplier') {
-                this.frequencyMultiplier = e.data.value;
-            } else if (e.data.type === 'octave-doubling') {
-                this.octaveLow = e.data.low;
-                this.octaveHigh = e.data.high;
-                this.octaveMult = e.data.multiplier;
-            } else if (e.data.type === 'interp-samples') {
-                this.interpSamples = e.data.value;
-                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
-            }
-        };
-    }
-
-    process(inputs, outputs, parameters) {
-        const output = outputs[0];
-        const channelL = output[0];
-        const channelR = output[1];
-        
-        const numPoints = this.spectralData.length / 4;
-        const nyquist = sampleRate * 0.5;
-        const PI2_SR = (2 * Math.PI) / sampleRate;
-        const PI2 = 2 * Math.PI;
-        
-        for (let i = 0; i < channelL.length; i++) {
-            // Timeline mode: step through pre-computed frames
-            if (this.timeline && this.timelineNumFrames > 1) {
-                const progress = this.sampleCount / this.timelineTotalSamples;
-                const framePos = progress * (this.timelineNumFrames - 1);
-                const frame0 = Math.floor(framePos);
-                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
-                const t = framePos - frame0;
-                const offset0 = frame0 * this.timelineFrameSize;
-                const offset1 = frame1 * this.timelineFrameSize;
-                for (let j = 0; j < this.timelineFrameSize; j++) {
-                    this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
-                }
-                const np = this.timelineFrameSize / 4;
-                for (let bin = 0; bin < np; bin++) {
-                    this.currentPhaseOffsets[bin] = this.spectralData[bin * 4 + 1];
-                }
-                this.sampleCount++;
-            }
-            // Per-sample interpolation advance (skip if disabled)
-            else if (this.interpSamples > 0 && this.interpT < 1.0) {
-                this.interpT += this.interpStep;
-                if (this.interpT > 1.0) this.interpT = 1.0;
-                
-                const t = this.interpT;
-                const invT = 1.0 - t;
-                
-                // Lerp all spectral data values (mag, custom1, custom2 - not phase offset)
-                for (let j = 0; j < this.spectralData.length; j++) {
-                    this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
-                }
-                
-                // Lerp phase offsets separately for phase continuity
-                for (let bin = 0; bin < numPoints; bin++) {
-                    this.currentPhaseOffsets[bin] = 
-                        this.prevPhaseOffsets[bin] * invT + this.targetPhaseOffsets[bin] * t;
-                }
-            }
-            
-            let sumL = 0;
-            let sumR = 0;
-            
-            for (let bin = 0; bin < numPoints; bin++) {
-                const idx = bin * 4;
-                const mag = this.spectralData[idx];
-                // Phase offset is now read from interpolated array, not spectralData
-                const phaseOffset = this.currentPhaseOffsets[bin];
-                const custom1 = this.spectralData[idx + 2];
-                
-                if (mag < 0.001) continue;
-
-                const minFreq = 20;
-                const maxFreq = 20000;
-                const normalizedBin = bin / numPoints;
-                const baseFreq = minFreq + (maxFreq - minFreq) * normalizedBin;
-                const freq = baseFreq * this.frequencyMultiplier;
-                
-                // Band-limiting: skip or attenuate bins above Nyquist threshold
-                const normalizedFreq = freq / nyquist;
-                if (normalizedFreq >= 1.0) continue;  // Hard cutoff at Nyquist
-                
-                const rolloffGain = computeRolloff(normalizedFreq, ROLLOFF_MODE);
-                if (rolloffGain < 0.001) continue;  // Skip negligible contributions
-                
-                const db = mag * 60 - 60;
-                const linearMag = Math.pow(10, db / 20) * rolloffGain;
-                
-                const p = (custom1 - 0.5) * 2;
-                const baseGainL = Math.min(1, 1 - p) * linearMag;
-                const baseGainR = Math.min(1, 1 + p) * linearMag;
-                
-                // Helper to generate oscillator at given frequency with gain
-                const generateOsc = (oscFreq, gain, phaseIdx) => {
-                    if (gain < 0.001) return;
-                    const nf = oscFreq / nyquist;
-                    if (nf >= 1.0) return;
-                    const rf = computeRolloff(nf, ROLLOFF_MODE);
-                    if (rf < 0.001) return;
-                    
-                    this.harmonicPhases[phaseIdx] += (oscFreq * PI2_SR);
-                    if (this.harmonicPhases[phaseIdx] > PI2) {
-                        this.harmonicPhases[phaseIdx] -= PI2;
-                    }
-                    const sample = Math.sin(this.harmonicPhases[phaseIdx] + phaseOffset * PI2);
-                    sumL += sample * baseGainL * gain * rf;
-                    sumR += sample * baseGainR * gain * rf;
-                };
-                
-                // Base oscillator (fundamental)
-                this.phaseAccumulators[bin] += (freq * PI2_SR);
-                if (this.phaseAccumulators[bin] > PI2) {
-                    this.phaseAccumulators[bin] -= PI2;
-                }
-                const currentPhase = this.phaseAccumulators[bin] + (phaseOffset * PI2);
-                const sample = Math.sin(currentPhase);
-                sumL += sample * baseGainL;
-                sumR += sample * baseGainR;
-                
-                // Low octaves (doubling below)
-                let harmGain = this.octaveMult;
-                for (let h = 1; h <= this.octaveLow; h++) {
-                    const harmFreq = freq / Math.pow(2, h);
-                    if (harmFreq < 20) break;
-                    const phaseIdx = bin * 20 + (h - 1);
-                    generateOsc(harmFreq, harmGain, phaseIdx);
-                    harmGain *= this.octaveMult;
-                }
-                
-                // High octaves (doubling above)
-                harmGain = this.octaveMult;
-                for (let h = 1; h <= this.octaveHigh; h++) {
-                    const harmFreq = freq * Math.pow(2, h);
-                    const phaseIdx = bin * 20 + 10 + (h - 1);
-                    generateOsc(harmFreq, harmGain, phaseIdx);
-                    harmGain *= this.octaveMult;
-                }
-            }
-            
-            const scale = 0.1; 
-            channelL[i] = sumL * scale;
-            channelR[i] = sumR * scale;
-        }
-        
-        return true;
-    }
-}
-registerProcessor('spectral-processor', SpectralProcessor);
-`;
-
-// Processor code for wavetable AM synthesis with feedback
-// Carrier wave (sine/saw/square/tri) modulated by reading line magnitudes
-// Magnitude 0 = silence, Magnitude 1 = full carrier amplitude
-// Feedback: previous output mixed back into carrier for evolving timbres
-const WAVETABLE_PROCESSOR_CODE = `
-const DEFAULT_INTERP_SAMPLES = 128;
-
-class WavetableProcessor extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        // Interpolation setting
-        this.interpSamples = DEFAULT_INTERP_SAMPLES;
-        
-        this.envelope = new Float32Array(1024);     // Current interpolated envelope
-        this.prevEnvelope = new Float32Array(1024); // Previous envelope
-        this.targetEnvelope = new Float32Array(1024); // Target envelope
-        this.envelopeSize = 64;
-        this.phase = 0;           // Carrier phase (0-1)
-        this.envPhase = 0;        // Envelope read position (0-1)
-        this.frequency = 220;     // Carrier frequency Hz
-        this.carrierType = 0;     // 0=sine, 1=saw, 2=square, 3=triangle
-        this.feedback = 0;        // Feedback amount 0-1
-        this.lastSample = 0;      // Previous output for feedback
-        
-        // Octave Doubling: octave layering
-        this.octaveLow = 0;    // 0-10 octaves below
-        this.octaveHigh = 0;   // 0-10 octaves above
-        this.octaveMult = 0.5; // Volume decay per octave
-        
-        // Octave doubling phases (10 low + 10 high)
-        this.harmonicPhases = new Float32Array(20);
-        this.harmonicEnvPhases = new Float32Array(20);
-        
-        // Interpolation state
-        this.interpT = 1.0;
-        this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
-        
-        // Timeline mode for offline rendering (LFO simulation)
-        this.timeline = null;
-        this.timelineFrameSize = 0;
-        this.timelineNumFrames = 0;
-        this.timelineTotalSamples = 0;
-        this.sampleCount = 0;
-        
-        this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-timeline') {
-                // Timeline of spectral frames for offline rendering
-                this.timeline = e.data.frames;
-                this.timelineFrameSize = e.data.frameSize;
-                this.timelineNumFrames = e.data.numFrames;
-                this.timelineTotalSamples = e.data.totalSamples;
-                this.sampleCount = 0;
-                this.envelopeSize = this.timelineFrameSize / 4;
-                // Initialize envelope from first frame
-                let maxMag = 0;
-                for (let i = 0; i < this.envelopeSize; i++) {
-                    const mag = this.timeline[i * 4];
-                    if (mag > maxMag) maxMag = mag;
-                }
-                const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
-                for (let i = 0; i < this.envelopeSize; i++) {
-                    this.envelope[i] = this.timeline[i * 4] * scale;
-                }
-                this.port.postMessage({ type: 'ready' });
-            } else if (e.data.type === 'spectral-data') {
-                const data = e.data.data;
-                const numPoints = data.length / 4;
-                this.envelopeSize = numPoints;
-                
-                let maxMag = 0;
-                for (let i = 0; i < numPoints; i++) {
-                    const mag = data[i * 4];
-                    if (mag > maxMag) maxMag = mag;
-                }
-                
-                const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
-                
-                if (this.interpSamples === 0) {
-                    // No interpolation - instant update
-                    for (let i = 0; i < numPoints; i++) {
-                        this.envelope[i] = data[i * 4] * scale;
-                        this.targetEnvelope[i] = this.envelope[i];
-                    }
-                    // Acknowledge data received for offline rendering sync
-                    this.port.postMessage({ type: 'ready' });
-                } else {
-                    // Snapshot current envelope as previous
-                    this.prevEnvelope.set(this.envelope);
-                    
-                    for (let i = 0; i < numPoints; i++) {
-                        this.targetEnvelope[i] = data[i * 4] * scale;
-                    }
-                    
-                    // Reset interpolation
-                    this.interpT = 0.0;
-                }
-            } else if (e.data.type === 'frequency') {
-                this.frequency = e.data.value;
-            } else if (e.data.type === 'carrier') {
-                this.carrierType = e.data.value;
-            } else if (e.data.type === 'feedback') {
-                this.feedback = e.data.value;
-            } else if (e.data.type === 'octave-doubling') {
-                this.octaveLow = e.data.low;
-                this.octaveHigh = e.data.high;
-                this.octaveMult = e.data.multiplier;
-            } else if (e.data.type === 'interp-samples') {
-                this.interpSamples = e.data.value;
-                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
-            }
-        };
-    }
-    
-    // Generate carrier waveform sample at phase (0-1)
-    carrier(phase, type) {
-        switch (type) {
-            case 0: // Sine
-                return Math.sin(phase * 2 * Math.PI);
-            case 1: // Saw (falling)
-                return 1 - 2 * phase;
-            case 2: // Square
-                return phase < 0.5 ? 1 : -1;
-            case 3: // Triangle
-                return phase < 0.5 
-                    ? 4 * phase - 1 
-                    : 3 - 4 * phase;
-            default:
-                return Math.sin(phase * 2 * Math.PI);
-        }
-    }
-
-    process(inputs, outputs, parameters) {
-        const output = outputs[0];
-        const channelL = output[0];
-        const channelR = output[1];
-        
-        if (this.envelopeSize < 2) {
-            for (let i = 0; i < channelL.length; i++) {
-                channelL[i] = 0;
-                channelR[i] = 0;
-            }
-            return true;
-        }
-        
-        const carrierPhaseInc = this.frequency / sampleRate;
-        const envPhaseInc = carrierPhaseInc;
-        const nyquist = sampleRate * 0.5;
-        
-        for (let i = 0; i < channelL.length; i++) {
-            // Timeline mode: step through pre-computed frames
-            if (this.timeline && this.timelineNumFrames > 1) {
-                const progress = this.sampleCount / this.timelineTotalSamples;
-                const framePos = progress * (this.timelineNumFrames - 1);
-                const frame0 = Math.floor(framePos);
-                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
-                const t = framePos - frame0;
-                const offset0 = frame0 * this.timelineFrameSize;
-                const offset1 = frame1 * this.timelineFrameSize;
-                // Interpolate envelope from timeline frames
-                let maxMag = 0;
-                for (let j = 0; j < this.envelopeSize; j++) {
-                    const mag0 = this.timeline[offset0 + j * 4];
-                    const mag1 = this.timeline[offset1 + j * 4];
-                    const mag = mag0 * (1 - t) + mag1 * t;
-                    if (mag > maxMag) maxMag = mag;
-                }
-                const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
-                for (let j = 0; j < this.envelopeSize; j++) {
-                    const mag0 = this.timeline[offset0 + j * 4];
-                    const mag1 = this.timeline[offset1 + j * 4];
-                    this.envelope[j] = (mag0 * (1 - t) + mag1 * t) * scale;
-                }
-                this.sampleCount++;
-            }
-            // Per-sample interpolation advance (skip if disabled)
-            else if (this.interpSamples > 0 && this.interpT < 1.0) {
-                this.interpT += this.interpStep;
-                if (this.interpT > 1.0) this.interpT = 1.0;
-                
-                const t = this.interpT;
-                const invT = 1.0 - t;
-                for (let j = 0; j < this.envelopeSize; j++) {
-                    this.envelope[j] = this.prevEnvelope[j] * invT + this.targetEnvelope[j] * t;
-                }
-            }
-            
-            // Get envelope with linear interpolation
-            const envPos = this.envPhase * this.envelopeSize;
-            const envIdx0 = Math.floor(envPos) % this.envelopeSize;
-            const envIdx1 = (envIdx0 + 1) % this.envelopeSize;
-            const envFrac = envPos - Math.floor(envPos);
-            const amplitude = this.envelope[envIdx0] * (1 - envFrac) + this.envelope[envIdx1] * envFrac;
-            
-            // Get base carrier sample
-            let carrierSample = this.carrier(this.phase, this.carrierType);
-            
-            // Mix in feedback: blend carrier with previous output
-            // feedback=0: pure carrier, feedback=1: 50/50 mix with previous
-            if (this.feedback > 0) {
-                carrierSample = carrierSample * (1 - this.feedback * 0.5) + this.lastSample * this.feedback * 0.5;
-            }
-            
-            // AM synthesis: carrier * envelope
-            let totalSample = carrierSample * amplitude;
-            
-            // Add low octaves (doubling below)
-            let harmGain = this.octaveMult;
-            for (let h = 1; h <= this.octaveLow; h++) {
-                const harmFreq = this.frequency / Math.pow(2, h);
-                if (harmFreq < 20) break;
-                const phaseIdx = h - 1;
-                const harmPhaseInc = harmFreq / sampleRate;
-                
-                let harmCarrier = this.carrier(this.harmonicPhases[phaseIdx], this.carrierType);
-                
-                // Get envelope at harmonic's position
-                const harmEnvPos = this.harmonicEnvPhases[phaseIdx] * this.envelopeSize;
-                const hEnvIdx0 = Math.floor(harmEnvPos) % this.envelopeSize;
-                const hEnvIdx1 = (hEnvIdx0 + 1) % this.envelopeSize;
-                const hEnvFrac = harmEnvPos - Math.floor(harmEnvPos);
-                const harmAmp = this.envelope[hEnvIdx0] * (1 - hEnvFrac) + this.envelope[hEnvIdx1] * hEnvFrac;
-                
-                totalSample += harmCarrier * harmAmp * harmGain;
-                
-                // Advance harmonic phases
-                this.harmonicPhases[phaseIdx] += harmPhaseInc;
-                if (this.harmonicPhases[phaseIdx] >= 1.0) this.harmonicPhases[phaseIdx] -= 1.0;
-                this.harmonicEnvPhases[phaseIdx] += harmPhaseInc;
-                if (this.harmonicEnvPhases[phaseIdx] >= 1.0) this.harmonicEnvPhases[phaseIdx] -= 1.0;
-                
-                harmGain *= this.octaveMult;
-            }
-            
-            // Add high octaves (doubling above)
-            harmGain = this.octaveMult;
-            for (let h = 1; h <= this.octaveHigh; h++) {
-                const harmFreq = this.frequency * Math.pow(2, h);
-                if (harmFreq >= nyquist) break;
-                const phaseIdx = 10 + (h - 1);
-                const harmPhaseInc = harmFreq / sampleRate;
-                
-                let harmCarrier = this.carrier(this.harmonicPhases[phaseIdx], this.carrierType);
-                
-                // Get envelope at harmonic's position
-                const harmEnvPos = this.harmonicEnvPhases[phaseIdx] * this.envelopeSize;
-                const hEnvIdx0 = Math.floor(harmEnvPos) % this.envelopeSize;
-                const hEnvIdx1 = (hEnvIdx0 + 1) % this.envelopeSize;
-                const hEnvFrac = harmEnvPos - Math.floor(harmEnvPos);
-                const harmAmp = this.envelope[hEnvIdx0] * (1 - hEnvFrac) + this.envelope[hEnvIdx1] * hEnvFrac;
-                
-                totalSample += harmCarrier * harmAmp * harmGain;
-                
-                // Advance harmonic phases
-                this.harmonicPhases[phaseIdx] += harmPhaseInc;
-                if (this.harmonicPhases[phaseIdx] >= 1.0) this.harmonicPhases[phaseIdx] -= 1.0;
-                this.harmonicEnvPhases[phaseIdx] += harmPhaseInc;
-                if (this.harmonicEnvPhases[phaseIdx] >= 1.0) this.harmonicEnvPhases[phaseIdx] -= 1.0;
-                
-                harmGain *= this.octaveMult;
-            }
-            
-            // Store for feedback
-            this.lastSample = totalSample;
-            
-            const gain = 0.5;
-            channelL[i] = totalSample * gain;
-            channelR[i] = totalSample * gain;
-            
-            // Advance phases
-            this.phase += carrierPhaseInc;
-            if (this.phase >= 1.0) this.phase -= 1.0;
-            
-            this.envPhase += envPhaseInc;
-            if (this.envPhase >= 1.0) this.envPhase -= 1.0;
-        }
-        
-        return true;
-    }
-}
-registerProcessor('wavetable-processor', WavetableProcessor);
-`;
-
-// Processor code for subtractive noise filtering
-// Starts with white noise and applies a bank of notch filters
-// spectralData[0] (R) = Frequency
-// spectralData[1] (G) = Q/Bandwidth
-const WHITENOISE_PROCESSOR_CODE = `
-const DEFAULT_INTERP_SAMPLES = 64;
-
-class WhitenoiseProcessor extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        // Interpolation setting
-        this.interpSamples = DEFAULT_INTERP_SAMPLES;
-        
-        this.spectralData = new Float32Array(1024 * 4);
-        this.prevData = new Float32Array(1024 * 4);
-        this.targetData = new Float32Array(1024 * 4);
-        
-        // State Variable Filter states (low and band) per potential filter band
-        this.lowStates = new Float32Array(1024);
-        this.bandStates = new Float32Array(1024);
-        
-        // Octave doubling filter states (10 low + 10 high) per bin
-        this.harmLowStates = new Float32Array(1024 * 20);
-        this.harmBandStates = new Float32Array(1024 * 20);
-        
-        this.frequencyMultiplier = 1.0;
-        
-        // Octave Doubling: layering octaves for filter bands
-        this.octaveLow = 0;
-        this.octaveHigh = 0;
-        this.octaveMult = 0.5;
-        
-        this.interpT = 1.0;
-        this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
-        
-        // Timeline mode for offline rendering (LFO simulation)
-        this.timeline = null;
-        this.timelineFrameSize = 0;
-        this.timelineNumFrames = 0;
-        this.timelineTotalSamples = 0;
-        this.sampleCount = 0;
-        
-        this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-timeline') {
-                // Timeline of spectral frames for offline rendering
-                this.timeline = e.data.frames;
-                this.timelineFrameSize = e.data.frameSize;
-                this.timelineNumFrames = e.data.numFrames;
-                this.timelineTotalSamples = e.data.totalSamples;
-                this.sampleCount = 0;
-                // Initialize with first frame
-                for (let i = 0; i < this.timelineFrameSize; i++) {
-                    this.spectralData[i] = this.timeline[i];
-                }
-                this.port.postMessage({ type: 'ready' });
-            } else if (e.data.type === 'spectral-data') {
-                const data = e.data.data;
-                if (this.interpSamples === 0) {
-                    this.spectralData.set(data);
-                    this.targetData.set(data);
-                    // Acknowledge data received for offline rendering sync
-                    this.port.postMessage({ type: 'ready' });
-                } else {
-                    this.prevData.set(this.spectralData);
-                    this.targetData.set(data);
-                    this.interpT = 0.0;
-                }
-            } else if (e.data.type === 'frequency-multiplier') {
-                this.frequencyMultiplier = e.data.value;
-            } else if (e.data.type === 'octave-doubling') {
-                this.octaveLow = e.data.low;
-                this.octaveHigh = e.data.high;
-                this.octaveMult = e.data.multiplier;
-            } else if (e.data.type === 'interp-samples') {
-                this.interpSamples = e.data.value;
-                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
-            }
-        };
-    }
-
-    process(inputs, outputs, parameters) {
-        const output = outputs[0];
-        const channelL = output[0];
-        const channelR = output[1];
-        
-        const numPoints = this.spectralData.length / 4;
-        
-        for (let i = 0; i < channelL.length; i++) {
-            // Timeline mode: step through pre-computed frames
-            if (this.timeline && this.timelineNumFrames > 1) {
-                const progress = this.sampleCount / this.timelineTotalSamples;
-                const framePos = progress * (this.timelineNumFrames - 1);
-                const frame0 = Math.floor(framePos);
-                const frame1 = Math.min(frame0 + 1, this.timelineNumFrames - 1);
-                const t = framePos - frame0;
-                const offset0 = frame0 * this.timelineFrameSize;
-                const offset1 = frame1 * this.timelineFrameSize;
-                for (let j = 0; j < this.timelineFrameSize; j++) {
-                    this.spectralData[j] = this.timeline[offset0 + j] * (1 - t) + this.timeline[offset1 + j] * t;
-                }
-                this.sampleCount++;
-            }
-            // Per-sample interpolation for smooth parameter changes
-            else if (this.interpSamples > 0 && this.interpT < 1.0) {
-                this.interpT += this.interpStep;
-                if (this.interpT > 1.0) this.interpT = 1.0;
-                const t = this.interpT;
-                const invT = 1.0 - t;
-                for (let j = 0; j < this.spectralData.length; j++) {
-                    this.spectralData[j] = this.prevData[j] * invT + this.targetData[j] * t;
-                }
-            }
-            
-            // Source: White Noise
-            const noise = Math.random() * 2 - 1;
-            let sumSubtracted = 0;
-            
-            const minFreq = 20;
-            const maxFreq = 20000;
-            const freqRange = maxFreq - minFreq;
-            const binWidth = freqRange / numPoints;
-            
-            // Subtractive Filtering (Parallel Bank of SVF Band-Pass filters subtracted from noise)
-            for (let bin = 0; bin < numPoints; bin++) {
-                const idx = bin * 4;
-                const suppression = this.spectralData[idx]; // R channel: Suppression amount
-                const qVal = this.spectralData[idx + 1];    // G channel: Width multiplier
-                
-                if (suppression < 0.001) continue;
-                
-                // Frequency mapped to index (consistent with Spectral mode)
-                const normalizedBin = bin / numPoints;
-                const baseFreq = minFreq + freqRange * normalizedBin;
-                const freq = baseFreq * this.frequencyMultiplier;
-                
-                if (freq >= sampleRate * 0.48) continue; // Protect SVF stability
-                
-                // Bandwidth: one bin width scaled by Green channel
-                const widthInBins = qVal * 10 + 0.1;
-                const BW = binWidth * widthInBins;
-                
-                // Q = center_freq / bandwidth
-                const Q = Math.max(0.5, freq / BW);
-                
-                // SVF Coefficients (Standard SVF for subtraction)
-                const f = 2.0 * Math.sin(Math.PI * freq / sampleRate);
-                const q = 1.0 / Q;
-                
-                // SVF Update Equations for Band-Pass
-                this.lowStates[bin] = this.lowStates[bin] + f * this.bandStates[bin];
-                const high = noise - this.lowStates[bin] - q * this.bandStates[bin];
-                const band = f * high + this.bandStates[bin];
-                this.bandStates[bin] = band;
-                
-                // Add to parallel subtraction sum
-                sumSubtracted += band * suppression;
-            }
-            
-            const sample = noise - sumSubtracted;
-            
-            const gain = 0.01; // User adjusted gain
-            channelL[i] = sample * gain;
-            channelR[i] = sample * gain;
-        }
-        
-        return true;
-    }
-}
-registerProcessor('whitenoise-processor', WhitenoiseProcessor);
-`;
+// Vite imports worklet files as URLs for AudioWorklet.addModule()
+import spectralWorkletUrl from './worklets/spectral.worklet.ts?worker&url';
+import chirpSpectralWorkletUrl from './worklets/chirp-spectral.worklet.ts?worker&url';
+import wavetableWorkletUrl from './worklets/wavetable.worklet.ts?worker&url';
+import whitenoiseWorkletUrl from './worklets/whitenoise.worklet.ts?worker&url';
 
 export class AudioEngine {
     private ctx: AudioContext;
     private workletNode: AudioWorkletNode | null = null;
     private isInitialized = false;
-    private currentMode: SynthMode = SynthMode.WAVETABLE; // Default to wavetable
+    private currentMode: SynthMode = SynthMode.WAVETABLE;
 
-    // Buffers for visualization
+    // Visualization buffers
     private timeDomainDataL: Float32Array;
     private timeDomainDataR: Float32Array;
     private frequencyDataL: Float32Array;
@@ -1196,13 +42,9 @@ export class AudioEngine {
     private lastNoteTime = 0;
     private isNoteOn = false;
 
-    // Wavetable frequency (Hz)
+    // Wavetable params
     private wavetableFrequency = 220;
-
-    // Carrier waveform type (0=sine, 1=saw, 2=square, 3=triangle)
     private carrierType = 0;
-
-    // Feedback amount (0-1)
     private feedback = 0;
 
     // Octave doubling state
@@ -1213,7 +55,6 @@ export class AudioEngine {
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
-        // Setup analysis graph
         this.splitNode = this.ctx.createChannelSplitter(2);
         this.analyserL = this.ctx.createAnalyser();
         this.analyserR = this.ctx.createAnalyser();
@@ -1237,40 +78,22 @@ export class AudioEngine {
         if (this.isInitialized) return;
 
         try {
-            // Load all processors
-            const spectralBlob = new Blob([SPECTRAL_PROCESSOR_CODE], { type: 'application/javascript' });
-            const chirpBlob = new Blob([SPECTRAL_PROCESSOR_CODE_CHIRP], { type: 'application/javascript' });
-            const wavetableBlob = new Blob([WAVETABLE_PROCESSOR_CODE], { type: 'application/javascript' });
-            const whitenoiseBlob = new Blob([WHITENOISE_PROCESSOR_CODE], { type: 'application/javascript' });
+            // Load all worklet processors via Vite-provided URLs
+            await this.ctx.audioWorklet.addModule(spectralWorkletUrl);
+            await this.ctx.audioWorklet.addModule(chirpSpectralWorkletUrl);
+            await this.ctx.audioWorklet.addModule(wavetableWorkletUrl);
+            await this.ctx.audioWorklet.addModule(whitenoiseWorkletUrl);
 
-            const spectralUrl = URL.createObjectURL(spectralBlob);
-            const chirpUrl = URL.createObjectURL(chirpBlob);
-            const wavetableUrl = URL.createObjectURL(wavetableBlob);
-            const whitenoiseUrl = URL.createObjectURL(whitenoiseBlob);
-
-            await this.ctx.audioWorklet.addModule(spectralUrl);
-            await this.ctx.audioWorklet.addModule(chirpUrl);
-            await this.ctx.audioWorklet.addModule(wavetableUrl);
-            await this.ctx.audioWorklet.addModule(whitenoiseUrl);
-
-            URL.revokeObjectURL(spectralUrl);
-            URL.revokeObjectURL(chirpUrl);
-            URL.revokeObjectURL(wavetableUrl);
-            URL.revokeObjectURL(whitenoiseUrl);
-
-            // Create initial worklet based on current mode
             this.createWorkletNode();
 
             this.isInitialized = true;
             console.log(`✓ Audio Engine initialized (mode: ${this.currentMode})`);
-
         } catch (e) {
             console.error('Failed to initialize Audio Engine:', e);
         }
     }
 
     private createWorkletNode(): void {
-        // Disconnect existing node if any
         if (this.workletNode) {
             this.workletNode.disconnect();
             this.workletNode = null;
@@ -1284,16 +107,13 @@ export class AudioEngine {
         this.workletNode = new AudioWorkletNode(this.ctx, processorName, {
             numberOfInputs: 0,
             numberOfOutputs: 1,
-            outputChannelCount: [2] // Stereo
+            outputChannelCount: [2]
         });
 
-        // Connect graph
-        // Connect graph
         this.workletNode.connect(this.masterGain);
         this.masterGain.connect(this.ctx.destination);
         this.masterGain.connect(this.splitNode);
 
-        // If wavetable mode, send initial frequency
         if (this.currentMode === SynthMode.WAVETABLE) {
             this.workletNode.port.postMessage({
                 type: 'frequency',
@@ -1301,15 +121,12 @@ export class AudioEngine {
             });
         }
 
-        // Send initial octave doubling settings to the new worklet
-        if (this.workletNode) {
-            this.workletNode.port.postMessage({
-                type: 'octave-doubling',
-                low: this.octaveLow,
-                high: this.octaveHigh,
-                multiplier: this.octaveMult
-            });
-        }
+        this.workletNode.port.postMessage({
+            type: 'octave-doubling',
+            low: this.octaveLow,
+            high: this.octaveHigh,
+            multiplier: this.octaveMult
+        });
     }
 
     public setMode(mode: SynthMode): void {
@@ -1373,11 +190,8 @@ export class AudioEngine {
     }
 
     public updateSpectralData(data: Float32Array): void {
-        if (!this.workletNode || !this.isInitialized) {
-            return;
-        }
+        if (!this.workletNode || !this.isInitialized) return;
 
-        // Send data to worklet (both modes use same message format)
         this.workletNode.port.postMessage({
             type: 'spectral-data',
             data: data
@@ -1417,8 +231,8 @@ export class AudioEngine {
     }
 
     public getScopeData(): { left: Float32Array, right: Float32Array } {
-        this.analyserL.getFloatTimeDomainData(this.timeDomainDataL as any);
-        this.analyserR.getFloatTimeDomainData(this.timeDomainDataR as any);
+        this.analyserL.getFloatTimeDomainData(this.timeDomainDataL as Float32Array<ArrayBuffer>);
+        this.analyserR.getFloatTimeDomainData(this.timeDomainDataR as Float32Array<ArrayBuffer>);
         return {
             left: this.timeDomainDataL,
             right: this.timeDomainDataR
@@ -1426,8 +240,8 @@ export class AudioEngine {
     }
 
     public getAudioSpectralData(): { left: Float32Array, right: Float32Array } {
-        this.analyserL.getFloatFrequencyData(this.frequencyDataL as any);
-        this.analyserR.getFloatFrequencyData(this.frequencyDataR as any);
+        this.analyserL.getFloatFrequencyData(this.frequencyDataL as Float32Array<ArrayBuffer>);
+        this.analyserR.getFloatFrequencyData(this.frequencyDataR as Float32Array<ArrayBuffer>);
         return {
             left: this.frequencyDataL,
             right: this.frequencyDataR
@@ -1463,19 +277,12 @@ export class AudioEngine {
             this.sustain = params.s;
         }
 
-        // Cancel any pending ramps
         this.masterGain.gain.cancelScheduledValues(now);
-
-        // Smooth transition from current value
-        const currentGain = this.masterGain.gain.value; // Approximate, see getGain() for precision
+        const currentGain = this.masterGain.gain.value;
         this.masterGain.gain.setValueAtTime(currentGain, now);
 
-        // Attack ramp
-        // Target peak (1.0 or user defined?) usually 1.0, then decay to Sustain
         const peak = 1.0;
         this.masterGain.gain.linearRampToValueAtTime(peak, now + this.attack);
-
-        // Decay ramp
         this.masterGain.gain.linearRampToValueAtTime(this.sustain, now + this.attack + this.decay);
     }
 
@@ -1485,25 +292,7 @@ export class AudioEngine {
 
         if (r !== undefined) this.release = r;
 
-        // Cancel future
         this.masterGain.gain.cancelScheduledValues(now);
-
-        // We need to ramp from *current* calculated gain to 0
-        // Web Audio's .value attribute is not always the instantaneous ramp value during scheduling
-        // But cancelScheduledValues() sets it to the current scheduled value? 
-        // No, it holds the value at 'now'. 
-        // However, safest to calculate it or just use setTargetAtTime which handles it automatically?
-        // User asked for "green line graph", implies linear release.
-        // linearRampToValueAtTime requires a starting point.
-
-        // Let's rely on browser behavior: 
-        // cancelScheduledValues(now) -> the param value becomes constant at the value it had at 'now'.
-        // So we just ramp from there.
-        // Wait, if we are in middle of attack, 'value' might jump?
-        // Actually, strictly speaking `setValueAtTime(this.masterGain.gain.value, now)` is needed to anchor it.
-        // But reading `.value` during automation is spec'd to return the automated value?
-        // "If the AudioParam is being automated, the value property returns the current value of the parameter." (MDN)
-
         const currentGain = this.masterGain.gain.value;
         this.masterGain.gain.setValueAtTime(currentGain, now);
         this.masterGain.gain.linearRampToValueAtTime(0, now + this.release);
@@ -1547,27 +336,11 @@ export class AudioEngine {
 
         const offlineCtx = new OfflineAudioContext(2, lengthSamples, offlineSampleRate);
 
-        // Load processors into offline context
-        const spectralBlob = new Blob([SPECTRAL_PROCESSOR_CODE], { type: 'application/javascript' });
-        const wavetableBlob = new Blob([WAVETABLE_PROCESSOR_CODE], { type: 'application/javascript' });
-        const whitenoiseBlob = new Blob([WHITENOISE_PROCESSOR_CODE], { type: 'application/javascript' });
-
-        const spectralUrl = URL.createObjectURL(spectralBlob);
-        const wavetableUrl = URL.createObjectURL(wavetableBlob);
-        const whitenoiseUrl = URL.createObjectURL(whitenoiseBlob);
-
-        const chirpBlob = new Blob([SPECTRAL_PROCESSOR_CODE_CHIRP], { type: 'application/javascript' });
-        const chirpUrl = URL.createObjectURL(chirpBlob);
-
-        await offlineCtx.audioWorklet.addModule(spectralUrl);
-        await offlineCtx.audioWorklet.addModule(chirpUrl);
-        await offlineCtx.audioWorklet.addModule(wavetableUrl);
-        await offlineCtx.audioWorklet.addModule(whitenoiseUrl);
-
-        URL.revokeObjectURL(spectralUrl);
-        URL.revokeObjectURL(chirpUrl);
-        URL.revokeObjectURL(wavetableUrl);
-        URL.revokeObjectURL(whitenoiseUrl);
+        // Load processors into offline context via URL imports
+        await offlineCtx.audioWorklet.addModule(spectralWorkletUrl);
+        await offlineCtx.audioWorklet.addModule(chirpSpectralWorkletUrl);
+        await offlineCtx.audioWorklet.addModule(wavetableWorkletUrl);
+        await offlineCtx.audioWorklet.addModule(whitenoiseWorkletUrl);
 
         let processorName = 'wavetable-processor';
         if (params.mode === SynthMode.SPECTRAL) processorName = 'spectral-processor';
@@ -1600,13 +373,12 @@ export class AudioEngine {
             node.port.postMessage({ type: 'carrier', value: params.wavetableParams.carrier });
             node.port.postMessage({ type: 'feedback', value: params.wavetableParams.feedback });
         } else {
-            // Spectral modes use multiplier
             const targetFreq = 440 * Math.pow(2, (note - 69) / 12);
             const rootFreq = 440;
             node.port.postMessage({ type: 'frequency-multiplier', value: targetFreq / rootFreq });
         }
 
-        // Send spectral data - either as timeline (for LFO simulation) or single frame
+        // Send spectral data
         if (params.timeline) {
             node.port.postMessage({
                 type: 'spectral-timeline',
@@ -1620,20 +392,19 @@ export class AudioEngine {
             node.port.postMessage({ type: 'spectral-data', data: spectralDataOrTimeline });
         }
 
-        // Wait for worklet to acknowledge spectral data is loaded before rendering
+        // Wait for worklet ready
         await new Promise<void>((resolve) => {
             node.port.onmessage = (e) => {
                 if (e.data.type === 'ready') resolve();
             };
         });
 
-        // Trigger Envelope
+        // Envelope automation
         const now = 0;
         masterGain.gain.setValueAtTime(0, now);
         masterGain.gain.linearRampToValueAtTime(1.0, now + this.attack);
         masterGain.gain.linearRampToValueAtTime(this.sustain, now + this.attack + this.decay);
 
-        // Release
         const releaseStart = duration;
         masterGain.gain.setValueAtTime(this.sustain, releaseStart);
         masterGain.gain.linearRampToValueAtTime(0, releaseStart + this.release);
@@ -1647,45 +418,9 @@ export class AudioEngine {
         const length = buffer.length * numOfChan * 2 + 44;
         const out = new ArrayBuffer(length);
         const view = new DataView(out);
-        const channels = [];
-        let i;
-        let sample;
+        const channels: Float32Array[] = [];
         let offset = 0;
         let pos = 0;
-
-        // write WAVE header
-        setUint32(0x46464952);                         // "RIFF"
-        setUint32(length - 8);                         // file length - 8
-        setUint32(0x45564157);                         // "WAVE"
-
-        setUint32(0x20746d66);                         // "fmt " chunk
-        setUint32(16);                                 // length = 16
-        setUint16(1);                                  // PCM (uncompressed)
-        setUint16(numOfChan);
-        setUint32(buffer.sampleRate);
-        setUint32(buffer.sampleRate * 2 * numOfChan);  // avg. bytes/sec
-        setUint16(numOfChan * 2);                      // block-align
-        setUint16(16);                                 // 16-bit (hardcoded)
-
-        setUint32(0x61746164);                         // "data" - chunk
-        setUint32(length - pos - 4);                   // chunk length
-
-        // write interleaved data
-        for (i = 0; i < buffer.numberOfChannels; i++) {
-            channels.push(buffer.getChannelData(i));
-        }
-
-        while (pos < length) {
-            for (i = 0; i < numOfChan; i++) {             // interleave channels
-                sample = Math.max(-1, Math.min(1, channels[i][offset])); // clamp
-                sample = (sample < 0 ? sample * 0x8000 : sample * 0x7FFF) | 0; // scale to 16-bit signed int
-                view.setInt16(pos, sample, true);          // write 16-bit sample
-                pos += 2;
-            }
-            offset++;                                     // next source sample
-        }
-
-        return new Blob([out], { type: 'audio/wav' });
 
         function setUint16(data: number) {
             view.setUint16(pos, data, true);
@@ -1696,5 +431,38 @@ export class AudioEngine {
             view.setUint32(pos, data, true);
             pos += 4;
         }
+
+        // WAVE header
+        setUint32(0x46464952);  // "RIFF"
+        setUint32(length - 8);
+        setUint32(0x45564157);  // "WAVE"
+
+        setUint32(0x20746d66);  // "fmt "
+        setUint32(16);
+        setUint16(1);           // PCM
+        setUint16(numOfChan);
+        setUint32(buffer.sampleRate);
+        setUint32(buffer.sampleRate * 2 * numOfChan);
+        setUint16(numOfChan * 2);
+        setUint16(16);          // 16-bit
+
+        setUint32(0x61746164);  // "data"
+        setUint32(length - pos - 4);
+
+        for (let i = 0; i < buffer.numberOfChannels; i++) {
+            channels.push(buffer.getChannelData(i));
+        }
+
+        while (pos < length) {
+            for (let i = 0; i < numOfChan; i++) {
+                let sample = Math.max(-1, Math.min(1, channels[i][offset]));
+                sample = (sample < 0 ? sample * 0x8000 : sample * 0x7FFF) | 0;
+                view.setInt16(pos, sample, true);
+                pos += 2;
+            }
+            offset++;
+        }
+
+        return new Blob([out], { type: 'audio/wav' });
     }
 }
