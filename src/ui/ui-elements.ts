@@ -79,7 +79,9 @@ export function createSlider(
     value: number,
     step: number,
     onInput?: (val: number) => void,
-    mode: 'slider' | 'knob' = CONTROL_STYLE
+    mode: 'slider' | 'knob' = CONTROL_STYLE,
+    scale: 'linear' | 'logarithmic' = 'linear',
+    precision: number = 2
 ): HTMLInputElement {
     const group = document.createElement('div');
     group.className = 'control-group';
@@ -91,24 +93,192 @@ export function createSlider(
     valueDisplay.className = 'value-display';
     valueDisplay.id = `${id}-value`;
     const updateDisplay = (val: number) => {
-        valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
+        valueDisplay.textContent = val.toFixed(precision);
     };
     updateDisplay(value);
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.id = id;
-    slider.min = String(min);
-    slider.max = String(max);
-    slider.value = String(value);
-    slider.step = String(step);
+
+    // For logarithmic, we need a positive minimum for the log math. If 0 is provided, use an epsilon.
+    const effectiveMin = (scale === 'logarithmic' && min === 0) ? 0.001 : min;
+    const isLog = scale === 'logarithmic' && effectiveMin > 0 && max > effectiveMin;
+
+    (slider as any).isLogarithmic = isLog;
+    (slider as any).precision = precision;
+    (slider as any).realMin = min;
+    (slider as any).realMax = max;
+    (slider as any).realStep = step;
+
+    if (isLog) {
+        slider.min = '0';
+        slider.max = '1';
+        slider.step = 'any';
+        // Initial normalized pos
+        const initialP = value <= 0 ? 0 : (Math.log10(Math.max(effectiveMin, value)) - Math.log10(effectiveMin)) / (Math.log10(max) - Math.log10(effectiveMin));
+        slider.value = String(Math.max(0, Math.min(1, initialP)));
+    } else {
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+        slider.value = String(value);
+    }
+
     slider.className = 'slider';
+
+    const getActualValue = (normVal: number) => {
+        if (!isLog) return normVal;
+        if (normVal <= 0.005 && min === 0) return 0; // Snap bottom slice to 0
+        const logMin = Math.log10(effectiveMin);
+        const logMax = Math.log10(max);
+        return Math.pow(10, logMin + normVal * (logMax - logMin));
+    };
+
     slider.addEventListener('input', () => {
-        const val = parseFloat(slider.value);
+        const val = getActualValue(parseFloat(slider.value));
         updateDisplay(val);
         if (onInput) onInput(val);
     });
+
+    // Wrap value property to handle actual values transparently
+    const originalValueDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    Object.defineProperty(slider, 'value', {
+        get: function () {
+            const v = originalValueDescriptor!.get!.call(this);
+            return String(getActualValue(parseFloat(v)));
+        },
+        set: function (v) {
+            const num = parseFloat(v);
+            let valToSet: string;
+            if (isLog) {
+                if (num <= 0) {
+                    valToSet = '0';
+                } else {
+                    const logMin = Math.log10(effectiveMin);
+                    const logMax = Math.log10(max);
+                    const p = (Math.log10(Math.max(effectiveMin, num)) - logMin) / (logMax - logMin);
+                    valToSet = String(Math.max(0, Math.min(1, p)));
+                }
+            } else {
+                valToSet = String(num);
+            }
+            originalValueDescriptor!.set!.call(this, valToSet);
+            updateDisplay(num);
+            if ((this as any).updateKnob) (this as any).updateKnob();
+        },
+        configurable: true
+    });
+
     if (mode === 'knob') {
         slider.style.display = 'none';
+        group.appendChild(slider); // Append even if hidden so parentElement works
+        group.appendChild(labelEl);
+        group.appendChild(createKnobElement(slider));
+        group.appendChild(valueDisplay);
+    } else {
+        const labelRow = document.createElement('div');
+        labelRow.className = 'label-row';
+        labelRow.appendChild(labelEl);
+        labelRow.appendChild(valueDisplay);
+        group.appendChild(labelRow);
+        group.appendChild(slider);
+    }
+    parent.appendChild(group);
+    return slider;
+}
+
+/**
+ * Creates a discrete value slider (e.g. for beat divisions).
+ */
+export function createEnumSlider(
+    parent: HTMLElement,
+    id: string,
+    label: string,
+    options: string[],
+    initialValue: string,
+    onInput?: (val: string) => void,
+    mode: 'slider' | 'knob' = CONTROL_STYLE,
+    displayFormatter?: (val: string) => string
+): HTMLInputElement {
+    const group = document.createElement('div');
+    group.className = 'control-group';
+    if (mode === 'knob') group.classList.add('knob-centered');
+
+    const labelEl = document.createElement('label');
+    labelEl.htmlFor = id;
+    labelEl.textContent = label;
+
+    const valueDisplay = document.createElement('span');
+    valueDisplay.className = 'value-display';
+    valueDisplay.id = `${id}-value`;
+
+    const updateDisplay = (idx: number) => {
+        const val = options[idx] || '';
+        valueDisplay.textContent = displayFormatter ? displayFormatter(val) : val;
+    };
+
+    const initialIdx = options.indexOf(initialValue);
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.id = id;
+    slider.min = '0';
+    slider.max = String(options.length - 1);
+    slider.step = '1';
+    slider.value = String(initialIdx >= 0 ? initialIdx : 0);
+    slider.className = 'slider';
+
+    const sliderAny = slider as any;
+    sliderAny.isEnum = true;
+    sliderAny.enumOptions = options;
+    sliderAny._enumIdx = initialIdx >= 0 ? initialIdx : 0;
+
+    updateDisplay(sliderAny._enumIdx);
+
+    // Get the original value descriptor for HTMLInputElement.prototype.value
+    const originalValueDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!;
+
+    slider.addEventListener('input', () => {
+        // Use the raw range input value (which is always the index)
+        const rawVal = originalValueDescriptor.get!.call(slider);
+        const idx = parseInt(rawVal);
+        if (!isNaN(idx)) {
+            sliderAny._enumIdx = idx;
+            updateDisplay(idx);
+            if (onInput) onInput(options[idx]);
+        }
+    });
+
+    // Wrap value property to handle strings
+    Object.defineProperty(slider, 'value', {
+        get: function () {
+            return options[this._enumIdx] || '';
+        },
+        set: function (v) {
+            let idx = options.indexOf(v);
+            if (idx === -1) {
+                // If not a string option, check if it's a numeric index
+                const num = parseInt(v);
+                if (!isNaN(num) && String(num) === String(v)) {
+                    idx = num;
+                }
+            }
+
+            if (idx >= 0 && idx < options.length) {
+                this._enumIdx = idx;
+                originalValueDescriptor.set!.call(this, String(idx));
+                updateDisplay(idx);
+                if (this.updateKnob) this.updateKnob();
+            }
+        },
+        configurable: true
+    });
+
+    // Initialize the range value
+    originalValueDescriptor.set!.call(slider, String(sliderAny._enumIdx));
+
+    if (mode === 'knob') {
+        slider.style.display = 'none';
+        group.appendChild(slider); // Append even if hidden so parentElement works
         group.appendChild(labelEl);
         group.appendChild(createKnobElement(slider));
         group.appendChild(valueDisplay);
@@ -170,26 +340,59 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
 
     const updateKnob = () => {
         const val = parseFloat(input.value);
-        const min = parseFloat(input.min);
-        const max = parseFloat(input.max);
-        const percent = (val - min) / (max - min);
+        const inputAny = input as any;
+        const isLog = inputAny.isLogarithmic;
+        const realMin = inputAny.realMin;
+        const realMax = inputAny.realMax;
+        const effectiveMin = (isLog && realMin === 0) ? 0.001 : realMin;
+        const max = isLog ? realMax : parseFloat(input.max);
+
+        let percent: number;
+        if (inputAny.isEnum) {
+            const idx = inputAny._enumIdx ?? 0;
+            const maxIdx = parseFloat(input.max);
+            percent = maxIdx > 0 ? idx / maxIdx : 0;
+        } else if (isLog) {
+            // value is already actual. Convert to normalized 0-1
+            if (val <= 0) {
+                percent = 0;
+            } else {
+                const logMin = Math.log10(effectiveMin);
+                const logMax = Math.log10(max);
+                percent = (Math.log10(val) - logMin) / (logMax - logMin);
+            }
+        } else {
+            const minAttr = parseFloat(input.min);
+            const maxAttr = parseFloat(input.max);
+            percent = (val - minAttr) / (maxAttr - minAttr);
+        }
+        percent = Math.max(0, Math.min(1, percent));
 
         // Update value arc
         const endAngle = 225 + percent * 270;
         valueArc.setAttribute('d', describeArc(24, 24, 18, 225, endAngle));
 
         // Update modulation range arc
-        const inputAny = input as any;
         if (inputAny.hasModulation) {
             const offset = typeof inputAny.modOffset === 'number' ? inputAny.modOffset : 0;
             const amp = typeof inputAny.modAmplitude === 'number' ? inputAny.modAmplitude : 0;
 
-            // start = offset - 0.5 * amp, end = offset + 0.5 * amp
             const startVal = offset - amp;
             const endVal = offset + amp;
 
-            const startP = (startVal - min) / (max - min);
-            const endP = (endVal - min) / (max - min);
+            let startP: number, endP: number;
+            if (isLog) {
+                const logMin = Math.log10(effectiveMin);
+                const logMax = Math.log10(realMax);
+                const logRange = logMax - logMin;
+                startP = (startVal <= 0) ? 0 : (Math.log10(Math.max(effectiveMin, startVal)) - logMin) / logRange;
+                endP = (endVal <= 0) ? 0 : (Math.log10(Math.max(effectiveMin, endVal)) - logMin) / logRange;
+            } else {
+                const minAttr = parseFloat(input.min);
+                const maxAttr = parseFloat(input.max);
+                startP = (startVal - minAttr) / (maxAttr - minAttr);
+                endP = (endVal - minAttr) / (maxAttr - minAttr);
+            }
 
             const sAngle = 225 + Math.max(0, Math.min(1, startP)) * 270;
             const eAngle = 225 + Math.max(0, Math.min(1, endP)) * 270;
@@ -224,23 +427,69 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
         if (input.disabled) return;
         isDragging = true;
         startY = e.clientY;
-        startVal = parseFloat(input.value);
+        const inputAny = input as any;
+        startVal = inputAny.isEnum ? (inputAny._enumIdx ?? 0) : parseFloat(input.value);
         document.body.style.cursor = 'ns-resize';
 
         const onMouseMove = (moveEvent: MouseEvent) => {
             if (!isDragging) return;
             const deltaY = startY - moveEvent.clientY;
-            const range = parseFloat(input.max) - parseFloat(input.min);
-            const sensitivity = range / 200; // 200px for full range
-            let newVal = startVal + deltaY * sensitivity;
 
-            const step = parseFloat(input.step) || 0.01;
-            newVal = Math.round(newVal / step) * step;
-            newVal = Math.max(parseFloat(input.min), Math.min(parseFloat(input.max), newVal));
+            // Interaction is always normalized 0-1
+            const deltaP = deltaY / 200;
 
-            input.value = String(newVal);
+            const inputAny = input as any;
+            const isLog = inputAny.isLogarithmic;
+            const realMin = inputAny.realMin;
+            const realMax = inputAny.realMax;
+            const effectiveMin = (isLog && realMin === 0) ? 0.001 : realMin;
+            const max = isLog ? realMax : parseFloat(input.max);
+            const realStep = inputAny.realStep || 0.001;
+
+            let newVal: number;
+            if (inputAny.isEnum) {
+                const maxIdx = parseFloat(input.max);
+                // Discrete steps
+                newVal = Math.round(startVal + deltaP * maxIdx);
+                newVal = Math.max(0, Math.min(maxIdx, newVal));
+
+                // Set normalized value to input
+                input.value = inputAny.enumOptions[newVal];
+            } else if (isLog) {
+                const logMin = Math.log10(effectiveMin);
+                const logMax = Math.log10(max);
+                const logRange = logMax - logMin;
+
+                // Get current P
+                let startP: number;
+                if (startVal <= 0) {
+                    startP = 0;
+                } else {
+                    startP = (Math.log10(Math.max(effectiveMin, startVal)) - logMin) / logRange;
+                }
+
+                const newP = Math.max(0, Math.min(1, startP + deltaP));
+                newVal = Math.pow(10, logMin + newP * logRange);
+
+                // Zero snapping
+                if (newP < 0.005 && realMin === 0) newVal = 0;
+                input.value = String(newVal);
+            } else {
+                const min = parseFloat(input.min);
+                const maxVal = parseFloat(input.max);
+                const step = realStep;
+                newVal = startVal + deltaP * (maxVal - min);
+                newVal = Math.round(newVal / step) * step;
+                newVal = Math.max(min, Math.min(maxVal, newVal));
+                input.value = String(newVal);
+            }
+
+            // For enum, input.value returns label but onInput needs label too?
+            // Actually input.value is wrapped to return actual value.
+            // But createSlider's onInput expects numeric value.
+            // createEnumSlider's onInput (defined below) expects string.
+            // Let's rely on the input listener in factory functions.
             input.dispatchEvent(new Event('input'));
-            updateKnob();
         };
 
         const onMouseUp = () => {
@@ -258,19 +507,8 @@ function createKnobElement(input: HTMLInputElement): HTMLElement {
     const observer = new MutationObserver(() => updateKnob());
     observer.observe(input, { attributes: true, attributeFilter: ['value', 'disabled'] });
 
-    // Also poll/check for value changes if MutationObserver doesn't catch .value assignment
-    // (In many cases, setting .value doesn't trigger MutationObserver)
-    const originalValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    if (originalValueSetter) {
-        Object.defineProperty(input, 'value', {
-            set: function (v) {
-                originalValueSetter.call(this, v);
-                updateKnob();
-            },
-            get: Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.get,
-            configurable: true
-        });
-    }
+    // Poll/check for value changes if MutationObserver doesn't catch .value assignment
+    // Factories (createSlider/createEnumSlider) already override value setter to call updateKnob.
 
     (input as any).updateKnob = updateKnob;
     updateKnob();
@@ -382,7 +620,9 @@ export function createModulatableSlider(
     lfoLabels: { value: string, label: string }[],
     onSliderInput: (val: number) => void,
     onSourceChange: (source: string) => void,
-    mode: 'slider' | 'knob' = CONTROL_STYLE
+    mode: 'slider' | 'knob' = CONTROL_STYLE,
+    scale: 'linear' | 'logarithmic' = 'linear',
+    precision: number = 2
 ): { slider: HTMLInputElement, select: HTMLSelectElement } {
     const group = document.createElement('div');
     group.className = 'control-group';
@@ -403,19 +643,78 @@ export function createModulatableSlider(
     valueDisplay.className = 'value-display';
     valueDisplay.id = `${id}-value`;
     const updateDisplay = (val: number) => {
-        valueDisplay.textContent = step >= 1 ? String(Math.round(val)) : val.toFixed(2);
+        valueDisplay.textContent = val.toFixed(precision);
     };
     updateDisplay(value);
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.id = id;
-    slider.min = String(min);
-    slider.max = String(max);
-    slider.value = String(value);
-    slider.step = String(step);
+
+    // For logarithmic, we need a positive minimum for the log math. If 0 is provided, use an epsilon.
+    const effectiveMin = (scale === 'logarithmic' && min === 0) ? 0.001 : min;
+    const isLog = scale === 'logarithmic' && effectiveMin > 0 && max > effectiveMin;
+
+    (slider as any).isLogarithmic = isLog;
+    (slider as any).precision = precision;
+    (slider as any).realMin = min;
+    (slider as any).realMax = max;
+    (slider as any).realStep = step;
+
+    if (isLog) {
+        slider.min = '0';
+        slider.max = '1';
+        slider.step = 'any';
+        // Initial normalized pos
+        const initialP = value <= 0 ? 0 : (Math.log10(Math.max(effectiveMin, value)) - Math.log10(effectiveMin)) / (Math.log10(max) - Math.log10(effectiveMin));
+        slider.value = String(Math.max(0, Math.min(1, initialP)));
+    } else {
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+        slider.value = String(value);
+    }
+
     slider.className = 'slider';
+
+    const getActualValue = (normVal: number) => {
+        if (!isLog) return normVal;
+        if (normVal <= 0.005 && min === 0) return 0; // Snap bottom slice to 0
+        const logMin = Math.log10(effectiveMin);
+        const logMax = Math.log10(max);
+        return Math.pow(10, logMin + normVal * (logMax - logMin));
+    };
+
+    // Wrap value property to handle actual values transparently
+    const originalValueDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    Object.defineProperty(slider, 'value', {
+        get: function () {
+            const v = originalValueDescriptor!.get!.call(this);
+            return String(getActualValue(parseFloat(v)));
+        },
+        set: function (v) {
+            const num = parseFloat(v);
+            let valToSet: string;
+            if (isLog) {
+                if (num <= 0) {
+                    valToSet = '0';
+                } else {
+                    const logMin = Math.log10(effectiveMin);
+                    const logMax = Math.log10(max);
+                    const p = (Math.log10(Math.max(effectiveMin, num)) - logMin) / (logMax - logMin);
+                    valToSet = String(Math.max(0, Math.min(1, p)));
+                }
+            } else {
+                valToSet = String(num);
+            }
+            originalValueDescriptor!.set!.call(this, valToSet);
+            updateDisplay(num);
+            if ((this as any).updateKnob) (this as any).updateKnob();
+        },
+        configurable: true
+    });
+
     slider.addEventListener('input', () => {
-        const val = parseFloat(slider.value);
+        const val = getActualValue(parseFloat(slider.value));
         updateDisplay(val);
         onSliderInput(val);
     });
@@ -555,7 +854,7 @@ export interface ProgressUI {
     text: HTMLElement;
     show: () => void;
     hide: () => void;
-    update: (percent: number) => void;
+    update: (percent: number, statusText?: string) => void;
 }
 
 /**
@@ -589,10 +888,10 @@ export function createProgressUI(parent: HTMLElement): ProgressUI {
         text,
         show: () => { container.style.display = 'flex'; },
         hide: () => { container.style.display = 'none'; },
-        update: (percent: number) => {
+        update: (percent: number, statusText?: string) => {
             const p = Math.max(0, Math.min(100, percent));
             fill.style.width = `${p}%`;
-            text.textContent = `${Math.round(p)}%`;
+            text.textContent = statusText || `${Math.round(p)}%`;
         }
     };
 }
