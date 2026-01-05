@@ -36,18 +36,18 @@
 ### Harmonics section to UI and audio engine
 
 #### Spectral (Frequency-Domain) Methods
-- [ ] **Additive harmonic injection**
+- [x] **Additive harmonic injection**
       *→ in worklet: loop `bin = fundamental * n` for n=1..N, add magnitude*
-  - [ ] Add energy at integer multiples of fundamental in spectrum
-  - [ ] Harmonic count control (1–32 partials)
-  - [ ] Per-harmonic amplitude falloff curve (e.g. 1/n, 1/n², custom)
-  - [ ] Limit harmonics below Nyquist to avoid aliasing
+  - [x] Add energy at integer multiples of fundamental in spectrum
+  - [x] Harmonic count control (1–32 partials)
+  - [x] Per-harmonic amplitude falloff curve (e.g. 1/n, 1/n², custom)
+  - [x] Limit harmonics below Nyquist to avoid aliasing
         *→ `maxHarmonic = floor(nyquist / fundamental)`*
-- [ ] **Spectral copying / scaling**
+- [x] **Spectral copying / scaling**
       *→ read bins 0..k, write to bins k..2k with scaling*
-  - [ ] Duplicate low-frequency spectrum regions
-  - [ ] Shift or scale copied regions upward
-  - [ ] Blend control for copied partials
+  - [x] Duplicate low-frequency spectrum regions
+  - [x] Shift or scale copied regions upward
+  - [x] Blend control for copied partials
 - [ ] **Spectral shaping**
       *→ apply curve to magnitude array before IFFT*
   - [ ] Apply nonlinear curves to spectral magnitudes

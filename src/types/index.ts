@@ -90,6 +90,28 @@ export const defaultOctaveDoublingState: OctaveDoublingState = {
     multiplier: 0.5
 };
 
+// Harmonic Injection state
+export interface HarmonicInjectionState {
+    count: number;     // 0-32, number of harmonics to inject
+    falloff: number;   // 0.0-5.0, amplitude decay exponent (1/n^falloff)
+}
+
+export const defaultHarmonicInjectionState: HarmonicInjectionState = {
+    count: 0,
+    falloff: 1.0
+};
+
+// Spectral Copy / Shift state
+export interface SpectralCopyState {
+    shift: number;      // Semitones (or bins depending on mode), -24 to +24
+    mix: number;        // 0.0-1.0, blend amount
+}
+
+export const defaultSpectralCopyState: SpectralCopyState = {
+    shift: 12,
+    mix: 0.0
+};
+
 // Generator parameter interfaces
 export interface JuliaParams {
     scale: number;      // 0.5 - 2.0, default 1.2
@@ -149,6 +171,8 @@ export interface PresetControls {
     modRouting: { pathY: string; scanPhase: string; shapePhase: string };
     octave: number;
     octaveDoubling?: OctaveDoublingState;
+    harmonicInjection?: HarmonicInjectionState;
+    spectralCopy?: SpectralCopyState;
     interpSamples: number;
     bpm: number;
 }

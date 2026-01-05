@@ -62,63 +62,103 @@ class SpectralProcessor extends AudioWorkletProcessor {
     private timelineTotalSamples = 0;
     private sampleCount = 0;
 
+    // Harmonic Injection
+    private harmonicCount = 0;
+    private harmonicFalloff = 1.0;
+    private harmonicPhasesExtra = new Float32Array(1024 * 32);
+    // We use a separate array for injected harmonics to avoid touching the octave ones
+
+    // Spectral Copy
+    private spectralCopyShift = 12; // Semitones
+    private spectralCopyMix = 0.0;
+    private spectralCopyPhases = new Float32Array(1024);
+
+
     constructor() {
         super();
         this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
 
         this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-timeline') {
-                this.timeline = e.data.frames;
-                this.timelineFrameSize = e.data.frameSize;
-                this.timelineNumFrames = e.data.numFrames;
-                this.timelineTotalSamples = e.data.totalSamples;
-                this.sampleCount = 0;
-                const numPoints = this.timelineFrameSize / 4;
-                if (this.harmonicPhases.length !== numPoints * 20) {
-                    this.harmonicPhases = new Float32Array(numPoints * 20);
-                }
-                for (let i = 0; i < this.timelineFrameSize; i++) {
-                    this.spectralData[i] = this.timeline![i];
-                }
-                for (let bin = 0; bin < numPoints; bin++) {
-                    this.currentPhaseOffsets[bin] = this.timeline![bin * 4 + 1];
-                }
-                this.port.postMessage({ type: 'ready' });
-            } else if (e.data.type === 'spectral-data') {
-                const data = e.data.data;
-                const numPoints = data.length / 4;
-
-                if (this.harmonicPhases.length !== numPoints * 20) {
-                    this.harmonicPhases = new Float32Array(numPoints * 20);
-                }
-
-                if (this.interpSamples === 0) {
-                    this.spectralData.set(data);
-                    this.targetData.set(data);
+            switch (e.data.type) {
+                case 'spectral-timeline': {
+                    this.timeline = e.data.frames;
+                    this.timelineFrameSize = e.data.frameSize;
+                    this.timelineNumFrames = e.data.numFrames;
+                    this.timelineTotalSamples = e.data.totalSamples;
+                    this.sampleCount = 0;
+                    const numPoints = this.timelineFrameSize / 4;
+                    if (this.harmonicPhases.length !== numPoints * 20) {
+                        this.harmonicPhases = new Float32Array(numPoints * 20);
+                    }
+                    if (this.harmonicPhasesExtra.length !== numPoints * 32) {
+                        this.harmonicPhasesExtra = new Float32Array(numPoints * 32);
+                    }
+                    if (this.spectralCopyPhases.length !== numPoints) {
+                        this.spectralCopyPhases = new Float32Array(numPoints);
+                    }
+                    for (let i = 0; i < this.timelineFrameSize; i++) {
+                        this.spectralData[i] = this.timeline![i];
+                    }
                     for (let bin = 0; bin < numPoints; bin++) {
-                        const offset = data[bin * 4 + 1];
-                        this.currentPhaseOffsets[bin] = offset;
-                        this.targetPhaseOffsets[bin] = offset;
+                        this.currentPhaseOffsets[bin] = this.timeline![bin * 4 + 1];
                     }
                     this.port.postMessage({ type: 'ready' });
-                } else {
-                    this.prevData.set(this.spectralData);
-                    this.prevPhaseOffsets.set(this.currentPhaseOffsets);
-                    this.targetData.set(data);
-                    for (let bin = 0; bin < numPoints; bin++) {
-                        this.targetPhaseOffsets[bin] = data[bin * 4 + 1];
-                    }
-                    this.interpT = 0.0;
+                    break;
                 }
-            } else if (e.data.type === 'frequency-multiplier') {
-                this.frequencyMultiplier = e.data.value;
-            } else if (e.data.type === 'octave-doubling') {
-                this.octaveLow = e.data.low;
-                this.octaveHigh = e.data.high;
-                this.octaveMult = e.data.multiplier;
-            } else if (e.data.type === 'interp-samples') {
-                this.interpSamples = e.data.value;
-                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+                case 'spectral-data': {
+                    const data = e.data.data;
+                    const numPoints = data.length / 4;
+
+                    if (this.harmonicPhases.length !== numPoints * 20) {
+                        this.harmonicPhases = new Float32Array(numPoints * 20);
+                    }
+                    if (this.harmonicPhasesExtra.length !== numPoints * 32) {
+                        this.harmonicPhasesExtra = new Float32Array(numPoints * 32);
+                    }
+                    if (this.spectralCopyPhases.length !== numPoints) {
+                        this.spectralCopyPhases = new Float32Array(numPoints);
+                    }
+
+                    if (this.interpSamples === 0) {
+                        this.spectralData.set(data);
+                        this.targetData.set(data);
+                        for (let bin = 0; bin < numPoints; bin++) {
+                            const offset = data[bin * 4 + 1];
+                            this.currentPhaseOffsets[bin] = offset;
+                            this.targetPhaseOffsets[bin] = offset;
+                        }
+                        this.port.postMessage({ type: 'ready' });
+                    } else {
+                        this.prevData.set(this.spectralData);
+                        this.prevPhaseOffsets.set(this.currentPhaseOffsets);
+                        this.targetData.set(data);
+                        for (let bin = 0; bin < numPoints; bin++) {
+                            this.targetPhaseOffsets[bin] = data[bin * 4 + 1];
+                        }
+                        this.interpT = 0.0;
+                    }
+                    break;
+                }
+                case 'frequency-multiplier':
+                    this.frequencyMultiplier = e.data.value;
+                    break;
+                case 'octave-doubling':
+                    this.octaveLow = e.data.low;
+                    this.octaveHigh = e.data.high;
+                    this.octaveMult = e.data.multiplier;
+                    break;
+                case 'harmonic-injection':
+                    this.harmonicCount = e.data.count;
+                    this.harmonicFalloff = e.data.falloff;
+                    break;
+                case 'interp-samples':
+                    this.interpSamples = e.data.value;
+                    this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+                    break;
+                case 'spectral-copy':
+                    this.spectralCopyShift = e.data.shift;
+                    this.spectralCopyMix = e.data.mix;
+                    break;
             }
         };
     }
@@ -200,19 +240,18 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 const baseGainL = Math.min(1, 1 - p) * linearMag;
                 const baseGainR = Math.min(1, 1 + p) * linearMag;
 
-                // Helper to generate oscillator at given frequency with gain
-                const generateOsc = (oscFreq: number, gain: number, phaseIdx: number) => {
+                const generateOsc = (oscFreq: number, gain: number, phaseIdx: number, phasesArray: Float32Array) => {
                     if (gain < 0.001) return;
                     const nf = oscFreq / nyquist;
                     if (nf >= 1.0) return;
                     const rf = computeRolloff(nf, ROLLOFF_MODE);
                     if (rf < 0.001) return;
 
-                    this.harmonicPhases[phaseIdx] += (oscFreq * PI2_SR);
-                    if (this.harmonicPhases[phaseIdx] > PI2) {
-                        this.harmonicPhases[phaseIdx] -= PI2;
+                    phasesArray[phaseIdx] += (oscFreq * PI2_SR);
+                    if (phasesArray[phaseIdx] > PI2) {
+                        phasesArray[phaseIdx] -= PI2;
                     }
-                    const sample = Math.sin(this.harmonicPhases[phaseIdx] + phaseOffset * PI2);
+                    const sample = Math.sin(phasesArray[phaseIdx] + phaseOffset * PI2);
                     sumL += sample * baseGainL * gain * rf;
                     sumR += sample * baseGainR * gain * rf;
                 };
@@ -233,7 +272,7 @@ class SpectralProcessor extends AudioWorkletProcessor {
                     const harmFreq = freq / Math.pow(2, h);
                     if (harmFreq < 20) break;
                     const phaseIdx = bin * 20 + (h - 1);
-                    generateOsc(harmFreq, harmGain, phaseIdx);
+                    generateOsc(harmFreq, harmGain, phaseIdx, this.harmonicPhases);
                     harmGain *= this.octaveMult;
                 }
 
@@ -242,8 +281,32 @@ class SpectralProcessor extends AudioWorkletProcessor {
                 for (let h = 1; h <= this.octaveHigh; h++) {
                     const harmFreq = freq * Math.pow(2, h);
                     const phaseIdx = bin * 20 + 10 + (h - 1);
-                    generateOsc(harmFreq, harmGain, phaseIdx);
+                    generateOsc(harmFreq, harmGain, phaseIdx, this.harmonicPhases);
                     harmGain *= this.octaveMult;
+                }
+
+                // Integer Harmonics (Injection)
+                if (this.harmonicCount > 0) {
+                    for (let h = 2; h <= this.harmonicCount + 1; h++) {
+                        const harmFreq = freq * h;
+                        const gain = Math.pow(h, -this.harmonicFalloff);
+                        // We use a separate phase space, allocating 32 slots per bin
+                        // Indexing: bin * 32 + (h - 2)
+                        const phaseIdx = bin * 32 + (h - 2);
+                        if (phaseIdx < this.harmonicPhasesExtra.length) {
+                            generateOsc(harmFreq, gain, phaseIdx, this.harmonicPhasesExtra);
+                        }
+                    }
+                }
+
+                // Spectral Copy (Shifted Layer)
+                if (this.spectralCopyMix > 0.001) {
+                    const shiftScale = Math.pow(2, this.spectralCopyShift / 12.0);
+                    const copyFreq = freq * shiftScale;
+                    // Start phase tracking from bin index
+                    if (bin < this.spectralCopyPhases.length) {
+                        generateOsc(copyFreq, this.spectralCopyMix, bin, this.spectralCopyPhases);
+                    }
                 }
             }
 

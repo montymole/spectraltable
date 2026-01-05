@@ -52,6 +52,14 @@ export class AudioEngine {
     private octaveHigh = 0;
     private octaveMult = 0.5;
 
+    // Harmonic injection state
+    private harmonicCount = 0;
+    private harmonicFalloff = 1.0;
+
+    // Spectral copy state
+    private spectralCopyShift = 12;
+    private spectralCopyMix = 0.0;
+
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
@@ -126,6 +134,18 @@ export class AudioEngine {
             low: this.octaveLow,
             high: this.octaveHigh,
             multiplier: this.octaveMult
+        });
+
+        this.workletNode.port.postMessage({
+            type: 'harmonic-injection',
+            count: this.harmonicCount,
+            falloff: this.harmonicFalloff
+        });
+
+        this.workletNode.port.postMessage({
+            type: 'spectral-copy',
+            shift: this.spectralCopyShift,
+            mix: this.spectralCopyMix
         });
     }
 
@@ -218,6 +238,46 @@ export class AudioEngine {
             low: this.octaveLow,
             high: this.octaveHigh,
             multiplier: this.octaveMult
+        };
+    }
+
+    public setHarmonicInjection(count: number, falloff: number): void {
+        this.harmonicCount = count;
+        this.harmonicFalloff = falloff;
+
+        if (this.workletNode && this.isInitialized) {
+            this.workletNode.port.postMessage({
+                type: 'harmonic-injection',
+                count: count,
+                falloff: falloff
+            });
+        }
+    }
+
+    public getHarmonicInjection(): { count: number, falloff: number } {
+        return {
+            count: this.harmonicCount,
+            falloff: this.harmonicFalloff
+        };
+    }
+
+    public setSpectralCopy(shift: number, mix: number): void {
+        this.spectralCopyShift = shift;
+        this.spectralCopyMix = mix;
+
+        if (this.workletNode && this.isInitialized) {
+            this.workletNode.port.postMessage({
+                type: 'spectral-copy',
+                shift: shift,
+                mix: mix
+            });
+        }
+    }
+
+    public getSpectralCopy(): { shift: number, mix: number } {
+        return {
+            shift: this.spectralCopyShift,
+            mix: this.spectralCopyMix
         };
     }
 
@@ -326,6 +386,8 @@ export class AudioEngine {
             mode: SynthMode,
             wavetableParams: { frequency: number, carrier: number, feedback: number },
             octaveDoubling: { low: number, high: number, multiplier: number },
+            harmonicInjection: { count: number, falloff: number },
+            spectralCopy: { shift: number, mix: number },
             interpSamples: number,
             timeline?: { numFrames: number, frameSize: number }
         }
@@ -365,6 +427,18 @@ export class AudioEngine {
             low: params.octaveDoubling.low,
             high: params.octaveDoubling.high,
             multiplier: params.octaveDoubling.multiplier
+        });
+
+        node.port.postMessage({
+            type: 'harmonic-injection',
+            count: params.harmonicInjection.count,
+            falloff: params.harmonicInjection.falloff
+        });
+
+        node.port.postMessage({
+            type: 'spectral-copy',
+            shift: params.spectralCopy.shift,
+            mix: params.spectralCopy.mix
         });
 
         if (params.mode === SynthMode.WAVETABLE) {

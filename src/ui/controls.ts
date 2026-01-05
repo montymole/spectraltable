@@ -6,7 +6,9 @@ import {
     VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
     defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
-    PresetControls, LFOState, OctaveDoublingState, defaultOctaveDoublingState
+    PresetControls, LFOState, OctaveDoublingState, defaultOctaveDoublingState,
+    HarmonicInjectionState, defaultHarmonicInjectionState,
+    SpectralCopyState, defaultSpectralCopyState
 } from '../types';
 import { PresetManager } from './preset-manager';
 import {
@@ -65,6 +67,8 @@ export class ControlPanel {
     private onMidiInputChange: ((id: string) => void) | null = null;
     private onOctaveChange: ((octave: number) => void) | null = null;
     private onOctaveDoublingChange: ((state: OctaveDoublingState) => void) | null = null;
+    private onHarmonicInjectionChange: ((state: HarmonicInjectionState) => void) | null = null;
+    private onSpectralCopyChange: ((state: SpectralCopyState) => void) | null = null;
     private onInterpSamplesChange: ((samples: number) => void) | null = null;
 
     // LFO Callbacks
@@ -73,6 +77,14 @@ export class ControlPanel {
 
     // Generator params callback
     private onGeneratorParamsChange: ((dataSet: string, params: GeneratorParams) => void) | null = null;
+
+    public setHarmonicInjectionChangeCallback(callback: (state: HarmonicInjectionState) => void): void {
+        this.onHarmonicInjectionChange = callback;
+    }
+
+    public setSpectralCopyChangeCallback(callback: (state: SpectralCopyState) => void): void {
+        this.onSpectralCopyChange = callback;
+    }
 
     // Offline Render callback
     private onRenderWav: ((note: number, duration: number) => void) | null = null;
@@ -93,6 +105,16 @@ export class ControlPanel {
     private octaveLowSlider!: HTMLInputElement;
     private octaveHighSlider!: HTMLInputElement;
     private octaveMultSlider!: HTMLInputElement;
+
+    // Harmonic injection state
+    private harmonicInjectionState: HarmonicInjectionState = { ...defaultHarmonicInjectionState };
+    private harmonicCountSlider!: HTMLInputElement;
+    private harmonicFalloffSlider!: HTMLInputElement;
+
+    // Spectral Copy state
+    private spectralCopyState: SpectralCopyState = { ...defaultSpectralCopyState };
+    private spectralShiftSlider!: HTMLInputElement;
+    private spectralMixSlider!: HTMLInputElement;
 
     // Debounce timer for auto-save
     private autoSaveTimer: number | null = null;
@@ -283,13 +305,8 @@ export class ControlPanel {
         this.synthParamsContainer.classList.add('sub-group');
         container.appendChild(this.synthParamsContainer);
 
-        // Global synthesis settings (like Interpolation)
-        const subGroup2 = document.createElement('div');
-        subGroup2.classList.add('sub-group');
-        container.appendChild(subGroup2);
-
         // Interpolation samples control (all modes)
-        this.interpSamplesSlider = createSlider(subGroup2, 'interp-samples', 'Interp Samples', 16, 1024, 64, 1, (val) => {
+        this.interpSamplesSlider = createSlider(subGroup, 'interp-samples', 'Interp Samples', 16, 1024, 64, 1, (val) => {
             if (this.onInterpSamplesChange) this.onInterpSamplesChange(val);
             this.scheduleAutoSave();
         });
@@ -322,6 +339,59 @@ export class ControlPanel {
             this.octaveDoublingState.multiplier = val;
             octaveUpdate();
         }, undefined, 'linear', 3);
+
+        // Harmonic Injection controls
+        const subGroup4 = document.createElement('div');
+        subGroup4.classList.add('sub-group');
+        container.appendChild(subGroup4);
+        const harmInjTitle = document.createElement('label');
+        harmInjTitle.textContent = 'Harmonic Injection';
+        harmInjTitle.style.fontWeight = 'bold';
+        harmInjTitle.style.marginBottom = '8px';
+        harmInjTitle.style.display = 'block';
+        subGroup4.appendChild(harmInjTitle);
+
+        const harmInjUpdate = () => {
+            if (this.onHarmonicInjectionChange) this.onHarmonicInjectionChange(this.harmonicInjectionState);
+            this.scheduleAutoSave();
+        };
+
+        this.harmonicCountSlider = createSlider(subGroup4, 'harmonic-count', 'Harmonics Count', 0, 32, 0, 1, (val) => {
+            this.harmonicInjectionState.count = val;
+            harmInjUpdate();
+        });
+
+        this.harmonicFalloffSlider = createSlider(subGroup4, 'harmonic-falloff', 'Falloff (Exp)', 0, 4.0, 1.0, 0.01, (val) => {
+            this.harmonicInjectionState.falloff = val;
+            harmInjUpdate();
+        }, undefined, 'linear', 2);
+
+        // Spectral Copy controls
+        const subGroup5 = document.createElement('div');
+        subGroup5.classList.add('sub-group');
+        container.appendChild(subGroup5);
+        const copyTitle = document.createElement('label');
+        copyTitle.textContent = 'Spectral Copy';
+        copyTitle.style.fontWeight = 'bold';
+        copyTitle.style.marginBottom = '8px';
+        copyTitle.style.display = 'block';
+        subGroup5.appendChild(copyTitle);
+
+        const copyUpdate = () => {
+            if (this.onSpectralCopyChange) this.onSpectralCopyChange(this.spectralCopyState);
+            this.scheduleAutoSave();
+        };
+
+        this.spectralShiftSlider = createSlider(subGroup5, 'spectral-shift', 'Shift (Semitones)', -24, 24, 12, 1, (val) => {
+            this.spectralCopyState.shift = val;
+            copyUpdate();
+        });
+
+        this.spectralMixSlider = createSlider(subGroup5, 'spectral-mix', 'Mix', 0, 1, 0, 0.01, (val) => {
+            this.spectralCopyState.mix = val;
+            copyUpdate();
+        });
+
 
         // Initialize dynamic UI
         this.updateSynthModeUI(this.synthModeSelect.value as SynthMode);
@@ -678,6 +748,8 @@ export class ControlPanel {
             envelopes: [{ attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.5 }], // Will be updated from AudioEngine
             octave: this.octaveValue,
             octaveDoubling: { ...this.octaveDoublingState },
+            harmonicInjection: { ...this.harmonicInjectionState },
+            spectralCopy: { ...this.spectralCopyState },
             interpSamples: parseFloat(this.interpSamplesSlider.value)
         };
     }
@@ -766,6 +838,18 @@ export class ControlPanel {
             this.octaveLowSlider.value = String(state.octaveDoubling.lowCount);
             this.octaveHighSlider.value = String(state.octaveDoubling.highCount);
             this.octaveMultSlider.value = String(state.octaveDoubling.multiplier);
+        }
+
+        if (state.harmonicInjection) {
+            this.harmonicInjectionState = { ...state.harmonicInjection };
+            this.harmonicCountSlider.value = String(state.harmonicInjection.count);
+            this.harmonicFalloffSlider.value = String(state.harmonicInjection.falloff);
+        }
+
+        if (state.spectralCopy) {
+            this.spectralCopyState = { ...state.spectralCopy };
+            this.spectralShiftSlider.value = String(state.spectralCopy.shift);
+            this.spectralMixSlider.value = String(state.spectralCopy.mix);
         }
 
         this.updateAllDisplays();

@@ -24,6 +24,12 @@ class WavetableProcessor extends AudioWorkletProcessor {
     private octaveMult = 0.5;
     private harmonicPhases = new Float32Array(20);
     private harmonicEnvPhases = new Float32Array(20);
+
+    // Harmonic Injection (Integer harmonics)
+    private harmonicCount = 0;
+    private harmonicFalloff = 1.0;
+    private harmonicPhasesInj = new Float32Array(32);
+    private harmonicEnvPhasesInj = new Float32Array(32);
     private interpT = 1.0;
     private interpStep: number;
     private timeline: Float32Array | null = null;
@@ -37,62 +43,76 @@ class WavetableProcessor extends AudioWorkletProcessor {
         this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
 
         this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-timeline') {
-                this.timeline = e.data.frames;
-                this.timelineFrameSize = e.data.frameSize;
-                this.timelineNumFrames = e.data.numFrames;
-                this.timelineTotalSamples = e.data.totalSamples;
-                this.sampleCount = 0;
-                this.envelopeSize = this.timelineFrameSize / 4;
-                let maxMag = 0;
-                for (let i = 0; i < this.envelopeSize; i++) {
-                    const mag = this.timeline![i * 4];
-                    if (mag > maxMag) maxMag = mag;
-                }
-                const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
-                for (let i = 0; i < this.envelopeSize; i++) {
-                    this.envelope[i] = this.timeline![i * 4] * scale;
-                }
-                this.port.postMessage({ type: 'ready' });
-            } else if (e.data.type === 'spectral-data') {
-                const data = e.data.data;
-                const numPoints = data.length / 4;
-                this.envelopeSize = numPoints;
-
-                let maxMag = 0;
-                for (let i = 0; i < numPoints; i++) {
-                    const mag = data[i * 4];
-                    if (mag > maxMag) maxMag = mag;
-                }
-
-                const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
-
-                if (this.interpSamples === 0) {
-                    for (let i = 0; i < numPoints; i++) {
-                        this.envelope[i] = data[i * 4] * scale;
-                        this.targetEnvelope[i] = this.envelope[i];
+            switch (e.data.type) {
+                case 'spectral-timeline': {
+                    this.timeline = e.data.frames;
+                    this.timelineFrameSize = e.data.frameSize;
+                    this.timelineNumFrames = e.data.numFrames;
+                    this.timelineTotalSamples = e.data.totalSamples;
+                    this.sampleCount = 0;
+                    this.envelopeSize = this.timelineFrameSize / 4;
+                    let maxMag = 0;
+                    for (let i = 0; i < this.envelopeSize; i++) {
+                        const mag = this.timeline![i * 4];
+                        if (mag > maxMag) maxMag = mag;
+                    }
+                    const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
+                    for (let i = 0; i < this.envelopeSize; i++) {
+                        this.envelope[i] = this.timeline![i * 4] * scale;
                     }
                     this.port.postMessage({ type: 'ready' });
-                } else {
-                    this.prevEnvelope.set(this.envelope);
-                    for (let i = 0; i < numPoints; i++) {
-                        this.targetEnvelope[i] = data[i * 4] * scale;
-                    }
-                    this.interpT = 0.0;
+                    break;
                 }
-            } else if (e.data.type === 'frequency') {
-                this.frequency = e.data.value;
-            } else if (e.data.type === 'carrier') {
-                this.carrierType = e.data.value;
-            } else if (e.data.type === 'feedback') {
-                this.feedback = e.data.value;
-            } else if (e.data.type === 'octave-doubling') {
-                this.octaveLow = e.data.low;
-                this.octaveHigh = e.data.high;
-                this.octaveMult = e.data.multiplier;
-            } else if (e.data.type === 'interp-samples') {
-                this.interpSamples = e.data.value;
-                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+                case 'spectral-data': {
+                    const data = e.data.data;
+                    const numPoints = data.length / 4;
+                    this.envelopeSize = numPoints;
+
+                    let maxMag = 0;
+                    for (let i = 0; i < numPoints; i++) {
+                        const mag = data[i * 4];
+                        if (mag > maxMag) maxMag = mag;
+                    }
+
+                    const scale = maxMag > 0.001 ? 1.0 / maxMag : 1.0;
+
+                    if (this.interpSamples === 0) {
+                        for (let i = 0; i < numPoints; i++) {
+                            this.envelope[i] = data[i * 4] * scale;
+                            this.targetEnvelope[i] = this.envelope[i];
+                        }
+                        this.port.postMessage({ type: 'ready' });
+                    } else {
+                        this.prevEnvelope.set(this.envelope);
+                        for (let i = 0; i < numPoints; i++) {
+                            this.targetEnvelope[i] = data[i * 4] * scale;
+                        }
+                        this.interpT = 0.0;
+                    }
+                    break;
+                }
+                case 'frequency':
+                    this.frequency = e.data.value;
+                    break;
+                case 'carrier':
+                    this.carrierType = e.data.value;
+                    break;
+                case 'feedback':
+                    this.feedback = e.data.value;
+                    break;
+                case 'octave-doubling':
+                    this.octaveLow = e.data.low;
+                    this.octaveHigh = e.data.high;
+                    this.octaveMult = e.data.multiplier;
+                    break;
+                case 'harmonic-injection':
+                    this.harmonicCount = e.data.count;
+                    this.harmonicFalloff = e.data.falloff;
+                    break;
+                case 'interp-samples':
+                    this.interpSamples = e.data.value;
+                    this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+                    break;
             }
         };
     }
@@ -236,6 +256,35 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 if (this.harmonicEnvPhases[phaseIdx] >= 1.0) this.harmonicEnvPhases[phaseIdx] -= 1.0;
 
                 harmGain *= this.octaveMult;
+            }
+
+            // Integer Harmonics (Injection)
+            if (this.harmonicCount > 0) {
+                for (let h = 2; h <= this.harmonicCount + 1; h++) {
+                    const harmFreq = this.frequency * h;
+                    if (harmFreq >= nyquist) break;
+
+                    const gain = Math.pow(h, -this.harmonicFalloff);
+                    // Use a separate phase space, allocating 32 slots (h ranges from 2..33 basically)
+                    const phaseIdx = h - 2;
+                    if (phaseIdx >= this.harmonicPhasesInj.length) break;
+
+                    const harmPhaseInc = harmFreq / sampleRate;
+                    const harmCarrier = this.carrier(this.harmonicPhasesInj[phaseIdx], this.carrierType);
+
+                    const harmEnvPos = this.harmonicEnvPhasesInj[phaseIdx] * this.envelopeSize;
+                    const hEnvIdx0 = Math.floor(harmEnvPos) % this.envelopeSize;
+                    const hEnvIdx1 = (hEnvIdx0 + 1) % this.envelopeSize;
+                    const hEnvFrac = harmEnvPos - Math.floor(harmEnvPos);
+                    const harmAmp = this.envelope[hEnvIdx0] * (1 - hEnvFrac) + this.envelope[hEnvIdx1] * hEnvFrac;
+
+                    totalSample += harmCarrier * harmAmp * gain;
+
+                    this.harmonicPhasesInj[phaseIdx] += harmPhaseInc;
+                    if (this.harmonicPhasesInj[phaseIdx] >= 1.0) this.harmonicPhasesInj[phaseIdx] -= 1.0;
+                    this.harmonicEnvPhasesInj[phaseIdx] += harmPhaseInc;
+                    if (this.harmonicEnvPhasesInj[phaseIdx] >= 1.0) this.harmonicEnvPhasesInj[phaseIdx] -= 1.0;
+                }
             }
 
             this.lastSample = totalSample;

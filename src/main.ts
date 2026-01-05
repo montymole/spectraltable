@@ -145,6 +145,12 @@ class SpectralTableApp {
         this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
         this.controls.setFeedbackChangeCallback(this.onFeedbackChange.bind(this));
         this.controls.setOctaveDoublingChangeCallback(this.onOctaveDoublingChange.bind(this));
+        this.controls.setHarmonicInjectionChangeCallback((state) => {
+            this.audioEngine.setHarmonicInjection(state.count, state.falloff);
+        });
+        this.controls.setSpectralCopyChangeCallback((state) => {
+            this.audioEngine.setSpectralCopy(state.shift, state.mix);
+        });
         this.controls.setInterpSamplesChangeCallback((samples: number) => this.audioEngine.setInterpSamples(samples));
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
@@ -280,6 +286,22 @@ class SpectralTableApp {
                 state.octaveDoubling.lowCount,
                 state.octaveDoubling.highCount,
                 state.octaveDoubling.multiplier
+            );
+        }
+
+        // Apply harmonic injection
+        if (state.harmonicInjection) {
+            this.audioEngine.setHarmonicInjection(
+                state.harmonicInjection.count,
+                state.harmonicInjection.falloff
+            );
+        }
+
+        // Apply spectral copy
+        if (state.spectralCopy) {
+            this.audioEngine.setSpectralCopy(
+                state.spectralCopy.shift,
+                state.spectralCopy.mix
             );
         }
 
@@ -553,6 +575,8 @@ class SpectralTableApp {
                     high: octaveDoubling.high,
                     multiplier: octaveDoubling.multiplier
                 },
+                harmonicInjection: this.audioEngine.getHarmonicInjection(),
+                spectralCopy: this.audioEngine.getSpectralCopy(),
                 interpSamples: state.interpSamples,
                 timeline: timelineInfo
             });

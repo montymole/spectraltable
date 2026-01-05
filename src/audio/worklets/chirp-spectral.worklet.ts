@@ -28,44 +28,59 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
     private timelineTotalSamples = 0;
     private sampleCount = 0;
 
+    // Harmonic Injection
+    private harmonicCount = 0;
+    private harmonicFalloff = 1.0;
+
     constructor() {
         super();
         this.interpStep = 1.0 / (this.interpSamples + 1);
 
         this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-timeline') {
-                this.timeline = e.data.frames;
-                this.timelineFrameSize = e.data.frameSize;
-                this.timelineNumFrames = e.data.numFrames;
-                this.timelineTotalSamples = e.data.totalSamples;
-                this.sampleCount = 0;
-                this.numBins = this.timelineFrameSize / 4;
-                for (let i = 0; i < this.timelineFrameSize; i++) {
-                    this.spectralData[i] = this.timeline![i];
-                }
-                this.port.postMessage({ type: 'ready' });
-            } else if (e.data.type === 'spectral-data') {
-                const data = e.data.data;
-                this.numBins = data.length / 4;
-
-                if (this.interpSamples === 0) {
-                    this.spectralData.set(data);
-                    this.targetData.set(data);
+            switch (e.data.type) {
+                case 'spectral-timeline':
+                    this.timeline = e.data.frames;
+                    this.timelineFrameSize = e.data.frameSize;
+                    this.timelineNumFrames = e.data.numFrames;
+                    this.timelineTotalSamples = e.data.totalSamples;
+                    this.sampleCount = 0;
+                    this.numBins = this.timelineFrameSize / 4;
+                    for (let i = 0; i < this.timelineFrameSize; i++) {
+                        this.spectralData[i] = this.timeline![i];
+                    }
                     this.port.postMessage({ type: 'ready' });
-                } else {
-                    this.prevData.set(this.spectralData);
-                    this.targetData.set(data);
-                    this.interpT = 0.0;
+                    break;
+                case 'spectral-data': {
+                    const data = e.data.data;
+                    this.numBins = data.length / 4;
+
+                    if (this.interpSamples === 0) {
+                        this.spectralData.set(data);
+                        this.targetData.set(data);
+                        this.port.postMessage({ type: 'ready' });
+                    } else {
+                        this.prevData.set(this.spectralData);
+                        this.targetData.set(data);
+                        this.interpT = 0.0;
+                    }
+                    break;
                 }
-            } else if (e.data.type === 'frequency-multiplier') {
-                this.frequencyMultiplier = e.data.value;
-            } else if (e.data.type === 'octave-doubling') {
-                this.octaveLow = e.data.low;
-                this.octaveHigh = e.data.high;
-                this.octaveMult = e.data.multiplier;
-            } else if (e.data.type === 'interp-samples') {
-                this.interpSamples = e.data.value;
-                this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+                case 'frequency-multiplier':
+                    this.frequencyMultiplier = e.data.value;
+                    break;
+                case 'octave-doubling':
+                    this.octaveLow = e.data.low;
+                    this.octaveHigh = e.data.high;
+                    this.octaveMult = e.data.multiplier;
+                    break;
+                case 'harmonic-injection':
+                    this.harmonicCount = e.data.count;
+                    this.harmonicFalloff = e.data.falloff;
+                    break;
+                case 'interp-samples':
+                    this.interpSamples = e.data.value;
+                    this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+                    break;
             }
         };
     }
@@ -148,6 +163,25 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
                     harmPhase += harmPhaseInc;
                 }
                 harmGain *= this.octaveMult;
+            }
+
+            // Integer Harmonics (Injection)
+            if (this.harmonicCount > 0) {
+                for (let h = 2; h <= this.harmonicCount + 1; h++) {
+                    const harmFreq = freq * h;
+                    if (harmFreq >= nyquist) break;
+
+                    const gain = Math.pow(h, -this.harmonicFalloff);
+                    const harmPhaseInc = harmFreq * pi2Sr;
+                    let harmPhase = this.phases[bin] * h;
+
+                    for (let s = 0; s < BLOCK_SIZE; s++) {
+                        const sample = Math.sin(harmPhase + phaseOffset * pi2);
+                        blockL[s] += sample * gainL * gain;
+                        blockR[s] += sample * gainR * gain;
+                        harmPhase += harmPhaseInc;
+                    }
+                }
             }
         }
 
