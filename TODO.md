@@ -78,13 +78,13 @@
 
 ### Additional Plot Types
 *→ add to reading-path.ts generatePlane() and generateReadingLine()*
-- [ ] **Tube**: circular curve on Y axis, shape phase adjusts radius
+- [x] **Tube**: circular curve on Y axis, shape phase adjusts radius
       *→ `y = cos(theta) * radius, z = sin(theta) * radius`*
-- [ ] **Bell**: zero at ends with curved center, shape phase adjusts magnitude (0 = flat)
+- [x] **Bell**: zero at ends with curved center, shape phase adjusts magnitude (0 = flat)
       *→ gaussian: `exp(-pow(x - 0.5, 2) / sigma)`*
-- [ ] **Spiral**: Z-axis spiral from center outward, shape adjusts rotation count
+- [x] **Spiral**: Z-axis spiral from center outward, shape adjusts rotation count
       *→ `x = t * cos(t * turns), y = t * sin(t * turns)`*
-- [ ] **Spring**: Y-axis spiral with height variation, shape adjusts height
+- [x] **Spring**: Y-axis spiral with height variation, shape adjusts height
       *→ helix: `x = cos(t * turns), y = t * height, z = sin(t * turns)`*
 
 ### Image Data Sources

@@ -37,6 +37,10 @@ export enum PlaneType {
     SINCOS = 'PLOT 1',
     WAVE = 'PLOT 2',
     RIPPLE = 'PLOT 3',
+    TUBE = 'Tube',
+    BELL = 'Bell',
+    SPIRAL = 'Spiral',
+    SPRING = 'Spring',
 }
 
 // Sensible density ranges for the spectral volume

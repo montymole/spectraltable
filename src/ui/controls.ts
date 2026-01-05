@@ -242,7 +242,8 @@ export class ControlPanel {
         spGroup.className = 'control-group';
         container.appendChild(spGroup);
         this.planeTypeSelect = createSelect(spGroup, 'plane-type', 'Plane Type', [
-            PlaneType.FLAT, PlaneType.SINCOS, PlaneType.WAVE, PlaneType.RIPPLE
+            PlaneType.FLAT, PlaneType.SINCOS, PlaneType.WAVE, PlaneType.RIPPLE,
+            PlaneType.TUBE, PlaneType.BELL, PlaneType.SPIRAL, PlaneType.SPRING
         ], (_val) => {
             if (this.onPathChange) this.onPathChange(this.getState());
             this.scheduleAutoSave();
