@@ -43,7 +43,6 @@ export class ControlPanel {
 
     // Spectral data controls
     private spectralDataSelect!: HTMLSelectElement;
-    private dynamicParamSlider: HTMLInputElement | null = null;
     private dynamicParamContainer: HTMLElement | null = null;
 
     // Generator parameter sliders
@@ -1146,7 +1145,7 @@ export class ControlPanel {
     public showDynamicParam(label: string, value: number, min: number, max: number, step: number, onChange: (v: number) => void): void {
         if (!this.dynamicParamContainer) return;
         this.dynamicParamContainer.innerHTML = '';
-        this.dynamicParamSlider = createSlider(this.dynamicParamContainer, 'dynamic-param', label, min, max, value, step, onChange);
+        createSlider(this.dynamicParamContainer, 'dynamic-param', label, min, max, value, step, onChange);
         this.dynamicParamContainer.style.display = 'block';
     }
 
@@ -1155,7 +1154,6 @@ export class ControlPanel {
             this.dynamicParamContainer.style.display = 'none';
             this.dynamicParamContainer.innerHTML = '';
         }
-        this.dynamicParamSlider = null;
     }
 
     public setVolumeDensity(x: number, y: number, z: number): void {

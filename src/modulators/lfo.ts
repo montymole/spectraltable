@@ -54,7 +54,6 @@ export class LFO {
         const parts = cleanDiv.split('/');
         const numerator = parseInt(parts[0]);
         const denominator = parseInt(parts[1]);
-        const divisionMultiplier = numerator / denominator;
 
         // Beats per second
         const bps = this.bpm / 60;
