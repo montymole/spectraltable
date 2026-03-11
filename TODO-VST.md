@@ -3,8 +3,12 @@
 This list is organized by the web prototype phases in `ROADMAP.md` and calls out what the JUCE VST3 still needs to implement to reach parity.
 
 ## Phase 1-2: Core + Visualization Pipeline
-- [x] Implement `SpectralCubePanel` OpenGL rendering (wireframe cube + point cloud).
-- [ ] Implement reading plane + reading line rendering.
+- [x] OpenGL context clears (black) in `SpectralCubePanel`.
+- [ ] Render a debug triangle in `SpectralCubePanel` (sanity check).
+- [ ] Render wireframe cube (visible in panel).
+- [ ] Render point cloud (visible in panel).
+- [ ] Render reading line (visible in panel).
+- [ ] Implement reading plane rendering.
 - [ ] Stream `SpectralVolume` data into an OpenGL 3D texture and refresh on generator/data changes.
 - [x] Add orbit camera + zoom + mouse controls to the cube view.
 - [ ] Add axis labels and visual cues (Time / Morph / Bins) like the web prototype.
@@ -20,7 +24,7 @@ This list is organized by the web prototype phases in `ROADMAP.md` and calls out
 - [ ] Add progress reporting UI for analysis/import.
 
 ## Phase 5: Procedural Generators
-- [ ] Wire `ParamID::GENERATOR` to `SpectralVolume` (Julia, Mandelbulb, Menger, Sine Plasma, Game of Life).
+- [x] Wire `ParamID::GENERATOR` to `SpectralVolume` (Julia, Mandelbulb, Menger, Sine Plasma, Game of Life).
 - [ ] Add per-generator parameters and a dynamic parameter UI (matching the web prototype controls).
 - [ ] Add animation/ticking for Sine Plasma and Game of Life with speed controls.
 

@@ -241,6 +241,11 @@ private:
   std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
       bpmAttachment;
 
+  juce::Label vizLabel;
+  juce::ToggleButton wireToggle;
+  juce::ToggleButton pointsToggle;
+  juce::ToggleButton lineToggle;
+
   void initControls();
   void styleLabel(juce::Label &label, const juce::String &text);
   void styleSlider(juce::Slider &slider);

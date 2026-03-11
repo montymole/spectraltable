@@ -4,46 +4,55 @@
 using namespace juce::gl;
 
 static const char *kWireVertex = R"(
-#version 150
-in vec3 position;
+attribute vec3 position;
 uniform mat4 uMVP;
 void main() { gl_Position = uMVP * vec4(position, 1.0); }
 )";
 
 static const char *kWireFrag = R"(
-#version 150
-out vec4 fragColor;
 uniform vec3 uColor;
-void main() { fragColor = vec4(uColor, 1.0); }
+void main() { gl_FragColor = vec4(uColor, 1.0); }
 )";
 
 static const char *kPointVertex = R"(
-#version 150
-in vec3 position;
-in vec4 data;
+attribute vec3 position;
+attribute vec4 color;
 uniform mat4 uMVP;
-out vec4 vColor;
+varying vec4 vColor;
 void main() {
   gl_Position = uMVP * vec4(position, 1.0);
   gl_PointSize = 3.0;
-  vColor = data;
+  vColor = color;
 }
 )";
 
 static const char *kPointFrag = R"(
-#version 150
-in vec4 vColor;
-out vec4 fragColor;
+varying vec4 vColor;
 void main() {
-  float d = length(gl_PointCoord - vec2(0.5));
-  if (d > 0.5) discard;
-  fragColor = vec4(vColor.rgb, 1.0);
+  gl_FragColor = vec4(vColor.rgb, 1.0);
 }
+)";
+
+static const char *kTestVertex = R"(
+attribute vec3 position;
+attribute vec4 color;
+varying vec4 vColor;
+void main() {
+  vColor = color;
+  gl_Position = vec4(position, 1.0);
+}
+)";
+
+static const char *kTestFrag = R"(
+varying vec4 vColor;
+void main() { gl_FragColor = vColor; }
 )";
 
 SpectralCubePanel::SpectralCubePanel(PluginProcessor &processor)
     : processor_(processor) {
+  setOpaque(true);
   openGLContext.setRenderer(this);
+  openGLContext.setComponentPaintingEnabled(true);
   openGLContext.setContinuousRepainting(true);
   openGLContext.attachTo(*this);
 }
@@ -53,7 +62,20 @@ SpectralCubePanel::~SpectralCubePanel() {
 }
 
 void SpectralCubePanel::paint(juce::Graphics &g) {
-  g.fillAll(juce::Colour(0xff121212));
+  juce::String text;
+  {
+    const juce::ScopedLock lock(debugLock);
+    text = debugText;
+  }
+  if (text.isNotEmpty()) {
+    g.setColour(juce::Colours::black.withAlpha(0.6f));
+    auto area = getLocalBounds().reduced(4);
+    g.fillRect(area.removeFromTop(36));
+    g.setColour(juce::Colours::red);
+    g.setFont(12.0f);
+    g.drawText(text, getLocalBounds().reduced(6),
+               juce::Justification::topLeft, true);
+  }
 }
 
 void SpectralCubePanel::resized() { openGLContext.triggerRepaint(); }
@@ -82,6 +104,7 @@ void SpectralCubePanel::newOpenGLContextCreated() {
 void SpectralCubePanel::openGLContextClosing() {
   wireframeProgram.reset();
   pointProgram.reset();
+  testProgram.reset();
 
   if (wireframeVAO != 0)
     openGLContext.extensions.glDeleteVertexArrays(1, &wireframeVAO);
@@ -93,11 +116,34 @@ void SpectralCubePanel::openGLContextClosing() {
     openGLContext.extensions.glDeleteVertexArrays(1, &pointVAO);
   if (pointVBO != 0)
     openGLContext.extensions.glDeleteBuffers(1, &pointVBO);
+  if (lineVAO != 0)
+    openGLContext.extensions.glDeleteVertexArrays(1, &lineVAO);
+  if (lineVBO != 0)
+    openGLContext.extensions.glDeleteBuffers(1, &lineVBO);
+  if (testVBO != 0)
+    openGLContext.extensions.glDeleteBuffers(1, &testVBO);
+  if (testVAO != 0)
+    openGLContext.extensions.glDeleteVertexArrays(1, &testVAO);
+}
+
+void SpectralCubePanel::setDebugText(const juce::String &text) {
+  {
+    const juce::ScopedLock lock(debugLock);
+    debugText = text;
+  }
+  juce::MessageManager::callAsync([safe = juce::Component::SafePointer(this)] {
+    if (safe != nullptr)
+      safe->repaint();
+  });
 }
 
 void SpectralCubePanel::renderOpenGL() {
-  juce::OpenGLHelpers::clear(juce::Colour(0xff101010));
+  glViewport(0, 0, getWidth(), getHeight());
+  juce::OpenGLHelpers::clear(juce::Colours::black);
+  glDisable(GL_SCISSOR_TEST);
   glEnable(GL_DEPTH_TEST);
+  glDisable(GL_CULL_FACE);
+  glLineWidth(1.5f);
 
   auto proj = getProjectionMatrix();
   auto view = getViewMatrix();
@@ -105,8 +151,29 @@ void SpectralCubePanel::renderOpenGL() {
       {rotationX, rotationY, 0.0f});
   auto mvp = proj * view * model;
 
+  // Debug triangle to verify GL rendering
+  if (juce::OpenGLShaderProgram::getLanguageVersion() < 1.30f) {
+    glUseProgram(0);
+    glDisable(GL_DEPTH_TEST);
+    glBegin(GL_TRIANGLES);
+    glColor3f(1.0f, 0.2f, 0.2f);
+    glVertex2f(0.0f, 0.6f);
+    glColor3f(0.2f, 1.0f, 0.2f);
+    glVertex2f(-0.6f, -0.6f);
+    glColor3f(0.2f, 0.4f, 1.0f);
+    glVertex2f(0.6f, -0.6f);
+    glEnd();
+    glEnable(GL_DEPTH_TEST);
+  } else if (testProgram && testVBO != 0 && testVAO != 0) {
+    testProgram->use();
+    openGLContext.extensions.glBindVertexArray(testVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    openGLContext.extensions.glBindVertexArray(0);
+  }
+
   // Wireframe cube
-  if (wireframeProgram) {
+  if (showWireframe && wireframeProgram && wireframeVAO != 0 &&
+      wireframeIBO != 0) {
     wireframeProgram->use();
     if (wireMvpUniform)
       wireMvpUniform->setMatrix4(mvp.mat, 1, false);
@@ -119,7 +186,7 @@ void SpectralCubePanel::renderOpenGL() {
   }
 
   // Point cloud
-  if (pointProgram) {
+  if (showPoints && pointProgram && pointVAO != 0 && pointVBO != 0) {
     // Build point buffer from volume (subsampled)
     const auto res = processor_.volume.getResolution();
     const int stride = 4;
@@ -172,6 +239,84 @@ void SpectralCubePanel::renderOpenGL() {
     glDrawArrays(GL_POINTS, 0, pointCount);
     openGLContext.extensions.glBindVertexArray(0);
   }
+
+  // Reading line (uses wireframe shader)
+  if (showLine && wireframeProgram && lineVAO != 0 && lineVBO != 0) {
+    const int resX = processor_.volume.getResolution().x;
+    if (resX > 1) {
+      std::vector<float> line((size_t)resX * 3);
+
+      const int planeType = static_cast<int>(
+          processor_.apvts.getRawParameterValue(ParamID::PLANE_TYPE)->load());
+      const float scanPos =
+          processor_.apvts.getRawParameterValue(ParamID::SCAN_POS)->load();
+      const float shapePhase =
+          processor_.apvts.getRawParameterValue(ParamID::SHAPE_PHASE)->load();
+      const float pathX =
+          processor_.apvts.getRawParameterValue(ParamID::PATH_X)->load();
+      const float pathY =
+          processor_.apvts.getRawParameterValue(ParamID::PATH_Y)->load();
+      const float pathZ =
+          processor_.apvts.getRawParameterValue(ParamID::PATH_Z)->load();
+      const float rotX =
+          processor_.apvts.getRawParameterValue(ParamID::ROT_X)->load();
+      const float rotY =
+          processor_.apvts.getRawParameterValue(ParamID::ROT_Y)->load();
+      const float rotZ =
+          processor_.apvts.getRawParameterValue(ParamID::ROT_Z)->load();
+
+      ReadingPath::generateReadingLine(static_cast<PlaneType>(planeType), resX,
+                                       scanPos, shapePhase, line.data());
+
+      const float rx = rotX * (3.14159265f / 180.0f);
+      const float ry = rotY * (3.14159265f / 180.0f);
+      const float rz = rotZ * (3.14159265f / 180.0f);
+      const float cx = std::cos(rx);
+      const float sx = std::sin(rx);
+      const float cy = std::cos(ry);
+      const float sy = std::sin(ry);
+      const float cz = std::cos(rz);
+      const float sz = std::sin(rz);
+
+      const float offX = pathX * 2.0f - 1.0f;
+      const float offY = pathY * 2.0f - 1.0f;
+      const float offZ = pathZ * 2.0f - 1.0f;
+
+      for (int i = 0; i < resX; ++i) {
+        float x = line[i * 3 + 0];
+        float y = line[i * 3 + 1];
+        float z = line[i * 3 + 2];
+
+        float y1 = y * cx - z * sx;
+        float z1 = y * sx + z * cx;
+        float x2 = x * cy + z1 * sy;
+        float z2 = -x * sy + z1 * cy;
+        float x3 = x2 * cz - y1 * sz;
+        float y3 = x2 * sz + y1 * cz;
+        float z3 = z2;
+
+        line[i * 3 + 0] = x3 + offX;
+        line[i * 3 + 1] = y3 + offY;
+        line[i * 3 + 2] = z3 + offZ;
+      }
+
+      openGLContext.extensions.glBindVertexArray(lineVAO);
+      glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
+      glBufferData(GL_ARRAY_BUFFER,
+                   (GLsizeiptr)(line.size() * sizeof(float)), line.data(),
+                   GL_DYNAMIC_DRAW);
+      lineCount = resX;
+
+      wireframeProgram->use();
+      if (wireMvpUniform)
+        wireMvpUniform->setMatrix4(mvp.mat, 1, false);
+      if (wireColorUniform)
+        wireColorUniform->set(1.0f, 0.4f, 0.2f);
+
+      glDrawArrays(GL_LINE_STRIP, 0, lineCount);
+      openGLContext.extensions.glBindVertexArray(0);
+    }
+  }
 }
 
 juce::Matrix3D<float> SpectralCubePanel::getProjectionMatrix() const {
@@ -192,10 +337,38 @@ juce::Matrix3D<float> SpectralCubePanel::getViewMatrix() const {
 }
 
 void SpectralCubePanel::createPrograms() {
-  wireframeProgram = std::make_unique<juce::OpenGLShaderProgram>(openGLContext);
-  wireframeProgram->addVertexShader(kWireVertex);
-  wireframeProgram->addFragmentShader(kWireFrag);
-  wireframeProgram->link();
+  juce::String lastError;
+  auto buildProgram = [&](const char *vs, const char *fs,
+                          const char *label)
+      -> std::unique_ptr<juce::OpenGLShaderProgram> {
+    auto prog = std::make_unique<juce::OpenGLShaderProgram>(openGLContext);
+    if (!prog->addVertexShader(
+            juce::OpenGLHelpers::translateVertexShaderToV3(vs))) {
+      lastError = juce::String(label) + " vertex shader error:\n" +
+                  prog->getLastError();
+      return nullptr;
+    }
+    if (!prog->addFragmentShader(
+            juce::OpenGLHelpers::translateFragmentShaderToV3(fs))) {
+      lastError = juce::String(label) + " fragment shader error:\n" +
+                  prog->getLastError();
+      return nullptr;
+    }
+    if (!prog->link()) {
+      lastError =
+          juce::String(label) + " link error:\n" + prog->getLastError();
+      return nullptr;
+    }
+    return prog;
+  };
+
+  wireframeProgram = buildProgram(kWireVertex, kWireFrag, "Wireframe");
+  if (!wireframeProgram) {
+    setDebugText(lastError + "\nGLSL: " +
+                 juce::String(juce::OpenGLShaderProgram::getLanguageVersion(),
+                              2));
+    return;
+  }
   wirePosAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute>(
       *wireframeProgram, "position");
   wireMvpUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform>(
@@ -203,19 +376,61 @@ void SpectralCubePanel::createPrograms() {
   wireColorUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform>(
       *wireframeProgram, "uColor");
 
-  pointProgram = std::make_unique<juce::OpenGLShaderProgram>(openGLContext);
-  pointProgram->addVertexShader(kPointVertex);
-  pointProgram->addFragmentShader(kPointFrag);
-  pointProgram->link();
-  pointPosAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute>(
-      *pointProgram, "position");
-  pointDataAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute>(
-      *pointProgram, "data");
-  pointMvpUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform>(
-      *pointProgram, "uMVP");
+  testProgram = buildProgram(kTestVertex, kTestFrag, "Test");
+  if (!testProgram) {
+    setDebugText(lastError + "\nGLSL: " +
+                 juce::String(juce::OpenGLShaderProgram::getLanguageVersion(),
+                              2));
+    return;
+  }
+  testPosAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute>(
+      *testProgram, "position");
+  testColorAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute>(
+      *testProgram, "color");
+
+  pointProgram = buildProgram(kPointVertex, kPointFrag, "Point");
+  if (pointProgram) {
+    pointPosAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute>(
+        *pointProgram, "position");
+    pointDataAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute>(
+        *pointProgram, "color");
+    pointMvpUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform>(
+        *pointProgram, "uMVP");
+  } else {
+    setDebugText(lastError + "\nGLSL: " +
+                 juce::String(juce::OpenGLShaderProgram::getLanguageVersion(),
+                              2));
+  }
 }
 
 void SpectralCubePanel::createGeometry() {
+  const float testVerts[] = {
+      0.0f, 0.6f, 0.0f, 1.0f, 0.2f, 0.2f, 1.0f,
+      -0.6f, -0.6f, 0.0f, 0.2f, 1.0f, 0.2f, 1.0f,
+      0.6f, -0.6f, 0.0f, 0.2f, 0.4f, 1.0f, 1.0f,
+  };
+
+  openGLContext.extensions.glGenBuffers(1, &testVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, testVBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(testVerts), testVerts, GL_STATIC_DRAW);
+  openGLContext.extensions.glGenVertexArrays(1, &testVAO);
+  openGLContext.extensions.glBindVertexArray(testVAO);
+
+  if (testPosAttrib) {
+    glEnableVertexAttribArray((GLuint)testPosAttrib->attributeID);
+    glVertexAttribPointer((GLuint)testPosAttrib->attributeID, 3, GL_FLOAT,
+                          GL_FALSE, 7 * sizeof(float), (void *)0);
+  }
+  if (testColorAttrib) {
+    glEnableVertexAttribArray((GLuint)testColorAttrib->attributeID);
+    glVertexAttribPointer((GLuint)testColorAttrib->attributeID, 4, GL_FLOAT,
+                          GL_FALSE, 7 * sizeof(float),
+                          (void *)(3 * sizeof(float)));
+  }
+
+  openGLContext.extensions.glBindVertexArray(0);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+
   const float cubeVerts[] = {
       -1, -1, -1, 1,  -1, -1, 1,  1,  -1, -1, 1,  -1,
       -1, -1, 1,  1,  -1, 1,  1,  1,  1,  -1, 1,  1};
@@ -260,5 +475,16 @@ void SpectralCubePanel::createGeometry() {
                           (void *)(3 * sizeof(float)));
   }
 
+  openGLContext.extensions.glBindVertexArray(0);
+
+  openGLContext.extensions.glGenVertexArrays(1, &lineVAO);
+  openGLContext.extensions.glBindVertexArray(lineVAO);
+  openGLContext.extensions.glGenBuffers(1, &lineVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
+  if (wirePosAttrib) {
+    glEnableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+    glVertexAttribPointer((GLuint)wirePosAttrib->attributeID, 3, GL_FLOAT,
+                          GL_FALSE, 3 * sizeof(float), (void *)0);
+  }
   openGLContext.extensions.glBindVertexArray(0);
 }

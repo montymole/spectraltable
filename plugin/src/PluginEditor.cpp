@@ -43,6 +43,11 @@ void PluginEditor::resized() {
     y += height + rowGap;
   };
 
+  auto rowNoLabel = [&](juce::Component &comp, int height) {
+    comp.setBounds(labelWidth + 10, y, contentWidth - labelWidth - 10, height);
+    y += height + rowGap;
+  };
+
   row(synthModeLabel, synthModeBox, 28);
   row(dataSourceLabel, dataSourceBox, 28);
   row(densityXLabel, densityXSlider, 90);
@@ -78,6 +83,9 @@ void PluginEditor::resized() {
   row(lfo2AmpLabel, lfo2AmpSlider, 90);
   row(lfo2TargetLabel, lfo2TargetBox, 28);
   row(bpmLabel, bpmSlider, 90);
+  row(vizLabel, wireToggle, 28);
+  rowNoLabel(pointsToggle, 28);
+  rowNoLabel(lineToggle, 28);
   row(attackLabel, attackSlider, 90);
   row(decayLabel, decaySlider, 90);
   row(sustainLabel, sustainSlider, 90);
@@ -371,6 +379,28 @@ void PluginEditor::initControls() {
       std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
           apvts_, ParamID::BPM, bpmSlider);
   addLabeled(bpmLabel, bpmSlider);
+
+  styleLabel(vizLabel, "Visuals");
+  wireToggle.setButtonText("Wireframe");
+  pointsToggle.setButtonText("Point Cloud");
+  lineToggle.setButtonText("Reading Line");
+  wireToggle.setToggleState(true, juce::dontSendNotification);
+  pointsToggle.setToggleState(false, juce::dontSendNotification);
+  lineToggle.setToggleState(false, juce::dontSendNotification);
+  controlsContent.addAndMakeVisible(vizLabel);
+  controlsContent.addAndMakeVisible(wireToggle);
+  controlsContent.addAndMakeVisible(pointsToggle);
+  controlsContent.addAndMakeVisible(lineToggle);
+
+  wireToggle.onClick = [this]() {
+    spectralCube.setShowWireframe(wireToggle.getToggleState());
+  };
+  pointsToggle.onClick = [this]() {
+    spectralCube.setShowPoints(pointsToggle.getToggleState());
+  };
+  lineToggle.onClick = [this]() {
+    spectralCube.setShowLine(lineToggle.getToggleState());
+  };
 
   styleLabel(attackLabel, "Attack");
   styleSlider(attackSlider);

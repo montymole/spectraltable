@@ -1,5 +1,6 @@
 #pragma once
 #include "../PluginProcessor.h"
+#include "../dsp/ReadingPath.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_opengl/juce_opengl.h>
 
@@ -15,10 +16,16 @@ public:
   void mouseWheelMove(const juce::MouseEvent &event,
                       const juce::MouseWheelDetails &wheel) override;
 
+  void setShowWireframe(bool shouldShow) { showWireframe = shouldShow; }
+  void setShowPoints(bool shouldShow) { showPoints = shouldShow; }
+  void setShowLine(bool shouldShow) { showLine = shouldShow; }
+
   // OpenGLRenderer overrides
   void newOpenGLContextCreated() override;
   void renderOpenGL() override;
   void openGLContextClosing() override;
+
+  void setDebugText(const juce::String &text);
 
 private:
   PluginProcessor &processor_;
@@ -26,12 +33,15 @@ private:
 
   std::unique_ptr<juce::OpenGLShaderProgram> wireframeProgram;
   std::unique_ptr<juce::OpenGLShaderProgram> pointProgram;
+  std::unique_ptr<juce::OpenGLShaderProgram> testProgram;
   std::unique_ptr<juce::OpenGLShaderProgram::Attribute> wirePosAttrib;
   std::unique_ptr<juce::OpenGLShaderProgram::Uniform> wireMvpUniform;
   std::unique_ptr<juce::OpenGLShaderProgram::Uniform> wireColorUniform;
   std::unique_ptr<juce::OpenGLShaderProgram::Attribute> pointPosAttrib;
   std::unique_ptr<juce::OpenGLShaderProgram::Attribute> pointDataAttrib;
   std::unique_ptr<juce::OpenGLShaderProgram::Uniform> pointMvpUniform;
+  std::unique_ptr<juce::OpenGLShaderProgram::Attribute> testPosAttrib;
+  std::unique_ptr<juce::OpenGLShaderProgram::Attribute> testColorAttrib;
 
   GLuint wireframeVAO = 0;
   GLuint wireframeVBO = 0;
@@ -41,12 +51,25 @@ private:
   GLuint pointVBO = 0;
   int pointCount = 0;
 
+  GLuint lineVAO = 0;
+  GLuint lineVBO = 0;
+  int lineCount = 0;
+
   GLuint volumeTexture = 0;
+  GLuint testVBO = 0;
+  GLuint testVAO = 0;
 
   float rotationX = 0.3f;
   float rotationY = 0.4f;
   float zoom = 3.0f;
   juce::Point<int> lastMousePos;
+
+  bool showWireframe = true;
+  bool showPoints = false;
+  bool showLine = false;
+
+  juce::String debugText = "hello";
+  juce::CriticalSection debugLock;
 
   juce::Matrix3D<float> getProjectionMatrix() const;
   juce::Matrix3D<float> getViewMatrix() const;
