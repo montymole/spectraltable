@@ -66,10 +66,19 @@ void SpectralSynth::pushSpectralData(const SpectralData &d,
 
 void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
                             int numSamples) {
+  if (!outL || !outR || numSamples <= 0)
+    return;
+
   const int numBins = (int)phaseAccum_.size();
   if (numBins == 0) {
     memset(outL, 0, numSamples * 4);
     memset(outR, 0, numSamples * 4);
+    return;
+  }
+
+  if (cur_.data.size() < (size_t)numBins * 4) {
+    memset(outL, 0, numSamples * sizeof(float));
+    memset(outR, 0, numSamples * sizeof(float));
     return;
   }
 

@@ -5,6 +5,7 @@
 #include "dsp/ReadingPath.h"
 #include "dsp/SpectralSynth.h"
 #include "dsp/WavetableSynth.h"
+#include <cmath>
 
 juce::AudioProcessorValueTreeState::ParameterLayout
 PluginProcessor::createParameterLayout() {
@@ -13,7 +14,11 @@ PluginProcessor::createParameterLayout() {
   params.push_back(std::make_unique<juce::AudioParameterInt>(
       juce::ParameterID{ParamID::SYNTH_MODE, 1}, "Synth Mode", 0, 3, 0));
   params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::PATH_X, 1}, "Path X", 0.0f, 1.0f, 0.5f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
       juce::ParameterID{ParamID::PATH_Y, 1}, "Path Y", 0.0f, 1.0f, 0.5f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::PATH_Z, 1}, "Path Z", 0.0f, 1.0f, 0.5f));
   params.push_back(std::make_unique<juce::AudioParameterFloat>(
       juce::ParameterID{ParamID::SCAN_POS, 1}, "Scan Pos", -1.0f, 1.0f, 0.0f));
   params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -21,6 +26,18 @@ PluginProcessor::createParameterLayout() {
       0.0f));
   params.push_back(std::make_unique<juce::AudioParameterInt>(
       juce::ParameterID{ParamID::PLANE_TYPE, 1}, "Plane Type", 0, 7, 0));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::ROT_X, 1}, "Rot X", -180.0f, 180.0f, 0.0f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::ROT_Y, 1}, "Rot Y", -180.0f, 180.0f, 0.0f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::ROT_Z, 1}, "Rot Z", -180.0f, 180.0f, 0.0f));
+  params.push_back(std::make_unique<juce::AudioParameterInt>(
+      juce::ParameterID{ParamID::DENSITY_X, 1}, "Density X", 16, 512, 64));
+  params.push_back(std::make_unique<juce::AudioParameterInt>(
+      juce::ParameterID{ParamID::DENSITY_Y, 1}, "Density Y", 1, 16, 2));
+  params.push_back(std::make_unique<juce::AudioParameterInt>(
+      juce::ParameterID{ParamID::DENSITY_Z, 1}, "Density Z", 16, 1024, 128));
   params.push_back(std::make_unique<juce::AudioParameterFloat>(
       juce::ParameterID{ParamID::FREQ_MUL, 1}, "Freq Mul", 0.1f, 10.0f, 1.0f));
   params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -133,6 +150,24 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     rebuildSynth(newMode);
   }
 
+  const int gen =
+      static_cast<int>(apvts.getRawParameterValue(ParamID::GENERATOR)->load());
+  const int resX =
+      static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_X)->load());
+  const int resY =
+      static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_Y)->load());
+  const int resZ =
+      static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_Z)->load());
+
+  if (gen != lastGenerator_ || resX != lastResX_ || resY != lastResY_ ||
+      resZ != lastResZ_) {
+    lastGenerator_ = gen;
+    lastResX_ = resX;
+    lastResY_ = resY;
+    lastResZ_ = resZ;
+    regenerateVolume();
+  }
+
   applyLFOs(getSampleRate(), numSamples);
 
   float a = apvts.getRawParameterValue(ParamID::ATTACK)->load();
@@ -217,17 +252,49 @@ void PluginProcessor::updateSpectralData() {
       apvts.getRawParameterValue(ParamID::PLANE_TYPE)->load()));
   float scanPos = apvts.getRawParameterValue(ParamID::SCAN_POS)->load();
   float shapePhase = apvts.getRawParameterValue(ParamID::SHAPE_PHASE)->load();
+  float pathX = apvts.getRawParameterValue(ParamID::PATH_X)->load();
   float pathY = apvts.getRawParameterValue(ParamID::PATH_Y)->load();
+  float pathZ = apvts.getRawParameterValue(ParamID::PATH_Z)->load();
+  float rotX = apvts.getRawParameterValue(ParamID::ROT_X)->load();
+  float rotY = apvts.getRawParameterValue(ParamID::ROT_Y)->load();
+  float rotZ = apvts.getRawParameterValue(ParamID::ROT_Z)->load();
 
   ReadingPath::generateReadingLine(type, resX, scanPos, shapePhase,
                                    path.data());
 
+  const float rx = rotX * (3.14159265f / 180.0f);
+  const float ry = rotY * (3.14159265f / 180.0f);
+  const float rz = rotZ * (3.14159265f / 180.0f);
+  const float cx = std::cos(rx);
+  const float sx = std::sin(rx);
+  const float cy = std::cos(ry);
+  const float sy = std::sin(ry);
+  const float cz = std::cos(rz);
+  const float sz = std::sin(rz);
+
+  const float offX = pathX * 2.0f - 1.0f;
+  const float offY = pathY * 2.0f - 1.0f;
+  const float offZ = pathZ * 2.0f - 1.0f;
+
   SpectralData sd;
   sd.data.resize((size_t)resX * 4);
   for (size_t i = 0; i < (size_t)resX; ++i) {
-    float x = (path[i * 3 + 0] * 0.5f) + 0.5f;
-    float y = (path[i * 3 + 1] * 0.5f) + pathY;
-    float z = (path[i * 3 + 2] * 0.5f) + 0.5f;
+    float x = path[i * 3 + 0];
+    float y = path[i * 3 + 1];
+    float z = path[i * 3 + 2];
+
+    // Rotate around X, then Y, then Z
+    float y1 = y * cx - z * sx;
+    float z1 = y * sx + z * cx;
+    float x2 = x * cy + z1 * sy;
+    float z2 = -x * sy + z1 * cy;
+    float x3 = x2 * cz - y1 * sz;
+    float y3 = x2 * sz + y1 * cz;
+    float z3 = z2;
+
+    x = (x3 + offX) * 0.5f + 0.5f;
+    y = (y3 + offY) * 0.5f + 0.5f;
+    z = (z3 + offZ) * 0.5f + 0.5f;
 
     x = juce::jlimit(0.0f, 1.0f, x);
     y = juce::jlimit(0.0f, 1.0f, y);
@@ -297,6 +364,42 @@ void PluginProcessor::setStateInformation(const void *data, int sizeInBytes) {
   if (xmlState.get() != nullptr &&
       xmlState->hasTagName(apvts.state.getType())) {
     apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+  }
+}
+
+void PluginProcessor::regenerateVolume() {
+  int resX =
+      static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_X)->load());
+  int resY =
+      static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_Y)->load());
+  int resZ =
+      static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_Z)->load());
+
+  volume = SpectralVolume(VolumeResolution{resX, resY, resZ});
+
+  const int gen =
+      static_cast<int>(apvts.getRawParameterValue(ParamID::GENERATOR)->load());
+
+  switch (gen) {
+  case 0:
+    volume.generate3DJulia();
+    break;
+  case 1:
+    volume.generateMandelbulb();
+    break;
+  case 2:
+    volume.generateMengerSponge();
+    break;
+  case 3:
+    volume.generateSinePlasma();
+    break;
+  case 4:
+    volume.initGameOfLife();
+    break;
+  case 5:
+  default:
+    volume.clearData();
+    break;
   }
 }
 

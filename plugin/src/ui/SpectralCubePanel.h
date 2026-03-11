@@ -10,6 +10,10 @@ public:
 
   void paint(juce::Graphics &g) override;
   void resized() override;
+  void mouseDown(const juce::MouseEvent &event) override;
+  void mouseDrag(const juce::MouseEvent &event) override;
+  void mouseWheelMove(const juce::MouseEvent &event,
+                      const juce::MouseWheelDetails &wheel) override;
 
   // OpenGLRenderer overrides
   void newOpenGLContextCreated() override;
@@ -22,6 +26,12 @@ private:
 
   std::unique_ptr<juce::OpenGLShaderProgram> wireframeProgram;
   std::unique_ptr<juce::OpenGLShaderProgram> pointProgram;
+  std::unique_ptr<juce::OpenGLShaderProgram::Attribute> wirePosAttrib;
+  std::unique_ptr<juce::OpenGLShaderProgram::Uniform> wireMvpUniform;
+  std::unique_ptr<juce::OpenGLShaderProgram::Uniform> wireColorUniform;
+  std::unique_ptr<juce::OpenGLShaderProgram::Attribute> pointPosAttrib;
+  std::unique_ptr<juce::OpenGLShaderProgram::Attribute> pointDataAttrib;
+  std::unique_ptr<juce::OpenGLShaderProgram::Uniform> pointMvpUniform;
 
   GLuint wireframeVAO = 0;
   GLuint wireframeVBO = 0;
@@ -35,6 +45,8 @@ private:
 
   float rotationX = 0.3f;
   float rotationY = 0.4f;
+  float zoom = 3.0f;
+  juce::Point<int> lastMousePos;
 
   juce::Matrix3D<float> getProjectionMatrix() const;
   juce::Matrix3D<float> getViewMatrix() const;

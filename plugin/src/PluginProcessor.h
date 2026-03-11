@@ -11,10 +11,18 @@
 // All parameter IDs – referenced from both processor and editor
 namespace ParamID {
 inline constexpr const char *SYNTH_MODE = "synthMode";
+inline constexpr const char *PATH_X = "pathX";
 inline constexpr const char *PATH_Y = "pathY";
+inline constexpr const char *PATH_Z = "pathZ";
 inline constexpr const char *SCAN_POS = "scanPos";
 inline constexpr const char *SHAPE_PHASE = "shapePhase";
 inline constexpr const char *PLANE_TYPE = "planeType";
+inline constexpr const char *ROT_X = "rotX";
+inline constexpr const char *ROT_Y = "rotY";
+inline constexpr const char *ROT_Z = "rotZ";
+inline constexpr const char *DENSITY_X = "densityX";
+inline constexpr const char *DENSITY_Y = "densityY";
+inline constexpr const char *DENSITY_Z = "densityZ";
 inline constexpr const char *FREQ_MUL = "freqMul";
 inline constexpr const char *WT_FREQ = "wtFreq";
 inline constexpr const char *CARRIER = "carrier";
@@ -105,6 +113,12 @@ private:
   void rebuildSynth(int mode);
   void applyLFOs(double sampleRate, int numSamples);
   void updateSpectralData();
+  void regenerateVolume();
+
+  int lastGenerator_ = -1;
+  int lastResX_ = -1;
+  int lastResY_ = -1;
+  int lastResZ_ = -1;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginProcessor)
 };

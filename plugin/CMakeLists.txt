@@ -40,7 +40,8 @@ target_sources(SpectralTable PRIVATE
     src/dsp/SpectralSynth.cpp
     src/dsp/WavetableSynth.cpp
     src/dsp/ChirpSynth.cpp
-    src/dsp/NoiseSynth.cpp)
+    src/dsp/NoiseSynth.cpp
+    src/ui/SpectralCubePanel.cpp)
 
 # ── JUCE modules ─────────────────────────────────────────────────────────────
 target_compile_definitions(SpectralTable PUBLIC
