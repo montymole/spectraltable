@@ -138,7 +138,9 @@ void SpectralCubePanel::setDebugText(const juce::String &text) {
 }
 
 void SpectralCubePanel::renderOpenGL() {
-  glViewport(0, 0, getWidth(), getHeight());
+  const float scale = (float)openGLContext.getRenderingScale();
+  glViewport(0, 0, juce::roundToInt(scale * (float)getWidth()),
+             juce::roundToInt(scale * (float)getHeight()));
   juce::OpenGLHelpers::clear(juce::Colours::black);
   glDisable(GL_SCISSOR_TEST);
   glEnable(GL_DEPTH_TEST);
@@ -151,10 +153,18 @@ void SpectralCubePanel::renderOpenGL() {
       {rotationX, rotationY, 0.0f});
   auto mvp = proj * view * model;
 
+  const bool legacyGL =
+      juce::OpenGLShaderProgram::getLanguageVersion() < 1.30f;
+  const bool canUseVAO = !legacyGL;
+
   // Debug triangle to verify GL rendering
-  if (juce::OpenGLShaderProgram::getLanguageVersion() < 1.30f) {
+  if (legacyGL) {
     glUseProgram(0);
     glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
     glBegin(GL_TRIANGLES);
     glColor3f(1.0f, 0.2f, 0.2f);
     glVertex2f(0.0f, 0.6f);
@@ -172,7 +182,7 @@ void SpectralCubePanel::renderOpenGL() {
   }
 
   // Wireframe cube
-  if (showWireframe && wireframeProgram && wireframeVAO != 0 &&
+  if (showWireframe && wireframeProgram && wireframeVBO != 0 &&
       wireframeIBO != 0) {
     wireframeProgram->use();
     if (wireMvpUniform)
@@ -180,9 +190,21 @@ void SpectralCubePanel::renderOpenGL() {
     if (wireColorUniform)
       wireColorUniform->set(0.2f, 0.8f, 1.0f);
 
-    openGLContext.extensions.glBindVertexArray(wireframeVAO);
-    glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
-    openGLContext.extensions.glBindVertexArray(0);
+    if (canUseVAO && wireframeVAO != 0) {
+      openGLContext.extensions.glBindVertexArray(wireframeVAO);
+      glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
+      openGLContext.extensions.glBindVertexArray(0);
+    } else if (wirePosAttrib) {
+      glBindBuffer(GL_ARRAY_BUFFER, wireframeVBO);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, wireframeIBO);
+      glEnableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+      glVertexAttribPointer((GLuint)wirePosAttrib->attributeID, 3, GL_FLOAT,
+                            GL_FALSE, 0, nullptr);
+      glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
+      glDisableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+      glBindBuffer(GL_ARRAY_BUFFER, 0);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    }
   }
 
   // Point cloud
