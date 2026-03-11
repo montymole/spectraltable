@@ -48,13 +48,13 @@
   - [x] Duplicate low-frequency spectrum regions
   - [x] Shift or scale copied regions upward
   - [x] Blend control for copied partials
-- [ ] **Spectral shaping**
+- [x] **Spectral shaping**
       *→ apply curve to magnitude array before IFFT*
-  - [ ] Apply nonlinear curves to spectral magnitudes
-  - [ ] Compression mode (reduce dynamic range of partials)
+  - [x] Apply nonlinear curves to spectral magnitudes
+  - [x] Compression mode (reduce dynamic range of partials)
         *→ `mag = sign(mag) * pow(abs(mag), 0.5)` style*
-  - [ ] Soft clip mode (emphasize higher partials)
-  - [ ] Preserve phase during magnitude shaping
+  - [x] Soft clip mode (emphasize higher partials)
+  - [x] Preserve phase during magnitude shaping
         *→ store phase separately, only modify magnitude*
 
 ### Soft clipping and compression saturation+waveshaping

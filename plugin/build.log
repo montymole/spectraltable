@@ -1,0 +1,63 @@
+[  1%] Building CXX object CMakeFiles/SpectralTable.dir/src/PluginProcessor.cpp.o
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:105:9: error: no member named 'setSampleRate' in 'LFO'
+  105 |   lfo1_.setSampleRate(sampleRate);
+      |   ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:106:9: error: no member named 'setSampleRate' in 'LFO'
+  106 |   lfo2_.setSampleRate(sampleRate);
+      |   ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:132:3: error: no type named 'Parameters' in 'ADSR'; did you mean 'juce::ADSR::Parameters'?
+  132 |   ADSR::Parameters params{a, d, s, r};
+      |   ^~~~~~~~~~~~~~~~
+      |   juce::ADSR::Parameters
+/Users/jlof/spectraltable/plugin/build/_deps/juce-src/modules/juce_audio_basics/utilities/juce_ADSR.h:67:22: note: 'juce::ADSR::Parameters' declared here
+   67 |     struct JUCE_API  Parameters
+      |                      ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:133:9: error: no member named 'setParameters' in 'ADSR'
+  133 |   adsr_.setParameters(params);
+      |   ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:140:13: error: no member named 'noteOn' in 'ADSR'
+  140 |       adsr_.noteOn();
+      |       ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:144:13: error: no member named 'noteOff' in 'ADSR'
+  144 |       adsr_.noteOff();
+      |       ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:152:25: error: no member named 'getNextSample' in 'ADSR'
+  152 |     adsrBuf_[i] = adsr_.getNextSample();
+      |                   ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:164:14: warning: implicit conversion changes signedness: 'int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  164 |     adsrBuf_[i] *= mvol;
+      |     ~~~~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:193:9: error: no member named 'setFrequency' in 'LFO'
+  193 |   lfo1_.setFrequency(r1);
+      |   ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:194:9: error: no member named 'setFrequency' in 'LFO'
+  194 |   lfo2_.setFrequency(r2);
+      |   ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:197:11: error: no member named 'getNextSample' in 'LFO'
+  197 |     lfo1_.getNextSample();
+      |     ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:198:11: error: no member named 'getNextSample' in 'LFO'
+  198 |     lfo2_.getNextSample();
+      |     ~~~~~ ^
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:204:32: warning: implicit conversion changes signedness: 'int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  204 |   std::vector<float> path(resX * 3);
+      |                      ~~~~ ~~~~~^~~
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:216:23: warning: implicit conversion changes signedness: 'int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  216 |   sd.data.resize(resX * 4);
+      |           ~~~~~~ ~~~~~^~~
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:218:27: warning: implicit conversion changes signedness: 'int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  218 |     float x = (path[i * 3 + 0] * 0.5f) + 0.5f;
+      |                ~~~~ ~~~~~~^~~
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:219:27: warning: implicit conversion changes signedness: 'int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  219 |     float y = (path[i * 3 + 1] * 0.5f) + pathY;
+      |                ~~~~ ~~~~~~^~~
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:220:27: warning: implicit conversion changes signedness: 'int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  220 |     float z = (path[i * 3 + 2] * 0.5f) + 0.5f;
+      |                ~~~~ ~~~~~~^~~
+/Users/jlof/spectraltable/plugin/src/PluginProcessor.cpp:226:39: warning: implicit conversion changes signedness: 'int' to 'size_type' (aka 'unsigned long') [-Wsign-conversion]
+  226 |     volume.sample(x, y, z, &sd.data[i * 4]);
+      |                             ~~      ~~^~~
+7 warnings and 11 errors generated.
+make[2]: *** [CMakeFiles/SpectralTable.dir/src/PluginProcessor.cpp.o] Error 1
+make[1]: *** [CMakeFiles/SpectralTable.dir/all] Error 2
+make: *** [all] Error 2
