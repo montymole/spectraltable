@@ -1,5 +1,7 @@
 ## 🚀 Spectra Table Synthesis: Web Prototype
 
+[https://montymole.github.io/spectraltable/](https://montymole.github.io/spectraltable/)
+
 A WebGL-intensive, real-time audio synthesis application that combines GPU-accelerated spectral processing with 3D visualization. Uses browser-based technologies (WebGL 2.0, Web Audio, Web MIDI, TypeScript) to create a novel synthesizer controlled through a 3D spectral volume interface.
 
 ## 📊 Current Status: ~74% Complete
