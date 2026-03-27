@@ -48,6 +48,7 @@ class WavetableProcessor extends AudioWorkletProcessor {
     private timelineNumFrames = 0;
     private timelineTotalSamples = 0;
     private sampleCount = 0;
+    private disposed = false;
 
     constructor() {
         super();
@@ -55,6 +56,9 @@ class WavetableProcessor extends AudioWorkletProcessor {
 
         this.port.onmessage = (e) => {
             switch (e.data.type) {
+                case 'dispose':
+                    this.disposed = true;
+                    break;
                 case 'spectral-timeline': {
                     this.timeline = e.data.frames;
                     this.timelineFrameSize = e.data.frameSize;
@@ -168,7 +172,13 @@ class WavetableProcessor extends AudioWorkletProcessor {
         }
     }
 
+    private sanitizeSample(value: number): number {
+        if (!Number.isFinite(value)) return 0;
+        return Math.max(-1, Math.min(1, value));
+    }
+
     process(_inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
+        if (this.disposed) return false;
         const output = outputs[0];
         const channelL = output[0];
         const channelR = output[1];
@@ -309,7 +319,7 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 }
             }
 
-            this.lastSample = totalSample;
+            this.lastSample = Number.isFinite(totalSample) ? Math.max(-2, Math.min(2, totalSample)) : 0;
 
             // Waveshaping post-process
             if (this.waveshapeCurve > 0 && this.waveshapeMix > 0.001) {
@@ -343,8 +353,9 @@ class WavetableProcessor extends AudioWorkletProcessor {
             }
 
             const gain = 0.5;
-            channelL[i] = totalSample * gain;
-            channelR[i] = totalSample * gain;
+            const out = this.sanitizeSample(totalSample * gain);
+            channelL[i] = out;
+            channelR[i] = out;
 
             this.phase = (this.phase + carrierPhaseInc) % 1.0;
             this.envPhase = (this.envPhase + envPhaseInc) % 1.0;

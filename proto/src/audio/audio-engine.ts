@@ -40,6 +40,7 @@ interface EngineVoice {
     id: number;
     note: number;
     startedAt: number;
+    releasedAt: number | null;
     node: AudioWorkletNode;
     gain: GainNode;
     filterStageA: BiquadFilterNode;
@@ -106,6 +107,7 @@ export class AudioEngine {
     private filterState: FilterState = { ...defaultFilterState };
     private polyphonyState: PolyphonyState = { ...defaultPolyphonyState };
     private lastSpectralData: Float32Array | null = null;
+    private readonly releaseVoiceMultiplier = 2;
 
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -163,6 +165,10 @@ export class AudioEngine {
             numberOfOutputs: 1,
             outputChannelCount: [2]
         });
+        node.onprocessorerror = () => {
+            console.error(`AudioWorklet processor failed for note ${note}`);
+            this.stopVoice(voice.id);
+        };
         const gain = this.ctx.createGain();
         gain.gain.value = 0;
         const filterStageA = this.ctx.createBiquadFilter();
@@ -172,6 +178,7 @@ export class AudioEngine {
             id: this.nextVoiceId++,
             note,
             startedAt: this.ctx.currentTime,
+            releasedAt: null,
             node,
             gain,
             filterStageA,
@@ -660,15 +667,16 @@ export class AudioEngine {
         if (!this.isInitialized) return [];
         this.resume();
 
-        this.stopActiveNote(note);
+        this.stopNoteVoices(note, true);
 
         if (this.polyphonyState.mode === 'mono') {
             this.getActiveNotes()
                 .filter((activeNote) => activeNote !== note)
-                .forEach((activeNote) => this.stopActiveNote(activeNote));
+                .forEach((activeNote) => this.stopNoteVoices(activeNote, true));
         } else if (!this.getActiveNotes().includes(note)) {
             this.ensureFreePolyNote();
         }
+        this.enforceTotalVoiceLimit(this.polyphonyState.unisonVoices);
 
         const count = this.polyphonyState.unisonVoices;
         const ids: number[] = [];
@@ -691,6 +699,7 @@ export class AudioEngine {
         this.voices.forEach((voice) => {
             if (voice.note !== note || voice.isReleasing) return;
             voice.isReleasing = true;
+            voice.releasedAt = this.ctx.currentTime;
             released.push(voice.id);
         });
         return released;
@@ -712,10 +721,28 @@ export class AudioEngine {
         const index = this.voices.findIndex((voice) => voice.id === voiceId);
         if (index < 0) return;
         const [voice] = this.voices.splice(index, 1);
+        try {
+            voice.gain.gain.cancelScheduledValues(this.ctx.currentTime);
+            voice.gain.gain.setValueAtTime(0, this.ctx.currentTime);
+        } catch {
+            // Ignore teardown automation errors.
+        }
+        try {
+            voice.node.port.postMessage({ type: 'dispose' });
+        } catch {
+            // Ignore disposed port errors.
+        }
         this.safeDisconnect(voice.node);
         this.safeDisconnect(voice.filterStageA);
         this.safeDisconnect(voice.filterStageB);
         this.safeDisconnect(voice.gain);
+        window.setTimeout(() => {
+            try {
+                voice.node.port.close();
+            } catch {
+                // Ignore if the port was already closed.
+            }
+        }, 0);
     }
 
     public getActiveVoiceIds(): number[] {
@@ -731,9 +758,14 @@ export class AudioEngine {
     }
 
     private stopActiveNote(note: number): void {
+        this.stopNoteVoices(note, false);
+    }
+
+    private stopNoteVoices(note: number, includeReleasing: boolean): void {
         this.voices
-            .filter((voice) => voice.note === note && !voice.isReleasing)
-            .forEach((voice) => this.stopVoice(voice.id));
+            .filter((voice) => voice.note === note && (includeReleasing || !voice.isReleasing))
+            .map((voice) => voice.id)
+            .forEach((id) => this.stopVoice(id));
     }
 
     private getActiveNotes(): number[] {
@@ -776,6 +808,23 @@ export class AudioEngine {
             .filter((voice) => !voice.isReleasing)
             .sort((a, b) => a.startedAt - b.startedAt)[0];
         if (oldest) this.stopActiveNote(oldest.note);
+    }
+
+    private enforceTotalVoiceLimit(incomingVoiceCount: number = 0): void {
+        const activeLimit = (this.polyphonyState.mode === 'mono' ? 1 : this.polyphonyState.voices) * this.polyphonyState.unisonVoices;
+        const releaseLimit = Math.max(this.polyphonyState.unisonVoices, activeLimit * this.releaseVoiceMultiplier);
+        const totalLimit = activeLimit + releaseLimit;
+
+        while (this.voices.length + incomingVoiceCount > totalLimit) {
+            const oldestReleasing = this.voices
+                .filter((voice) => voice.isReleasing)
+                .sort((a, b) => (a.releasedAt ?? a.startedAt) - (b.releasedAt ?? b.startedAt))[0];
+            const oldest = oldestReleasing || this.voices
+                .slice()
+                .sort((a, b) => a.startedAt - b.startedAt)[0];
+            if (!oldest) break;
+            this.stopVoice(oldest.id);
+        }
     }
 
     private getUnisonDetune(index: number, count: number): number {

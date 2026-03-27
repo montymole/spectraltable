@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="GPU-accelerated spectral synthesis in the browser" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet">
+  <title>Spectra Table Synthesis</title>
+  <script type="module" crossorigin src="./index-C1K1rMYI.js"></script>
+  <link rel="stylesheet" crossorigin href="./index-DceTEbhW.css">
+</head>
+
+<body>
+  <div id="app">
+    <div id="app-shell">
+      <header id="top-bar">
+        <div class="top-brand">
+          <div class="brand-mark">ST</div>
+          <div class="brand-copy">
+            <span class="brand-name">Spectral Table</span>
+            <span class="brand-subtitle">Prototype Layout</span>
+          </div>
+        </div>
+        <div id="preset-toolbar" class="top-toolbar-slot"></div>
+        <div id="tab-toolbar" class="top-toolbar-slot"></div>
+        <div class="top-status">
+          <span class="status-label">Proto</span>
+          <span class="status-value">Layout Study</span>
+        </div>
+      </header>
+
+      <main id="workspace">
+        <aside id="visual-column">
+          <section class="panel-card visual-card visual-card-cube">
+            <div class="panel-body vis-content">
+              <canvas id="gl-canvas"></canvas>
+            </div>
+            <div class="vis-header">Spectral Cube</div>
+          </section>
+
+          <section class="panel-card visual-card visual-card-spectrum">
+            <div class="panel-body vis-content">
+              <canvas id="spectrogram-canvas"></canvas>
+            </div>
+            <div class="vis-header">Spectrogram</div>
+          </section>
+
+          <section class="panel-card visual-card visual-card-scope">
+            <div class="panel-body vis-content">
+              <canvas id="scope-canvas"></canvas>
+            </div>
+            <div class="vis-header">Stereo Scope</div>
+          </section>
+        </aside>
+
+        <section id="panel-stage">
+          <div id="controls"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="piano-container"></div>
+  </div>
+
+</body>
+
+</html>

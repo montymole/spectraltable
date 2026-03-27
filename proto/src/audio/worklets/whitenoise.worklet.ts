@@ -23,6 +23,7 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
     private timelineNumFrames = 0;
     private timelineTotalSamples = 0;
     private sampleCount = 0;
+    private disposed = false;
 
     // Waveshaping
     private waveshapeCurve = 0; // 0=none, 1=tanh, 2=polynomial, 3=sine fold, 4=custom LUT
@@ -40,7 +41,9 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
         this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
 
         this.port.onmessage = (e) => {
-            if (e.data.type === 'spectral-timeline') {
+            if (e.data.type === 'dispose') {
+                this.disposed = true;
+            } else if (e.data.type === 'spectral-timeline') {
                 this.timeline = e.data.frames;
                 this.timelineFrameSize = e.data.frameSize;
                 this.timelineNumFrames = e.data.numFrames;
@@ -95,7 +98,13 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
         }
     }
 
+    private sanitizeSample(value: number): number {
+        if (!Number.isFinite(value)) return 0;
+        return Math.max(-1, Math.min(1, value));
+    }
+
     process(_inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
+        if (this.disposed) return false;
         const output = outputs[0];
         const channelL = output[0];
         const channelR = output[1];
@@ -160,9 +169,14 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
                 this.lowStates[bin] = this.lowStates[bin] + f * this.bandStates[bin];
                 const high = noise - this.lowStates[bin] - q * this.bandStates[bin];
                 const band = f * high + this.bandStates[bin];
-                this.bandStates[bin] = band;
+                if (!Number.isFinite(this.lowStates[bin]) || !Number.isFinite(band)) {
+                    this.lowStates[bin] = 0;
+                    this.bandStates[bin] = 0;
+                    continue;
+                }
+                this.bandStates[bin] = Math.max(-8, Math.min(8, band));
 
-                sumSubtracted += band * suppression;
+                sumSubtracted += this.bandStates[bin] * suppression;
             }
 
             let sample = noise - sumSubtracted;
@@ -186,8 +200,9 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
             }
 
             const gain = 0.01;
-            channelL[i] = sample * gain;
-            channelR[i] = sample * gain;
+            const out = this.sanitizeSample(sample * gain);
+            channelL[i] = out;
+            channelR[i] = out;
         }
 
         return true;

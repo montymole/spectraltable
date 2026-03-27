@@ -27,6 +27,7 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
     private timelineNumFrames = 0;
     private timelineTotalSamples = 0;
     private sampleCount = 0;
+    private disposed = false;
 
     // Harmonic Injection
     private harmonicCount = 0;
@@ -53,6 +54,9 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
 
         this.port.onmessage = (e) => {
             switch (e.data.type) {
+                case 'dispose':
+                    this.disposed = true;
+                    break;
                 case 'spectral-timeline':
                     this.timeline = e.data.frames;
                     this.timelineFrameSize = e.data.frameSize;
@@ -123,6 +127,11 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
             this.targetData = new Float32Array(needed);
             this.phases = new Float32Array(bins);
         }
+    }
+
+    private sanitizeSample(value: number): number {
+        if (!Number.isFinite(value)) return 0;
+        return Math.max(-1, Math.min(1, value));
     }
 
     getLogFreq(k: number): number {
@@ -239,6 +248,7 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
     }
 
     process(_inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
+        if (this.disposed) return false;
         const output = outputs[0];
         const channelL = output[0];
         const channelR = output[1];
@@ -284,8 +294,8 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
                 l = this.applySaturation(l);
                 r = this.applySaturation(r);
             }
-            channelL[i] = l * scale;
-            channelR[i] = r * scale;
+            channelL[i] = this.sanitizeSample(l * scale);
+            channelR[i] = this.sanitizeSample(r * scale);
         }
 
         return true;
