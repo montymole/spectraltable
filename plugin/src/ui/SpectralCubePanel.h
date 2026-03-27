@@ -1,6 +1,5 @@
 #pragma once
 #include "../PluginProcessor.h"
-#include "../dsp/ReadingPath.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_opengl/juce_opengl.h>
 
@@ -19,6 +18,7 @@ public:
   void setShowWireframe(bool shouldShow) { showWireframe = shouldShow; }
   void setShowPoints(bool shouldShow) { showPoints = shouldShow; }
   void setShowLine(bool shouldShow) { showLine = shouldShow; }
+  void setShowPlane(bool shouldShow) { showPlane = shouldShow; }
 
   // OpenGLRenderer overrides
   void newOpenGLContextCreated() override;
@@ -55,7 +55,17 @@ private:
   GLuint lineVBO = 0;
   int lineCount = 0;
 
+  GLuint planeVAO = 0;
+  GLuint planeVBO = 0;
+  GLuint planeIBO = 0;
+  int planeIndexCount = 0;
+
+  GLuint axesVAO = 0;
+  GLuint axesVBO = 0;
+  int axesCounts[3] = {0, 0, 0};
+
   GLuint volumeTexture = 0;
+  uint32_t lastVolumeVersion = 0;
   GLuint testVBO = 0;
   GLuint testVAO = 0;
 
@@ -67,8 +77,9 @@ private:
   bool showWireframe = true;
   bool showPoints = false;
   bool showLine = false;
+  bool showPlane = true;
 
-  juce::String debugText = "hello";
+  juce::String debugText = "cube";
   juce::CriticalSection debugLock;
 
   juce::Matrix3D<float> getProjectionMatrix() const;

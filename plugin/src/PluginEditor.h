@@ -245,8 +245,68 @@ private:
   juce::ToggleButton wireToggle;
   juce::ToggleButton pointsToggle;
   juce::ToggleButton lineToggle;
+  juce::ToggleButton planeToggle;
+  juce::TextButton resetButton{"Reset to Defaults"};
+  juce::TextButton importButton{"Import WAV..."};
+  std::unique_ptr<juce::FileChooser> fileChooser;
+
+  // ---- Dynamic generator parameter controls ----
+  // Section header
+  juce::Label genParamLabel;
+
+  // Julia (gen=0): scale, cReal, cImag
+  juce::Label genScaleLabel;
+  juce::Slider genScaleSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genScaleAttachment;
+  juce::Label genCRealLabel;
+  juce::Slider genCRealSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genCRealAttachment;
+  juce::Label genCImagLabel;
+  juce::Slider genCImagSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genCImagAttachment;
+
+  // Mandelbulb (gen=1): power, iter (share scale above)
+  juce::Label genPowerLabel;
+  juce::Slider genPowerSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genPowerAttachment;
+  juce::Label genIterLabel;
+  juce::Slider genIterSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genIterAttachment;
+
+  // Menger (gen=2): hole (share scale+iter above)
+  juce::Label genHoleLabel;
+  juce::Slider genHoleSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genHoleAttachment;
+
+  // Plasma (gen=3): freq, comp, contrast
+  juce::Label genFreqLabel;
+  juce::Slider genFreqSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genFreqAttachment;
+  juce::Label genCompLabel;
+  juce::Slider genCompSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genCompAttachment;
+  juce::Label genContrastLabel;
+  juce::Slider genContrastSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genContrastAttachment;
+
+  // GoL (gen=4): density, birth, survive
+  juce::Label genDensityLabel;
+  juce::Slider genDensitySlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genDensityAttachment;
+  juce::Label genBirthLabel;
+  juce::Slider genBirthSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genBirthAttachment;
+  juce::Label genSurviveLabel;
+  juce::Slider genSurviveSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genSurviveAttachment;
+
+  // Animated (gen=3 + gen=4): speed
+  juce::Label genSpeedLabel;
+  juce::Slider genSpeedSlider;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> genSpeedAttachment;
 
   void initControls();
+  void updateGenParamVisibility(int gen);
   void styleLabel(juce::Label &label, const juce::String &text);
   void styleSlider(juce::Slider &slider);
   void styleCombo(juce::ComboBox &box);

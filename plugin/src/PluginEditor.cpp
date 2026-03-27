@@ -86,18 +86,52 @@ void PluginEditor::resized() {
   row(vizLabel, wireToggle, 28);
   rowNoLabel(pointsToggle, 28);
   rowNoLabel(lineToggle, 28);
+  rowNoLabel(planeToggle, 28);
   row(attackLabel, attackSlider, 90);
   row(decayLabel, decaySlider, 90);
   row(sustainLabel, sustainSlider, 90);
   row(releaseLabel, releaseSlider, 90);
   row(masterVolLabel, masterVolSlider, 90);
+  rowNoLabel(resetButton, 32);
+  rowNoLabel(importButton, 32);
+
+  // Gen params – only laid out when visible (visibility set by updateGenParamVisibility)
+  auto genRow = [&](juce::Label &label, juce::Slider &slider) {
+    if (!slider.isVisible()) return;
+    label.setBounds(0, y, labelWidth, 90);
+    slider.setBounds(labelWidth + 10, y, contentWidth - labelWidth - 10, 90);
+    y += 90 + rowGap;
+  };
+
+  if (genParamLabel.isVisible()) {
+    genParamLabel.setBounds(0, y, contentWidth, 22);
+    y += 22 + rowGap;
+  }
+  genRow(genScaleLabel, genScaleSlider);
+  genRow(genCRealLabel, genCRealSlider);
+  genRow(genCImagLabel, genCImagSlider);
+  genRow(genPowerLabel, genPowerSlider);
+  genRow(genIterLabel, genIterSlider);
+  genRow(genHoleLabel, genHoleSlider);
+  genRow(genFreqLabel, genFreqSlider);
+  genRow(genCompLabel, genCompSlider);
+  genRow(genContrastLabel, genContrastSlider);
+  genRow(genDensityLabel, genDensitySlider);
+  genRow(genBirthLabel, genBirthSlider);
+  genRow(genSurviveLabel, genSurviveSlider);
+  genRow(genSpeedLabel, genSpeedSlider);
+
 
   controlsContent.setSize(contentWidth, y);
 
-  // Split left panel into 3 equal height rows
-  int th = leftPanel.getHeight() / 3;
-  spectralCube.setBounds(leftPanel.removeFromTop(th).reduced(4));
-  spectrogram.setBounds(leftPanel.removeFromTop(th).reduced(4));
+  // Prioritize the cube view: give it 2/3 of the visual column and split the
+  // remaining 1/3 evenly between the placeholder spectrogram and scope panels.
+  const int totalHeight = leftPanel.getHeight();
+  const int smallPanelHeight = totalHeight / 6;
+  const int cubeHeight = totalHeight - (smallPanelHeight * 2);
+
+  spectralCube.setBounds(leftPanel.removeFromTop(cubeHeight).reduced(4));
+  spectrogram.setBounds(leftPanel.removeFromTop(smallPanelHeight).reduced(4));
   scope.setBounds(leftPanel.reduced(4));
 }
 
@@ -124,11 +158,18 @@ void PluginEditor::initControls() {
   dataSourceBox.addItem("Sine Plasma", 4);
   dataSourceBox.addItem("Game of Life", 5);
   dataSourceBox.addItem("Empty", 6);
+  dataSourceBox.addItem("Imported", 7);
   styleCombo(dataSourceBox);
   dataSourceAttachment =
       std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
           apvts_, ParamID::GENERATOR, dataSourceBox);
+  // Note: APVTS attachment sets the initial value; we sync visibility after
+  // addLabeled so the component exists before we call setVisible on children.
   addLabeled(dataSourceLabel, dataSourceBox);
+  dataSourceBox.onChange = [this]() {
+    // ComboBox ID is 1-based; generator param is 0-based
+    updateGenParamVisibility(dataSourceBox.getSelectedId() - 1);
+  };
 
   styleLabel(pathXLabel, "Path X");
   styleSlider(pathXSlider);
@@ -384,13 +425,16 @@ void PluginEditor::initControls() {
   wireToggle.setButtonText("Wireframe");
   pointsToggle.setButtonText("Point Cloud");
   lineToggle.setButtonText("Reading Line");
+  planeToggle.setButtonText("Reading Plane");
   wireToggle.setToggleState(true, juce::dontSendNotification);
   pointsToggle.setToggleState(false, juce::dontSendNotification);
   lineToggle.setToggleState(false, juce::dontSendNotification);
+  planeToggle.setToggleState(true, juce::dontSendNotification);
   controlsContent.addAndMakeVisible(vizLabel);
   controlsContent.addAndMakeVisible(wireToggle);
   controlsContent.addAndMakeVisible(pointsToggle);
   controlsContent.addAndMakeVisible(lineToggle);
+  controlsContent.addAndMakeVisible(planeToggle);
 
   wireToggle.onClick = [this]() {
     spectralCube.setShowWireframe(wireToggle.getToggleState());
@@ -400,6 +444,9 @@ void PluginEditor::initControls() {
   };
   lineToggle.onClick = [this]() {
     spectralCube.setShowLine(lineToggle.getToggleState());
+  };
+  planeToggle.onClick = [this]() {
+    spectralCube.setShowPlane(planeToggle.getToggleState());
   };
 
   styleLabel(attackLabel, "Attack");
@@ -436,6 +483,117 @@ void PluginEditor::initControls() {
       std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
           apvts_, ParamID::MASTER_VOL, masterVolSlider);
   addLabeled(masterVolLabel, masterVolSlider);
+
+  resetButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff442222));
+  resetButton.onClick = [this]() {
+    for (auto *param : apvts_.processor.getParameters()) {
+      if (auto *p = dynamic_cast<juce::AudioProcessorParameterWithID *>(param)) {
+        p->setValueNotifyingHost(p->getDefaultValue());
+      }
+    }
+  };
+  controlsContent.addAndMakeVisible(resetButton);
+
+  importButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff224422));
+  importButton.onClick = [this]() {
+    fileChooser = std::make_unique<juce::FileChooser>(
+        "Select one or more WAV files to import...",
+        juce::File::getSpecialLocation(juce::File::userHomeDirectory),
+        "*.wav;*.aif;*.aiff");
+
+    auto folderFlags = juce::FileBrowserComponent::openMode |
+                       juce::FileBrowserComponent::canSelectFiles |
+                       juce::FileBrowserComponent::canSelectMultipleItems;
+
+    fileChooser->launchAsync(folderFlags, [this](const juce::FileChooser &fc) {
+      auto files = fc.getResults();
+      if (files.size() > 0) {
+        // Trigger import on the processor
+        if (auto* proc = dynamic_cast<PluginProcessor*>(&apvts_.processor)) {
+          proc->importWavFiles(files);
+        }
+      }
+    });
+  };
+  controlsContent.addAndMakeVisible(importButton);
+
+  // ---- Generator parameter controls ----
+  auto addGen = [&](juce::Label &label, juce::Slider &slider) {
+    styleSlider(slider);
+    controlsContent.addAndMakeVisible(label);
+    controlsContent.addAndMakeVisible(slider);
+  };
+
+  styleLabel(genParamLabel, "Gen Params");
+  controlsContent.addAndMakeVisible(genParamLabel);
+
+  styleLabel(genScaleLabel, "Scale");
+  genScaleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_SCALE, genScaleSlider);
+  addGen(genScaleLabel, genScaleSlider);
+
+  styleLabel(genCRealLabel, "C Real");
+  genCRealAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_CREAL, genCRealSlider);
+  addGen(genCRealLabel, genCRealSlider);
+
+  styleLabel(genCImagLabel, "C Imag");
+  genCImagAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_CIMAG, genCImagSlider);
+  addGen(genCImagLabel, genCImagSlider);
+
+  styleLabel(genPowerLabel, "Power");
+  genPowerAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_POWER, genPowerSlider);
+  addGen(genPowerLabel, genPowerSlider);
+
+  styleLabel(genIterLabel, "Iterations");
+  genIterAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_ITER, genIterSlider);
+  addGen(genIterLabel, genIterSlider);
+
+  styleLabel(genHoleLabel, "Hole Size");
+  genHoleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_HOLE, genHoleSlider);
+  addGen(genHoleLabel, genHoleSlider);
+
+  styleLabel(genFreqLabel, "Frequency");
+  genFreqAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_FREQ, genFreqSlider);
+  addGen(genFreqLabel, genFreqSlider);
+
+  styleLabel(genCompLabel, "Complexity");
+  genCompAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_COMP, genCompSlider);
+  addGen(genCompLabel, genCompSlider);
+
+  styleLabel(genContrastLabel, "Contrast");
+  genContrastAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_CONTRAST, genContrastSlider);
+  addGen(genContrastLabel, genContrastSlider);
+
+  styleLabel(genDensityLabel, "Density");
+  genDensityAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_DENSITY, genDensitySlider);
+  addGen(genDensityLabel, genDensitySlider);
+
+  styleLabel(genBirthLabel, "Birth Min");
+  genBirthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_BIRTH, genBirthSlider);
+  addGen(genBirthLabel, genBirthSlider);
+
+  styleLabel(genSurviveLabel, "Survive Min");
+  genSurviveAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_SURVIVE, genSurviveSlider);
+  addGen(genSurviveLabel, genSurviveSlider);
+
+  styleLabel(genSpeedLabel, "Anim Speed");
+  genSpeedAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+      apvts_, ParamID::GEN_SPEED, genSpeedSlider);
+  addGen(genSpeedLabel, genSpeedSlider);
+
+  // Sync initial visibility to the current generator value
+  updateGenParamVisibility(dataSourceBox.getSelectedId() - 1);
 }
 
 void PluginEditor::styleLabel(juce::Label &label, const juce::String &text) {
@@ -460,4 +618,58 @@ void PluginEditor::styleCombo(juce::ComboBox &box) {
   box.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff1e1e1e));
   box.setColour(juce::ComboBox::textColourId, juce::Colours::white);
   box.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff2a2a2a));
+}
+
+void PluginEditor::updateGenParamVisibility(int gen) {
+  // Which controls each generator uses:
+  //   0 Julia      : scale, cReal, cImag
+  //   1 Mandelbulb : scale, power, iter
+  //   2 Menger     : scale, iter, hole
+  //   3 Plasma     : freq, comp, contrast, speed
+  //   4 GoL        : density, birth, survive, speed
+  //   5 Empty      : (none)
+  const bool isJulia    = gen == 0;
+  const bool isBulb     = gen == 1;
+  const bool isMenger   = gen == 2;
+  const bool isPlasma   = gen == 3;
+  const bool isGoL      = gen == 4;
+  const bool isAnimated = isPlasma || isGoL;
+
+  const bool showScale   = isJulia || isBulb || isMenger;
+  const bool showCReal   = isJulia;
+  const bool showCImag   = isJulia;
+  const bool showPower   = isBulb;
+  const bool showIter    = isBulb || isMenger;
+  const bool showHole    = isMenger;
+  const bool showFreq    = isPlasma;
+  const bool showComp    = isPlasma;
+  const bool showContrast= isPlasma;
+  const bool showDensity = isGoL;
+  const bool showBirth   = isGoL;
+  const bool showSurvive = isGoL;
+  const bool anyVisible  = showScale || showCReal || showCImag || showPower ||
+                           showIter  || showHole  || showFreq  || showComp  ||
+                           showContrast || showDensity || showBirth || showSurvive ||
+                           isAnimated;
+
+  genParamLabel.setVisible(anyVisible);
+  genScaleLabel.setVisible(showScale);    genScaleSlider.setVisible(showScale);
+  genCRealLabel.setVisible(showCReal);    genCRealSlider.setVisible(showCReal);
+  genCImagLabel.setVisible(showCImag);    genCImagSlider.setVisible(showCImag);
+  genPowerLabel.setVisible(showPower);    genPowerSlider.setVisible(showPower);
+  genIterLabel.setVisible(showIter);      genIterSlider.setVisible(showIter);
+  genHoleLabel.setVisible(showHole);      genHoleSlider.setVisible(showHole);
+  genFreqLabel.setVisible(showFreq);      genFreqSlider.setVisible(showFreq);
+  genCompLabel.setVisible(showComp);      genCompSlider.setVisible(showComp);
+  genContrastLabel.setVisible(showContrast); genContrastSlider.setVisible(showContrast);
+  genDensityLabel.setVisible(showDensity);   genDensitySlider.setVisible(showDensity);
+  genBirthLabel.setVisible(showBirth);    genBirthSlider.setVisible(showBirth);
+  genSurviveLabel.setVisible(showSurvive);   genSurviveSlider.setVisible(showSurvive);
+  genSpeedLabel.setVisible(isAnimated);   genSpeedSlider.setVisible(isAnimated);
+
+  // Recalculate layout now that visibility has changed.
+  // Post asynchronously to avoid re-entrant resized() calls during init.
+  juce::MessageManager::callAsync([safe = juce::Component::SafePointer(this)] {
+    if (safe != nullptr) safe->resized();
+  });
 }

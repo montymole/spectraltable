@@ -1,4 +1,5 @@
 #include "SpectralCubePanel.h"
+#include "../dsp/ReadingPath.h"
 #include <juce_opengl/juce_opengl.h>
 
 using namespace juce::gl;
@@ -47,6 +48,37 @@ static const char *kTestFrag = R"(
 varying vec4 vColor;
 void main() { gl_FragColor = vColor; }
 )";
+
+static void addChar(char c, float x, float y, float z, float s, std::vector<float> &v,
+                    int axis) {
+  auto l = [&](float x1, float y1, float x2, float y2) {
+    if (axis == 0) { // X
+      v.push_back(x + x1 * s); v.push_back(y + y1 * s); v.push_back(z);
+      v.push_back(x + x2 * s); v.push_back(y + y2 * s); v.push_back(z);
+    } else if (axis == 1) { // Y
+      v.push_back(x + x1 * s); v.push_back(y + y1 * s); v.push_back(z);
+      v.push_back(x + x2 * s); v.push_back(y + y2 * s); v.push_back(z);
+    } else { // Z (char width maps to Z)
+      v.push_back(x); v.push_back(y + y1 * s); v.push_back(z + x1 * s);
+      v.push_back(x); v.push_back(y + y2 * s); v.push_back(z + x2 * s);
+    }
+  };
+  switch (toupper(c)) {
+  case 'B': l(0, 0, 0, 2); l(0, 2, 1.5, 2); l(1.5, 2, 2, 1.5); l(2, 1.5, 1.5, 1);
+            l(1.5, 1, 0, 1); l(1.5, 1, 2, 0.5); l(2, 0.5, 1.5, 0); l(1.5, 0, 0, 0); break;
+  case 'I': l(1, 2, 1, 0); break;
+  case 'N': l(0, 0, 0, 2); l(2, 0, 2, 2); l(0, 2, 2, 0); break;
+  case 'S': l(2, 2, 0, 2); l(0, 2, 0, 1); l(0, 1, 2, 1); l(2, 1, 2, 0); l(2, 0, 0, 0); break;
+  case 'M': l(0, 0, 0, 2); l(2, 0, 2, 2); l(0, 2, 1, 1); l(1, 1, 2, 2); break;
+  case 'O': l(0, 0, 2, 0); l(2, 0, 2, 2); l(2, 2, 0, 2); l(0, 2, 0, 0); break;
+  case 'R': l(0, 0, 0, 2); l(0, 2, 2, 2); l(2, 2, 2, 1); l(2, 1, 0, 1); l(0, 1, 2, 0); break;
+  case 'P': l(0, 0, 0, 2); l(0, 2, 2, 2); l(2, 2, 2, 1); l(2, 1, 0, 1); break;
+  case 'H': l(0, 0, 0, 2); l(2, 0, 2, 2); l(0, 1, 2, 1); break;
+  case 'T': l(0, 2, 2, 2); l(1, 2, 1, 0); break;
+  case 'E': l(0, 2, 2, 2); l(0, 1, 1.5, 1); l(0, 0, 2, 0); l(0, 0, 0, 2); break;
+  case 'A': l(0, 0, 1, 2); l(1, 2, 2, 0); l(0.5, 1, 1.5, 1); break;
+  }
+}
 
 SpectralCubePanel::SpectralCubePanel(PluginProcessor &processor)
     : processor_(processor) {
@@ -99,6 +131,7 @@ void SpectralCubePanel::mouseWheelMove(const juce::MouseEvent &,
 void SpectralCubePanel::newOpenGLContextCreated() {
   createPrograms();
   createGeometry();
+  glGenTextures(1, &volumeTexture);
 }
 
 void SpectralCubePanel::openGLContextClosing() {
@@ -120,10 +153,22 @@ void SpectralCubePanel::openGLContextClosing() {
     openGLContext.extensions.glDeleteVertexArrays(1, &lineVAO);
   if (lineVBO != 0)
     openGLContext.extensions.glDeleteBuffers(1, &lineVBO);
+  if (planeVAO != 0)
+    openGLContext.extensions.glDeleteVertexArrays(1, &planeVAO);
+  if (planeVBO != 0)
+    openGLContext.extensions.glDeleteBuffers(1, &planeVBO);
+  if (planeIBO != 0)
+    openGLContext.extensions.glDeleteBuffers(1, &planeIBO);
   if (testVBO != 0)
     openGLContext.extensions.glDeleteBuffers(1, &testVBO);
   if (testVAO != 0)
     openGLContext.extensions.glDeleteVertexArrays(1, &testVAO);
+  if (volumeTexture != 0)
+    glDeleteTextures(1, &volumeTexture);
+  if (axesVAO != 0)
+    openGLContext.extensions.glDeleteVertexArrays(1, &axesVAO);
+  if (axesVBO != 0)
+    openGLContext.extensions.glDeleteBuffers(1, &axesVBO);
 }
 
 void SpectralCubePanel::setDebugText(const juce::String &text) {
@@ -145,6 +190,8 @@ void SpectralCubePanel::renderOpenGL() {
   glDisable(GL_SCISSOR_TEST);
   glEnable(GL_DEPTH_TEST);
   glDisable(GL_CULL_FACE);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glLineWidth(1.5f);
 
   auto proj = getProjectionMatrix();
@@ -153,32 +200,23 @@ void SpectralCubePanel::renderOpenGL() {
       {rotationX, rotationY, 0.0f});
   auto mvp = proj * view * model;
 
-  const bool legacyGL =
-      juce::OpenGLShaderProgram::getLanguageVersion() < 1.30f;
-  const bool canUseVAO = !legacyGL;
+  const bool canUseVAO = juce::OpenGLShaderProgram::getLanguageVersion() >= 1.30f;
 
-  // Debug triangle to verify GL rendering
-  if (legacyGL) {
-    glUseProgram(0);
-    glDisable(GL_DEPTH_TEST);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glBegin(GL_TRIANGLES);
-    glColor3f(1.0f, 0.2f, 0.2f);
-    glVertex2f(0.0f, 0.6f);
-    glColor3f(0.2f, 1.0f, 0.2f);
-    glVertex2f(-0.6f, -0.6f);
-    glColor3f(0.2f, 0.4f, 1.0f);
-    glVertex2f(0.6f, -0.6f);
-    glEnd();
-    glEnable(GL_DEPTH_TEST);
-  } else if (testProgram && testVBO != 0 && testVAO != 0) {
-    testProgram->use();
-    openGLContext.extensions.glBindVertexArray(testVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    openGLContext.extensions.glBindVertexArray(0);
+  // Refresh 3D texture if volume has changed
+  uint32_t currentVersion = processor_.volume.getVersion();
+  if (currentVersion != lastVolumeVersion && volumeTexture != 0) {
+    const auto res = processor_.volume.getResolution();
+    glBindTexture(GL_TEXTURE_3D, volumeTexture);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    // Using GL_RGBA (4 floats per voxel)
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, res.x, res.y, res.z, 0, GL_RGBA,
+                 GL_FLOAT, processor_.volume.data());
+    lastVolumeVersion = currentVersion;
   }
 
   // Wireframe cube
@@ -207,8 +245,59 @@ void SpectralCubePanel::renderOpenGL() {
     }
   }
 
+  // Axes and labels use the same legacy-safe path as the cube so they remain
+  // visible in the host's GLSL 1.20 context.
+  if (showWireframe && wireframeProgram && axesVBO != 0 && wirePosAttrib) {
+    wireframeProgram->use();
+    if (wireMvpUniform)
+      wireMvpUniform->setMatrix4(mvp.mat, 1, false);
+
+    int offset = 0;
+    if (canUseVAO && axesVAO != 0) {
+      openGLContext.extensions.glBindVertexArray(axesVAO);
+
+      if (wireColorUniform)
+        wireColorUniform->set(0.9f, 0.4f, 0.4f);
+      glDrawArrays(GL_LINES, offset, axesCounts[0]);
+      offset += axesCounts[0];
+
+      if (wireColorUniform)
+        wireColorUniform->set(0.4f, 0.9f, 0.4f);
+      glDrawArrays(GL_LINES, offset, axesCounts[1]);
+      offset += axesCounts[1];
+
+      if (wireColorUniform)
+        wireColorUniform->set(0.4f, 0.4f, 0.9f);
+      glDrawArrays(GL_LINES, offset, axesCounts[2]);
+
+      openGLContext.extensions.glBindVertexArray(0);
+    } else {
+      glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
+      glEnableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+      glVertexAttribPointer((GLuint)wirePosAttrib->attributeID, 3, GL_FLOAT,
+                            GL_FALSE, 3 * sizeof(float), nullptr);
+
+      if (wireColorUniform)
+        wireColorUniform->set(0.9f, 0.4f, 0.4f);
+      glDrawArrays(GL_LINES, offset, axesCounts[0]);
+      offset += axesCounts[0];
+
+      if (wireColorUniform)
+        wireColorUniform->set(0.4f, 0.9f, 0.4f);
+      glDrawArrays(GL_LINES, offset, axesCounts[1]);
+      offset += axesCounts[1];
+
+      if (wireColorUniform)
+        wireColorUniform->set(0.4f, 0.4f, 0.9f);
+      glDrawArrays(GL_LINES, offset, axesCounts[2]);
+
+      glDisableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+      glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+  }
+
   // Point cloud
-  if (showPoints && pointProgram && pointVAO != 0 && pointVBO != 0) {
+  if (showPoints && pointVBO != 0) {
     // Build point buffer from volume (subsampled)
     const auto res = processor_.volume.getResolution();
     const int stride = 4;
@@ -217,9 +306,9 @@ void SpectralCubePanel::renderOpenGL() {
     std::vector<float> points;
     points.reserve((size_t)res.x * res.y);
 
-    const int stepX = juce::jmax(1, res.x / 64);
-    const int stepY = juce::jmax(1, res.y / 8);
-    const int stepZ = juce::jmax(1, res.z / 64);
+    const int stepX = juce::jmax(1, (int)res.x / 64);
+    const int stepY = juce::jmax(1, (int)res.y / 8);
+    const int stepZ = juce::jmax(1, (int)res.z / 64);
 
     for (int z = 0; z < res.z; z += stepZ) {
       for (int y = 0; y < res.y; y += stepY) {
@@ -249,21 +338,53 @@ void SpectralCubePanel::renderOpenGL() {
 
     pointCount = (int)(points.size() / 7);
 
-    openGLContext.extensions.glBindVertexArray(pointVAO);
     glBindBuffer(GL_ARRAY_BUFFER, pointVBO);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(points.size() * sizeof(float)),
                  points.data(), GL_DYNAMIC_DRAW);
 
-    pointProgram->use();
-    if (pointMvpUniform)
-      pointMvpUniform->setMatrix4(mvp.mat, 1, false);
+    if (pointProgram && pointPosAttrib && pointDataAttrib) {
+      pointProgram->use();
+      if (pointMvpUniform)
+        pointMvpUniform->setMatrix4(mvp.mat, 1, false);
 
-    glDrawArrays(GL_POINTS, 0, pointCount);
-    openGLContext.extensions.glBindVertexArray(0);
+      if (canUseVAO && pointVAO != 0) {
+        openGLContext.extensions.glBindVertexArray(pointVAO);
+        glDrawArrays(GL_POINTS, 0, pointCount);
+        openGLContext.extensions.glBindVertexArray(0);
+      } else {
+        glEnableVertexAttribArray((GLuint)pointPosAttrib->attributeID);
+        glVertexAttribPointer((GLuint)pointPosAttrib->attributeID, 3, GL_FLOAT,
+                              GL_FALSE, 7 * sizeof(float), nullptr);
+        glEnableVertexAttribArray((GLuint)pointDataAttrib->attributeID);
+        glVertexAttribPointer((GLuint)pointDataAttrib->attributeID, 4, GL_FLOAT,
+                              GL_FALSE, 7 * sizeof(float),
+                              (void *)(3 * sizeof(float)));
+        glDrawArrays(GL_POINTS, 0, pointCount);
+        glDisableVertexAttribArray((GLuint)pointDataAttrib->attributeID);
+        glDisableVertexAttribArray((GLuint)pointPosAttrib->attributeID);
+      }
+    } else {
+      // Legacy fallback when the point shader won't compile in GLSL 1.20.
+      auto modelView = view * model;
+      glMatrixMode(GL_PROJECTION);
+      glLoadMatrixf(proj.mat);
+      glMatrixMode(GL_MODELVIEW);
+      glLoadMatrixf(modelView.mat);
+      glPointSize(3.0f);
+      glBegin(GL_POINTS);
+      for (int i = 0; i < pointCount; ++i) {
+        const size_t base = (size_t)i * 7;
+        glColor4f(points[base + 3], points[base + 4], points[base + 5], 1.0f);
+        glVertex3f(points[base + 0], points[base + 1], points[base + 2]);
+      }
+      glEnd();
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
   }
 
   // Reading line (uses wireframe shader)
-  if (showLine && wireframeProgram && lineVAO != 0 && lineVBO != 0) {
+  if (showLine && wireframeProgram && lineVBO != 0) {
     const int resX = processor_.volume.getResolution().x;
     if (resX > 1) {
       std::vector<float> line((size_t)resX * 3);
@@ -305,9 +426,9 @@ void SpectralCubePanel::renderOpenGL() {
       const float offZ = pathZ * 2.0f - 1.0f;
 
       for (int i = 0; i < resX; ++i) {
-        float x = line[i * 3 + 0];
-        float y = line[i * 3 + 1];
-        float z = line[i * 3 + 2];
+        float x = line[(size_t)i * 3 + 0];
+        float y = line[(size_t)i * 3 + 1];
+        float z = line[(size_t)i * 3 + 2];
 
         float y1 = y * cx - z * sx;
         float z1 = y * sx + z * cx;
@@ -317,12 +438,11 @@ void SpectralCubePanel::renderOpenGL() {
         float y3 = x2 * sz + y1 * cz;
         float z3 = z2;
 
-        line[i * 3 + 0] = x3 + offX;
-        line[i * 3 + 1] = y3 + offY;
-        line[i * 3 + 2] = z3 + offZ;
+        line[(size_t)i * 3 + 0] = x3 + offX;
+        line[(size_t)i * 3 + 1] = y3 + offY;
+        line[(size_t)i * 3 + 2] = z3 + offZ;
       }
 
-      openGLContext.extensions.glBindVertexArray(lineVAO);
       glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
       glBufferData(GL_ARRAY_BUFFER,
                    (GLsizeiptr)(line.size() * sizeof(float)), line.data(),
@@ -335,8 +455,101 @@ void SpectralCubePanel::renderOpenGL() {
       if (wireColorUniform)
         wireColorUniform->set(1.0f, 0.4f, 0.2f);
 
-      glDrawArrays(GL_LINE_STRIP, 0, lineCount);
+      if (canUseVAO && lineVAO != 0) {
+        openGLContext.extensions.glBindVertexArray(lineVAO);
+        glDrawArrays(GL_LINE_STRIP, 0, lineCount);
+        openGLContext.extensions.glBindVertexArray(0);
+      } else if (wirePosAttrib) {
+        glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
+        glEnableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+        glVertexAttribPointer((GLuint)wirePosAttrib->attributeID, 3, GL_FLOAT,
+                              GL_FALSE, 3 * sizeof(float), nullptr);
+        glDrawArrays(GL_LINE_STRIP, 0, lineCount);
+        glDisableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+      }
+    }
+  }
+
+  // Reading plane
+  if (showPlane && wireframeProgram && planeVBO != 0 &&
+      planeIBO != 0) {
+    const int gridRes = 24;
+    std::vector<float> plane((size_t)(gridRes + 1) * (gridRes + 1) * 3);
+
+    const int planeType = static_cast<int>(
+        processor_.apvts.getRawParameterValue(ParamID::PLANE_TYPE)->load());
+    const float shapePhase =
+        processor_.apvts.getRawParameterValue(ParamID::SHAPE_PHASE)->load();
+    const float pathX =
+        processor_.apvts.getRawParameterValue(ParamID::PATH_X)->load();
+    const float pathY =
+        processor_.apvts.getRawParameterValue(ParamID::PATH_Y)->load();
+    const float pathZ =
+        processor_.apvts.getRawParameterValue(ParamID::PATH_Z)->load();
+    const float rotX =
+        processor_.apvts.getRawParameterValue(ParamID::ROT_X)->load();
+    const float rotY =
+        processor_.apvts.getRawParameterValue(ParamID::ROT_Y)->load();
+    const float rotZ =
+        processor_.apvts.getRawParameterValue(ParamID::ROT_Z)->load();
+
+    const float rx = rotX * (3.14159265f / 180.0f);
+    const float ry = rotY * (3.14159265f / 180.0f);
+    const float rz = rotZ * (3.14159265f / 180.0f);
+    const float cx = std::cos(rx), sx = std::sin(rx);
+    const float cy = std::cos(ry), sy = std::sin(ry);
+    const float cz = std::cos(rz), sz = std::sin(rz);
+    const float offX = pathX * 2.0f - 1.0f;
+    const float offY = pathY * 2.0f - 1.0f;
+    const float offZ = pathZ * 2.0f - 1.0f;
+
+    int vIdx = 0;
+    for (int j = 0; j <= gridRes; ++j) {
+      float vVal = (float)j / gridRes * 2.0f - 1.0f;
+      for (int i = 0; i <= gridRes; ++i) {
+        float uVal = (float)i / gridRes * 2.0f - 1.0f;
+        Vertex3 v = ReadingPath::calcVertex(
+            uVal, vVal, static_cast<PlaneType>(planeType), shapePhase);
+
+        float y1 = v.y * cx - v.z * sx;
+        float z1 = v.y * sx + v.z * cx;
+        float x2 = v.x * cy + z1 * sy;
+        float z2 = -v.x * sy + z1 * cy;
+        float x3 = x2 * cz - y1 * sz;
+        float y3 = x2 * sz + y1 * cz;
+        float z3 = z2;
+
+        plane[vIdx++] = x3 + offX;
+        plane[vIdx++] = y3 + offY;
+        plane[vIdx++] = z3 + offZ;
+      }
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(plane.size() * sizeof(float)),
+                 plane.data(), GL_DYNAMIC_DRAW);
+
+    wireframeProgram->use();
+    if (wireMvpUniform)
+      wireMvpUniform->setMatrix4(mvp.mat, 1, false);
+    if (wireColorUniform)
+      wireColorUniform->set(0.2f, 0.4f, 0.6f); // dark blue plane
+
+    if (canUseVAO && planeVAO != 0) {
+      openGLContext.extensions.glBindVertexArray(planeVAO);
+      glDrawElements(GL_TRIANGLES, planeIndexCount, GL_UNSIGNED_INT, nullptr);
       openGLContext.extensions.glBindVertexArray(0);
+    } else if (wirePosAttrib) {
+      glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, planeIBO);
+      glEnableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+      glVertexAttribPointer((GLuint)wirePosAttrib->attributeID, 3, GL_FLOAT,
+                            GL_FALSE, 3 * sizeof(float), nullptr);
+      glDrawElements(GL_TRIANGLES, planeIndexCount, GL_UNSIGNED_INT, nullptr);
+      glDisableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+      glBindBuffer(GL_ARRAY_BUFFER, 0);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     }
   }
 }
@@ -441,7 +654,7 @@ void SpectralCubePanel::createGeometry() {
   if (testPosAttrib) {
     glEnableVertexAttribArray((GLuint)testPosAttrib->attributeID);
     glVertexAttribPointer((GLuint)testPosAttrib->attributeID, 3, GL_FLOAT,
-                          GL_FALSE, 7 * sizeof(float), (void *)0);
+                          GL_FALSE, 7 * sizeof(float), nullptr);
   }
   if (testColorAttrib) {
     glEnableVertexAttribArray((GLuint)testColorAttrib->attributeID);
@@ -488,7 +701,7 @@ void SpectralCubePanel::createGeometry() {
   if (pointPosAttrib) {
     glEnableVertexAttribArray((GLuint)pointPosAttrib->attributeID);
     glVertexAttribPointer((GLuint)pointPosAttrib->attributeID, 3, GL_FLOAT,
-                          GL_FALSE, 7 * sizeof(float), (void *)0);
+                          GL_FALSE, 7 * sizeof(float), nullptr);
   }
   if (pointDataAttrib) {
     glEnableVertexAttribArray((GLuint)pointDataAttrib->attributeID);
@@ -506,7 +719,116 @@ void SpectralCubePanel::createGeometry() {
   if (wirePosAttrib) {
     glEnableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
     glVertexAttribPointer((GLuint)wirePosAttrib->attributeID, 3, GL_FLOAT,
-                          GL_FALSE, 3 * sizeof(float), (void *)0);
+                          GL_FALSE, 3 * sizeof(float), nullptr);
+  }
+  openGLContext.extensions.glBindVertexArray(0);
+
+  // Reading plane
+  openGLContext.extensions.glGenVertexArrays(1, &planeVAO);
+  openGLContext.extensions.glBindVertexArray(planeVAO);
+  openGLContext.extensions.glGenBuffers(1, &planeVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+  if (wirePosAttrib) {
+    glEnableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+    glVertexAttribPointer((GLuint)wirePosAttrib->attributeID, 3, GL_FLOAT,
+                          GL_FALSE, 3 * sizeof(float), nullptr);
+  }
+
+  const int gridRes = 24;
+  std::vector<unsigned int> planeIndices;
+  for (int j = 0; j < gridRes; ++j) {
+    for (int i = 0; i < gridRes; ++i) {
+      int r0 = j * (gridRes + 1);
+      int r1 = (j + 1) * (gridRes + 1);
+      planeIndices.push_back((unsigned int)(r0 + i));
+      planeIndices.push_back((unsigned int)(r0 + i + 1));
+      planeIndices.push_back((unsigned int)(r1 + i));
+      planeIndices.push_back((unsigned int)(r0 + i + 1));
+      planeIndices.push_back((unsigned int)(r1 + i + 1));
+      planeIndices.push_back((unsigned int)(r1 + i));
+    }
+  }
+  planeIndexCount = (int)planeIndices.size();
+  openGLContext.extensions.glGenBuffers(1, &planeIBO);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, planeIBO);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(planeIndices.size() * sizeof(unsigned int)),
+               planeIndices.data(), GL_STATIC_DRAW);
+
+  openGLContext.extensions.glBindVertexArray(0);
+
+  // Axes and Labels Geometry
+  std::vector<float> axesVerts;
+  const float origin = -1.2f;
+  const float length = 1.0f;
+  const float arrow = 0.05f;
+
+  // X - BINS
+  int xStart = (int)axesVerts.size() / 3;
+  axesVerts.push_back(origin); axesVerts.push_back(origin); axesVerts.push_back(origin);
+  axesVerts.push_back(origin + length); axesVerts.push_back(origin); axesVerts.push_back(origin);
+  // Arrowhead
+  axesVerts.push_back(origin+length); axesVerts.push_back(origin); axesVerts.push_back(origin);
+  axesVerts.push_back(origin+length-arrow); axesVerts.push_back(origin+arrow); axesVerts.push_back(origin);
+  axesVerts.push_back(origin+length); axesVerts.push_back(origin); axesVerts.push_back(origin);
+  axesVerts.push_back(origin+length-arrow); axesVerts.push_back(origin-arrow); axesVerts.push_back(origin);
+  // Label BINS
+  {
+    float lx = origin + 0.2f, ly = origin - 0.2f, lz = origin, s = 0.04f;
+    for (char c : std::string("BINS")) {
+      addChar(c, lx, ly, lz, s, axesVerts, 0);
+      lx += s * 3.0f;
+    }
+  }
+  axesCounts[0] = (int)axesVerts.size() / 3 - xStart;
+
+  // Y - MORPH
+  int yStart = (int)axesVerts.size() / 3;
+  axesVerts.push_back(origin); axesVerts.push_back(origin); axesVerts.push_back(origin);
+  axesVerts.push_back(origin); axesVerts.push_back(origin + length); axesVerts.push_back(origin);
+  // Arrowhead
+  axesVerts.push_back(origin); axesVerts.push_back(origin+length); axesVerts.push_back(origin);
+  axesVerts.push_back(origin+arrow); axesVerts.push_back(origin+length-arrow); axesVerts.push_back(origin);
+  axesVerts.push_back(origin); axesVerts.push_back(origin+length); axesVerts.push_back(origin);
+  axesVerts.push_back(origin-arrow); axesVerts.push_back(origin+length-arrow); axesVerts.push_back(origin);
+  // Label MORPH
+  {
+    float lx = origin - 0.2f, ly = origin + 0.2f, lz = origin, s = 0.04f;
+    for (char c : std::string("MORPH")) {
+      addChar(c, lx, ly, lz, s, axesVerts, 1);
+      ly += s * 3.0f;
+    }
+  }
+  axesCounts[1] = (int)axesVerts.size() / 3 - yStart;
+
+  // Z - TIME
+  int zStart = (int)axesVerts.size() / 3;
+  axesVerts.push_back(origin); axesVerts.push_back(origin); axesVerts.push_back(origin);
+  axesVerts.push_back(origin); axesVerts.push_back(origin); axesVerts.push_back(origin + length);
+  // Arrowhead
+  axesVerts.push_back(origin); axesVerts.push_back(origin); axesVerts.push_back(origin+length);
+  axesVerts.push_back(origin+arrow); axesVerts.push_back(origin); axesVerts.push_back(origin+length-arrow);
+  axesVerts.push_back(origin); axesVerts.push_back(origin); axesVerts.push_back(origin+length);
+  axesVerts.push_back(origin-arrow); axesVerts.push_back(origin); axesVerts.push_back(origin+length-arrow);
+  // Label TIME
+  {
+    float lx = origin - 0.2f, ly = origin, lz = origin + 0.2f, s = 0.04f;
+    for (char c : std::string("TIME")) {
+      addChar(c, lx, ly, lz, s, axesVerts, 2);
+      lz += s * 3.0f;
+    }
+  }
+  axesCounts[2] = (int)axesVerts.size() / 3 - zStart;
+
+  openGLContext.extensions.glGenVertexArrays(1, &axesVAO);
+  openGLContext.extensions.glBindVertexArray(axesVAO);
+  openGLContext.extensions.glGenBuffers(1, &axesVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
+  glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(axesVerts.size() * sizeof(float)),
+               axesVerts.data(), GL_STATIC_DRAW);
+  if (wirePosAttrib) {
+    glEnableVertexAttribArray((GLuint)wirePosAttrib->attributeID);
+    glVertexAttribPointer((GLuint)wirePosAttrib->attributeID, 3, GL_FLOAT,
+                          GL_FALSE, 3 * sizeof(float), nullptr);
   }
   openGLContext.extensions.glBindVertexArray(0);
 }

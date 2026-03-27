@@ -50,6 +50,21 @@ inline constexpr const char *GENERATOR = "generator";
 inline constexpr const char *BPM = "bpm";
 inline constexpr const char *SHAPE_MODE = "shapeMode";
 inline constexpr const char *SHAPE_AMOUNT = "shapeAmount";
+
+// Generator Params
+inline constexpr const char *GEN_SCALE = "genScale";
+inline constexpr const char *GEN_CREAL = "genCReal";
+inline constexpr const char *GEN_CIMAG = "genCImag";
+inline constexpr const char *GEN_POWER = "genPower";
+inline constexpr const char *GEN_ITER = "genIter";
+inline constexpr const char *GEN_HOLE = "genHole";
+inline constexpr const char *GEN_FREQ = "genFreq";
+inline constexpr const char *GEN_COMP = "genComp";
+inline constexpr const char *GEN_CONTRAST = "genContrast";
+inline constexpr const char *GEN_DENSITY = "genDensity";
+inline constexpr const char *GEN_BIRTH = "genBirth";
+inline constexpr const char *GEN_SURVIVE = "genSurvive";
+inline constexpr const char *GEN_SPEED = "genSpeed";
 } // namespace ParamID
 
 class PluginProcessor : public juce::AudioProcessor {
@@ -92,6 +107,9 @@ public:
   // Spectral volume — public so editor can trigger regeneration
   SpectralVolume volume{VolumeResolution{64, 2, 128}};
 
+  void importWavFiles(const juce::Array<juce::File>& files);
+  std::atomic<float> loadProgress_{0.0f};
+
 private:
   // Current active synth backend
   std::unique_ptr<SynthBase> synth_;
@@ -119,6 +137,17 @@ private:
   int lastResX_ = -1;
   int lastResY_ = -1;
   int lastResZ_ = -1;
+
+  // Per-generator param snapshots for change detection
+  float lastGenScale_ = -1.0f, lastGenCReal_ = -1.0f, lastGenCImag_ = -1.0f;
+  float lastGenPower_ = -1.0f, lastGenIter_ = -1.0f, lastGenHole_ = -1.0f;
+  float lastGenFreq_ = -1.0f, lastGenComp_ = -1.0f, lastGenContrast_ = -1.0f;
+  float lastGenDensity_ = -1.0f, lastGenBirth_ = -1.0f, lastGenSurvive_ = -1.0f;
+
+  // Animation: accumulated seconds since last tick (Plasma / GoL)
+  float animAccum_ = 0.0f;
+  float genTime_ = 0.0f;
+  void tickAnimatedGenerators(double sampleRate, int numSamples);
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginProcessor)
 };

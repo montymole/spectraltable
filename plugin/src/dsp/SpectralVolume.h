@@ -13,7 +13,7 @@ struct VolumeResolution { int x, y, z; };
 
 struct JuliaParams     { float scale = 1.0f, cReal = -0.4f, cImag = 0.6f; };
 struct MandelbulbParams{ float power = 8.0f, scale = 1.2f, iterations = 12.0f; };
-struct MengerParams    { float iterations = 4.0f, scale = 1.0f; };
+struct MengerParams    { float iterations = 4.0f, scale = 1.0f, holeSize = 0.33f; };
 struct PlasmaParams    { float frequency = 3.0f, complexity = 4.0f, contrast = 2.0f; };
 struct GameOfLifeParams{ float density = 0.3f; int birthMin = 5, surviveMin = 4; };
 
@@ -43,6 +43,7 @@ public:
     void clearData();
 
     VolumeResolution getResolution() const { return res_; }
+    uint32_t getVersion() const { return version_; }
 
     // Direct read access for the reading path sampler
     const float* data() const { return data_.data(); }
@@ -50,6 +51,7 @@ public:
 private:
     VolumeResolution res_;
     std::vector<float> data_;   // res.x * res.y * res.z * 4 floats
+    uint32_t version_ = 1;
 
     // GoL double buffers
     std::vector<uint8_t> golState_, golBuf_;

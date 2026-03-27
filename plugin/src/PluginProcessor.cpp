@@ -2,6 +2,7 @@
 #include "PluginEditor.h"
 #include "dsp/ChirpSynth.h"
 #include "dsp/NoiseSynth.h"
+#include "dsp/SpectralAnalyzer.h"
 #include "dsp/ReadingPath.h"
 #include "dsp/SpectralSynth.h"
 #include "dsp/WavetableSynth.h"
@@ -112,9 +113,43 @@ PluginProcessor::createParameterLayout() {
       juce::ParameterID{ParamID::LFO2_TARGET, 1}, "LFO2 Target", 0, 3, 0));
 
   params.push_back(std::make_unique<juce::AudioParameterInt>(
-      juce::ParameterID{ParamID::GENERATOR, 1}, "Generator", 0, 5, 0));
+      juce::ParameterID{ParamID::GENERATOR, 1}, "Generator", 0, 6, 6));
   params.push_back(std::make_unique<juce::AudioParameterFloat>(
       juce::ParameterID{ParamID::BPM, 1}, "BPM", 20.0f, 300.0f, 120.0f));
+
+  // Per-generator params
+  // Julia: scale, c.real, c.imag
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_SCALE, 1}, "Gen Scale", 0.1f, 3.0f, 1.0f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_CREAL, 1}, "Gen C Real", -2.0f, 2.0f, -0.4f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_CIMAG, 1}, "Gen C Imag", -2.0f, 2.0f, 0.6f));
+  // Mandelbulb: power, iterations (shared scale above)
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_POWER, 1}, "Gen Power", 1.0f, 16.0f, 8.0f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_ITER, 1}, "Gen Iterations", 2.0f, 32.0f, 12.0f));
+  // Menger: holeSize (shared scale + iter above)
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_HOLE, 1}, "Gen Hole", 0.05f, 0.6f, 0.33f));
+  // Plasma: frequency, complexity, contrast
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_FREQ, 1}, "Gen Freq", 0.5f, 20.0f, 3.0f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_COMP, 1}, "Gen Complexity", 1.0f, 16.0f, 4.0f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_CONTRAST, 1}, "Gen Contrast", 0.25f, 8.0f, 2.0f));
+  // GoL: density, birth threshold, survive threshold
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_DENSITY, 1}, "Gen Density", 0.05f, 0.8f, 0.3f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_BIRTH, 1}, "Gen Birth Min", 1.0f, 13.0f, 5.0f));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_SURVIVE, 1}, "Gen Survive Min", 1.0f, 13.0f, 4.0f));
+  // Animation speed (ticks/sec) for Plasma + GoL
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID{ParamID::GEN_SPEED, 1}, "Gen Speed", 0.1f, 30.0f, 4.0f));
 
   return {params.begin(), params.end()};
 }
@@ -125,7 +160,7 @@ PluginProcessor::PluginProcessor()
               .withInput("Input", juce::AudioChannelSet::stereo(), true)
               .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "Parameters", createParameterLayout()) {
-  volume.generate3DJulia(); // default
+  volume.clearData(); // default: clean table
   rebuildSynth(currentMode_);
 }
 
@@ -159,15 +194,45 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float> &buffer,
   const int resZ =
       static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_Z)->load());
 
+  // Read per-generator params
+  const float genScale    = apvts.getRawParameterValue(ParamID::GEN_SCALE)->load();
+  const float genCReal    = apvts.getRawParameterValue(ParamID::GEN_CREAL)->load();
+  const float genCImag    = apvts.getRawParameterValue(ParamID::GEN_CIMAG)->load();
+  const float genPower    = apvts.getRawParameterValue(ParamID::GEN_POWER)->load();
+  const float genIter     = apvts.getRawParameterValue(ParamID::GEN_ITER)->load();
+  const float genHole     = apvts.getRawParameterValue(ParamID::GEN_HOLE)->load();
+  const float genFreq     = apvts.getRawParameterValue(ParamID::GEN_FREQ)->load();
+  const float genComp     = apvts.getRawParameterValue(ParamID::GEN_COMP)->load();
+  const float genContrast = apvts.getRawParameterValue(ParamID::GEN_CONTRAST)->load();
+  const float genDensity  = apvts.getRawParameterValue(ParamID::GEN_DENSITY)->load();
+  const float genBirth    = apvts.getRawParameterValue(ParamID::GEN_BIRTH)->load();
+  const float genSurvive  = apvts.getRawParameterValue(ParamID::GEN_SURVIVE)->load();
+
+  const bool genParamsDirty =
+      genScale    != lastGenScale_    || genCReal  != lastGenCReal_  ||
+      genCImag    != lastGenCImag_    || genPower  != lastGenPower_  ||
+      genIter     != lastGenIter_     || genHole   != lastGenHole_   ||
+      genFreq     != lastGenFreq_     || genComp   != lastGenComp_   ||
+      genContrast != lastGenContrast_ || genDensity != lastGenDensity_ ||
+      genBirth    != lastGenBirth_    || genSurvive != lastGenSurvive_;
+
+  lastGenScale_ = genScale; lastGenCReal_ = genCReal;   lastGenCImag_    = genCImag;
+  lastGenPower_ = genPower; lastGenIter_  = genIter;    lastGenHole_     = genHole;
+  lastGenFreq_  = genFreq;  lastGenComp_  = genComp;    lastGenContrast_ = genContrast;
+  lastGenDensity_ = genDensity; lastGenBirth_ = genBirth; lastGenSurvive_ = genSurvive;
+
   if (gen != lastGenerator_ || resX != lastResX_ || resY != lastResY_ ||
-      resZ != lastResZ_) {
+      resZ != lastResZ_ || genParamsDirty) {
     lastGenerator_ = gen;
     lastResX_ = resX;
     lastResY_ = resY;
     lastResZ_ = resZ;
     regenerateVolume();
+    animAccum_ = 0.0f;
+    genTime_ = 0.0f;
   }
 
+  tickAnimatedGenerators(getSampleRate(), numSamples);
   applyLFOs(getSampleRate(), numSamples);
 
   float a = apvts.getRawParameterValue(ParamID::ATTACK)->load();
@@ -242,6 +307,26 @@ void PluginProcessor::applyLFOs(double sampleRate, int numSamples) {
     lfo1_.advance(deltaSeconds);
     lfo2_.advance(deltaSeconds);
   }
+}
+
+void PluginProcessor::importWavFiles(const juce::Array<juce::File>& files) {
+  int resX = static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_X)->load());
+  int resY = static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_Y)->load());
+  int resZ = static_cast<int>(apvts.getRawParameterValue(ParamID::DENSITY_Z)->load());
+
+  volume = SpectralVolume(VolumeResolution{resX, resY, resZ});
+  std::vector<float> newData((size_t)resX * resY * resZ * 4, 0.0f);
+
+  SpectralAnalyzer analyzer;
+  analyzer.analyzeFiles(files, volume.getResolution(), newData.data(), [this](float p) {
+    loadProgress_.store(p);
+  });
+
+  volume.setData(newData.data(), (int)newData.size());
+
+  // Switch generator to 'Imported' (6) so it's not immediately cleared
+  apvts.getRawParameterValue(ParamID::GENERATOR)->store(6.0f);
+  lastGenerator_ = 6;
 }
 
 void PluginProcessor::updateSpectralData() {
@@ -380,26 +465,71 @@ void PluginProcessor::regenerateVolume() {
   const int gen =
       static_cast<int>(apvts.getRawParameterValue(ParamID::GENERATOR)->load());
 
+  const float scale    = apvts.getRawParameterValue(ParamID::GEN_SCALE)->load();
+  const float cReal    = apvts.getRawParameterValue(ParamID::GEN_CREAL)->load();
+  const float cImag    = apvts.getRawParameterValue(ParamID::GEN_CIMAG)->load();
+  const float power    = apvts.getRawParameterValue(ParamID::GEN_POWER)->load();
+  const float iter     = apvts.getRawParameterValue(ParamID::GEN_ITER)->load();
+  const float hole     = apvts.getRawParameterValue(ParamID::GEN_HOLE)->load();
+  const float freq     = apvts.getRawParameterValue(ParamID::GEN_FREQ)->load();
+  const float comp     = apvts.getRawParameterValue(ParamID::GEN_COMP)->load();
+  const float contrast = apvts.getRawParameterValue(ParamID::GEN_CONTRAST)->load();
+  const float density  = apvts.getRawParameterValue(ParamID::GEN_DENSITY)->load();
+  const float birth    = apvts.getRawParameterValue(ParamID::GEN_BIRTH)->load();
+  const float survive  = apvts.getRawParameterValue(ParamID::GEN_SURVIVE)->load();
+
   switch (gen) {
   case 0:
-    volume.generate3DJulia();
+    volume.generate3DJulia(JuliaParams{scale, cReal, cImag});
     break;
   case 1:
-    volume.generateMandelbulb();
+    volume.generateMandelbulb(MandelbulbParams{power, scale, iter});
     break;
   case 2:
-    volume.generateMengerSponge();
+    volume.generateMengerSponge(MengerParams{iter, scale, hole});
     break;
   case 3:
-    volume.generateSinePlasma();
+    volume.generateSinePlasma(0.0f, PlasmaParams{freq, comp, contrast});
     break;
   case 4:
-    volume.initGameOfLife();
+    volume.initGameOfLife(GameOfLifeParams{
+        density,
+        static_cast<int>(birth),
+        static_cast<int>(survive)});
     break;
   case 5:
   default:
     volume.clearData();
     break;
+  case 6: // Imported - do nothing (keep current volume data)
+    break;
+  }
+}
+
+void PluginProcessor::tickAnimatedGenerators(double sampleRate, int numSamples) {
+  // Only Sine Plasma (3) and Game of Life (4) animate.
+  if (lastGenerator_ != 3 && lastGenerator_ != 4)
+    return;
+
+  const float speed = apvts.getRawParameterValue(ParamID::GEN_SPEED)->load();
+  // speed = ticks per second; 0 = frozen
+  if (speed <= 0.0f)
+    return;
+
+  animAccum_ += static_cast<float>(numSamples) / static_cast<float>(sampleRate);
+  const float tickPeriod = 1.0f / speed;
+
+  while (animAccum_ >= tickPeriod) {
+    animAccum_ -= tickPeriod;
+    if (lastGenerator_ == 3) {
+      genTime_ += tickPeriod;
+      const float freq     = apvts.getRawParameterValue(ParamID::GEN_FREQ)->load();
+      const float comp     = apvts.getRawParameterValue(ParamID::GEN_COMP)->load();
+      const float contrast = apvts.getRawParameterValue(ParamID::GEN_CONTRAST)->load();
+      volume.generateSinePlasma(genTime_, PlasmaParams{freq, comp, contrast});
+    } else {
+      volume.stepGameOfLife();
+    }
   }
 }
 

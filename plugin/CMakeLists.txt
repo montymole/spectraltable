@@ -41,6 +41,7 @@ target_sources(SpectralTable PRIVATE
     src/dsp/WavetableSynth.cpp
     src/dsp/ChirpSynth.cpp
     src/dsp/NoiseSynth.cpp
+    src/dsp/SpectralAnalyzer.cpp
     src/ui/SpectralCubePanel.cpp)
 
 # ── JUCE modules ─────────────────────────────────────────────────────────────
@@ -69,6 +70,11 @@ target_link_libraries(SpectralTable PRIVATE
 
 # ── Tests (optional) ─────────────────────────────────────────────────────────
 option(BUILD_TESTS "Build DSP unit tests" OFF)
+option(BUILD_HOST  "Build JUCE AudioPluginHost" ON)
+
+if(BUILD_HOST)
+    add_subdirectory(${juce_SOURCE_DIR}/extras/AudioPluginHost build/AudioPluginHost)
+endif()
 
 if(BUILD_TESTS)
     FetchContent_Declare(Catch2

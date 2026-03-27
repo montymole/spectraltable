@@ -5,12 +5,13 @@
 #include <random>
 
 SpectralVolume::SpectralVolume(VolumeResolution res) : res_(res) {
-  data_.assign(totalVoxels() * 4, 0.0f);
+  data_.assign((size_t)totalVoxels() * 4, 0.0f);
 }
 
 void SpectralVolume::setData(const float *src, int numFloats) {
   assert(numFloats == totalVoxels() * 4);
   data_.assign(src, src + numFloats);
+  version_++;
 }
 
 void SpectralVolume::sample(float x, float y, float z, float out[4]) const {
@@ -32,14 +33,14 @@ void SpectralVolume::sample(float x, float y, float z, float out[4]) const {
   float fx = gx - x0, fy = gy - y0, fz = gz - z0;
 
   for (int i = 0; i < 4; i++) {
-    float v000 = data_[voxelIndex(x0, y0, z0) + i];
-    float v100 = data_[voxelIndex(x1, y0, z0) + i];
-    float v010 = data_[voxelIndex(x0, y1, z0) + i];
-    float v110 = data_[voxelIndex(x1, y1, z0) + i];
-    float v001 = data_[voxelIndex(x0, y0, z1) + i];
-    float v101 = data_[voxelIndex(x1, y0, z1) + i];
-    float v011 = data_[voxelIndex(x0, y1, z1) + i];
-    float v111 = data_[voxelIndex(x1, y1, z1) + i];
+    float v000 = data_[(size_t)voxelIndex(x0, y0, z0) + i];
+    float v100 = data_[(size_t)voxelIndex(x1, y0, z0) + i];
+    float v010 = data_[(size_t)voxelIndex(x0, y1, z0) + i];
+    float v110 = data_[(size_t)voxelIndex(x1, y1, z0) + i];
+    float v001 = data_[(size_t)voxelIndex(x0, y0, z1) + i];
+    float v101 = data_[(size_t)voxelIndex(x1, y0, z1) + i];
+    float v011 = data_[(size_t)voxelIndex(x0, y1, z1) + i];
+    float v111 = data_[(size_t)voxelIndex(x1, y1, z1) + i];
 
     float c00 = v000 * (1 - fx) + v100 * fx;
     float c10 = v010 * (1 - fx) + v110 * fx;
@@ -53,7 +54,10 @@ void SpectralVolume::sample(float x, float y, float z, float out[4]) const {
   }
 }
 
-void SpectralVolume::clearData() { data_.assign(totalVoxels() * 4, 0.0f); }
+void SpectralVolume::clearData() {
+  data_.assign((size_t)totalVoxels() * 4, 0.0f);
+  version_++;
+}
 
 // ── Procedural generators ──────────────────────────────────────────────────
 
@@ -101,6 +105,7 @@ void SpectralVolume::generate3DJulia(const JuliaParams &p) {
         data_[idx++] = (py / scale + 1) * 0.5f;
         data_[idx++] = (pz / scale + 1) * 0.5f;
       }
+  version_++;
 }
 
 void SpectralVolume::generateMandelbulb(const MandelbulbParams &p) {
@@ -145,6 +150,7 @@ void SpectralVolume::generateMandelbulb(const MandelbulbParams &p) {
         data_[idx++] = (py / scale + 1) * 0.5f;
         data_[idx++] = (pz / scale + 1) * 0.5f;
       }
+  version_++;
 }
 
 void SpectralVolume::generateMengerSponge(const MengerParams &p) {
@@ -194,6 +200,7 @@ void SpectralVolume::generateMengerSponge(const MengerParams &p) {
         data_[idx++] = (py / scale + 1) * 0.5f;
         data_[idx++] = (pz / scale + 1) * 0.5f;
       }
+  version_++;
 }
 
 void SpectralVolume::generateSinePlasma(float timeOffset,
@@ -243,6 +250,7 @@ void SpectralVolume::generateSinePlasma(float timeOffset,
 void SpectralVolume::stepSinePlasma() {
   plasmaTime_ += 0.02f;
   generateSinePlasma(plasmaTime_, plasmaParams_);
+  version_++;
 }
 
 // ── Game of Life ───────────────────────────────────────────────────────────
@@ -259,6 +267,7 @@ void SpectralVolume::initGameOfLife(const GameOfLifeParams &p) {
     golState_[i] = (dist(rng) < p.density) ? 1 : 0;
 
   golToSpectral();
+  version_++;
 }
 
 void SpectralVolume::stepGameOfLife() {
@@ -286,17 +295,18 @@ void SpectralVolume::stepGameOfLife() {
                 continue;
               neighbors += golState_[getIdx(ix + dx, iy + dy, iz + dz)];
             }
-        bool alive = golState_[idx] == 1;
+        bool alive = golState_[(size_t)idx] == 1;
         if (alive)
-          golBuf_[idx] = (neighbors >= golParams_.surviveMin &&
-                          neighbors <= golParams_.surviveMin + 1)
-                             ? 1
-                             : 0;
+          golBuf_[(size_t)idx] = (neighbors >= golParams_.surviveMin &&
+                                  neighbors <= golParams_.surviveMin + 1)
+                                     ? 1
+                                     : 0;
         else
-          golBuf_[idx] = (neighbors == golParams_.birthMin) ? 1 : 0;
+          golBuf_[(size_t)idx] = (neighbors == golParams_.birthMin) ? 1 : 0;
       }
   std::swap(golState_, golBuf_);
   golToSpectral();
+  version_++;
 }
 
 void SpectralVolume::golToSpectral() {
@@ -305,19 +315,17 @@ void SpectralVolume::golToSpectral() {
   for (int iz = 0; iz < D; iz++)
     for (int iy = 0; iy < H; iy++)
       for (int ix = 0; ix < W; ix++) {
-        bool alive = golState_[iz * H * W + iy * W + ix] == 1;
+        bool alive = golState_[(size_t)iz * (size_t)H * (size_t)W + (size_t)iy * (size_t)W + (size_t)ix] == 1;
         float mag = alive ? 0.8f : 0.0f;
         if (alive) {
           float freqBoost = 1.0f + (1.0f - (float)ix / W) * 0.4f;
           mag = std::min(1.0f, mag * freqBoost);
         }
-        float nx = (float)ix / W * 2 - 1;
         float ny = (float)iy / H * 2 - 1;
         float nz = (float)iz / D * 2 - 1;
-        (void)nx;
-        data_[idx++] = mag;
-        data_[idx++] = ((float)ix / W + (float)iy / H + (float)iz / D) / 3.0f;
-        data_[idx++] = (ny + 1) * 0.5f;
-        data_[idx++] = (nz + 1) * 0.5f;
+        data_[(size_t)idx++] = mag;
+        data_[(size_t)idx++] = ((float)ix / W + (float)iy / H + (float)iz / D) / 3.0f;
+        data_[(size_t)idx++] = (ny + 1) * 0.5f;
+        data_[(size_t)idx++] = (nz + 1) * 0.5f;
       }
 }

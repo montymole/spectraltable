@@ -23,19 +23,19 @@ void SpectralSynth::ensureBuffers(int numBins) {
   if ((int)phaseAccum_.size() == numBins)
     return;
 
-  phaseAccum_.assign(numBins, 0.0f);
-  curPhaseOffset_.assign(numBins, 0.0f);
-  prevPhaseOffset_.assign(numBins, 0.0f);
-  targetPhaseOffset_.assign(numBins, 0.0f);
-  harmonicPhases_.assign(numBins * 20, 0.0f);
-  harmonicPhasesInj_.assign(numBins * 32, 0.0f);
-  copyPhases_.assign(numBins, 0.0f);
+  phaseAccum_.assign((size_t)numBins, 0.0f);
+  curPhaseOffset_.assign((size_t)numBins, 0.0f);
+  prevPhaseOffset_.assign((size_t)numBins, 0.0f);
+  targetPhaseOffset_.assign((size_t)numBins, 0.0f);
+  harmonicPhases_.assign((size_t)numBins * 20, 0.0f);
+  harmonicPhasesInj_.assign((size_t)numBins * 32, 0.0f);
+  copyPhases_.assign((size_t)numBins, 0.0f);
 }
 
 void SpectralSynth::prepare(double sampleRate, int maxBlockSize) {
   sampleRate_ = sampleRate;
-  blockL_.resize(maxBlockSize, 0.0f);
-  blockR_.resize(maxBlockSize, 0.0f);
+  blockL_.resize((size_t)maxBlockSize, 0.0f);
+  blockR_.resize((size_t)maxBlockSize, 0.0f);
 }
 
 void SpectralSynth::pushSpectralData(const SpectralData &d,
@@ -47,18 +47,18 @@ void SpectralSynth::pushSpectralData(const SpectralData &d,
   if (p.interpSamples == 0) {
     cur_ = d;
     for (int b = 0; b < numBins; b++)
-      curPhaseOffset_[b] = d.data[b * 4 + 1];
+      curPhaseOffset_[(size_t)b] = d.data[(size_t)b * 4 + 1];
     interpT_ = 1.0f;
     return;
   }
 
   prev_ = cur_;
   for (int b = 0; b < (int)prevPhaseOffset_.size(); b++)
-    prevPhaseOffset_[b] = curPhaseOffset_[b];
+    prevPhaseOffset_[(size_t)b] = curPhaseOffset_[(size_t)b];
 
   target_ = d;
   for (int b = 0; b < numBins; b++)
-    targetPhaseOffset_[b] = d.data[b * 4 + 1];
+    targetPhaseOffset_[(size_t)b] = d.data[(size_t)b * 4 + 1];
 
   interpStep_ = p.interpSamples > 0 ? 1.0f / (p.interpSamples + 1) : 1.0f;
   interpT_ = 0.0f;
@@ -71,14 +71,14 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
 
   const int numBins = (int)phaseAccum_.size();
   if (numBins == 0) {
-    memset(outL, 0, numSamples * 4);
-    memset(outR, 0, numSamples * 4);
+    memset(outL, 0, (size_t)numSamples * 4);
+    memset(outR, 0, (size_t)numSamples * 4);
     return;
   }
 
   if (cur_.data.size() < (size_t)numBins * 4) {
-    memset(outL, 0, numSamples * sizeof(float));
-    memset(outR, 0, numSamples * sizeof(float));
+    memset(outL, 0, (size_t)numSamples * sizeof(float));
+    memset(outR, 0, (size_t)numSamples * sizeof(float));
     return;
   }
 
@@ -90,19 +90,19 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
     interpT_ = std::min(1.0f, interpT_ + interpStep_ * numSamples);
     float t = interpT_, invT = 1.0f - t;
     int prevBins = cur_.numBins(); // before swap, same as target
-    for (int j = 0; j < (int)cur_.data.size() && j < (int)target_.data.size();
+    for (size_t j = 0; j < cur_.data.size() && j < target_.data.size();
          j++)
       cur_.data[j] = prev_.data[j] * invT + target_.data[j] * t;
     (void)prevBins;
     for (int b = 0; b < numBins; b++)
-      curPhaseOffset_[b] =
-          prevPhaseOffset_[b] * invT + targetPhaseOffset_[b] * t;
+      curPhaseOffset_[(size_t)b] =
+          prevPhaseOffset_[(size_t)b] * invT + targetPhaseOffset_[(size_t)b] * t;
   }
 
   // Clear block
   for (int i = 0; i < numSamples; i++) {
-    blockL_[i] = 0.0f;
-    blockR_[i] = 0.0f;
+    blockL_[(size_t)i] = 0.0f;
+    blockR_[(size_t)i] = 0.0f;
   }
 
   const OctaveDoublingParams &oct = params_.octave;
@@ -111,16 +111,17 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
   const float freqMul = params_.frequencyMultiplier;
 
   for (int bin = 0; bin < numBins; bin++) {
-    const float mag = cur_.data[bin * 4 + 0];
+    const float mag = cur_.data[(size_t)bin * 4 + 0];
     if (mag < 0.001f)
       continue;
 
-    const float phaseOffset = curPhaseOffset_[bin];
-    const float pan = cur_.data[bin * 4 + 2];
+    const float phaseOffset = curPhaseOffset_[(size_t)bin];
+    const float pan = cur_.data[(size_t)bin * 4 + 2];
 
-    // Linear bin → frequency
-    const float normalizedBin = (float)bin / numBins;
-    const float baseFreq = MIN_FREQ + (MAX_FREQ - MIN_FREQ) * normalizedBin;
+    // Logarithmic bin → frequency
+    const float normalizedBin = (float)bin / (numBins > 1 ? (numBins - 1) : 1);
+    const float ratio = MAX_FREQ / MIN_FREQ;
+    const float baseFreq = MIN_FREQ * std::pow(ratio, normalizedBin);
     const float freq = baseFreq * freqMul;
 
     const float normalizedFreq = freq / nyquist;
@@ -144,14 +145,14 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
     const float offsetRad = phaseOffset * PI2;
 
     // Base oscillator
-    float phase = phaseAccum_[bin];
+    float phase = phaseAccum_[(size_t)bin];
     for (int i = 0; i < numSamples; i++) {
       float s = std::sin(phase + offsetRad);
-      blockL_[i] += s * glL;
-      blockR_[i] += s * glR;
+      blockL_[(size_t)i] += s * glL;
+      blockR_[(size_t)i] += s * glR;
       phase += phaseInc;
     }
-    phaseAccum_[bin] = std::fmod(phase, PI2);
+    phaseAccum_[(size_t)bin] = std::fmod(phase, PI2);
 
     // Octave doubling – low
     if (oct.lowCount > 0) {
@@ -162,14 +163,14 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
           break;
         float hPhaseInc = hFreq * PI2_SR;
         int idx = bin * 20 + (h - 1);
-        float hPhase = harmonicPhases_[idx];
+        float hPhase = harmonicPhases_[(size_t)idx];
         for (int i = 0; i < numSamples; i++) {
           float s = std::sin(hPhase + offsetRad);
-          blockL_[i] += s * glL * harmGain;
-          blockR_[i] += s * glR * harmGain;
+          blockL_[(size_t)i] += s * glL * harmGain;
+          blockR_[(size_t)i] += s * glR * harmGain;
           hPhase += hPhaseInc;
         }
-        harmonicPhases_[idx] = std::fmod(hPhase, PI2);
+        harmonicPhases_[(size_t)idx] = std::fmod(hPhase, PI2);
         harmGain *= oct.multiplier;
       }
     }
@@ -183,14 +184,14 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
           break;
         float hPhaseInc = hFreq * PI2_SR;
         int idx = bin * 20 + 10 + (h - 1);
-        float hPhase = harmonicPhases_[idx];
+        float hPhase = harmonicPhases_[(size_t)idx];
         for (int i = 0; i < numSamples; i++) {
           float s = std::sin(hPhase + offsetRad);
-          blockL_[i] += s * glL * harmGain;
-          blockR_[i] += s * glR * harmGain;
+          blockL_[(size_t)i] += s * glL * harmGain;
+          blockR_[(size_t)i] += s * glR * harmGain;
           hPhase += hPhaseInc;
         }
-        harmonicPhases_[idx] = std::fmod(hPhase, PI2);
+        harmonicPhases_[(size_t)idx] = std::fmod(hPhase, PI2);
         harmGain *= oct.multiplier;
       }
     }
@@ -203,14 +204,14 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
       float injGain = std::pow((float)h, -harm.falloff);
       float hPhaseInc = hFreq * PI2_SR;
       int idx = bin * 32 + (h - 2);
-      float hPhase = harmonicPhasesInj_[idx];
+      float hPhase = harmonicPhasesInj_[(size_t)idx];
       for (int i = 0; i < numSamples; i++) {
         float s = std::sin(hPhase + offsetRad);
-        blockL_[i] += s * glL * injGain;
-        blockR_[i] += s * glR * injGain;
+        blockL_[(size_t)i] += s * glL * injGain;
+        blockR_[(size_t)i] += s * glR * injGain;
         hPhase += hPhaseInc;
       }
-      harmonicPhasesInj_[idx] = std::fmod(hPhase, PI2);
+      harmonicPhasesInj_[(size_t)idx] = std::fmod(hPhase, PI2);
     }
 
     // Spectral copy
@@ -219,14 +220,14 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
       float cFreq = freq * shiftScale;
       if (cFreq < nyquist) {
         float cPhaseInc = cFreq * PI2_SR;
-        float cPhase = copyPhases_[bin];
+        float cPhase = copyPhases_[(size_t)bin];
         for (int i = 0; i < numSamples; i++) {
           float s = std::sin(cPhase + offsetRad);
-          blockL_[i] += s * glL * cp.mix;
-          blockR_[i] += s * glR * cp.mix;
+          blockL_[(size_t)i] += s * glL * cp.mix;
+          blockR_[(size_t)i] += s * glR * cp.mix;
           cPhase += cPhaseInc;
         }
-        copyPhases_[bin] = std::fmod(cPhase, PI2);
+        copyPhases_[(size_t)bin] = std::fmod(cPhase, PI2);
       }
     }
   }
@@ -234,8 +235,8 @@ void SpectralSynth::process(float *outL, float *outR, const float *adsrGain,
   // Output with ADSR and master scale
   const float scale = 0.1f;
   for (int i = 0; i < numSamples; i++) {
-    float env = adsrGain ? adsrGain[i] : 1.0f;
-    outL[i] = blockL_[i] * scale * env;
-    outR[i] = blockR_[i] * scale * env;
+    float env = adsrGain ? adsrGain[(size_t)i] : 1.0f;
+    outL[(size_t)i] = blockL_[(size_t)i] * scale * env;
+    outR[(size_t)i] = blockR_[(size_t)i] * scale * env;
   }
 }
