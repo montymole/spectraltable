@@ -9,7 +9,7 @@
  * - WHITENOISE_BAND_Q_FILTER: Subtractive noise filtering
  */
 
-import { SynthMode } from '../types';
+import { SaturationState, SynthMode, WaveshapeState } from '../types';
 
 // Vite imports worklet files as URLs for AudioWorklet.addModule()
 import spectralWorkletUrl from './worklets/spectral.worklet.ts?worker&url';
@@ -64,6 +64,12 @@ export class AudioEngine {
     private waveshapeCurve = 0;
     private waveshapeDrive = 1.0;
     private waveshapeMix = 0.0;
+    private waveshapeCustomCurve: Float32Array | null = null;
+
+    // Saturation state
+    private saturationMode = 0;
+    private saturationDrive = 1.0;
+    private saturationMix = 0.0;
 
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -159,6 +165,7 @@ export class AudioEngine {
 
         // Send waveshaping state
         this.sendWaveshapingToWorklet();
+        this.sendSaturationToWorklet();
     }
 
     public setMode(mode: SynthMode): void {
@@ -296,13 +303,18 @@ export class AudioEngine {
     }
 
     private sendWaveshapingToWorklet(): void {
-        if (this.workletNode && this.isInitialized) {
+        if (this.workletNode) {
             this.workletNode.port.postMessage({
                 type: 'waveshape',
                 curve: this.waveshapeCurve,
                 drive: this.waveshapeDrive,
                 mix: this.waveshapeMix
             });
+
+            if (this.waveshapeCurve === 4 && this.waveshapeCustomCurve) {
+                const lut = this.waveshapeCustomCurve.slice();
+                this.workletNode.port.postMessage({ type: 'waveshape-lut', lut }, [lut.buffer]);
+            }
         }
     }
 
@@ -311,6 +323,42 @@ export class AudioEngine {
         this.waveshapeDrive = drive;
         this.waveshapeMix = mix;
         this.sendWaveshapingToWorklet();
+    }
+
+    public setWaveshapeCustomCurve(curve: Float32Array | null): void {
+        this.waveshapeCustomCurve = curve ? curve.slice() : null;
+        if (this.waveshapeCurve === 4) this.sendWaveshapingToWorklet();
+    }
+
+    public setWaveshaping(state: WaveshapeState | undefined): void {
+        const s = state || { curve: 0, drive: 1.0, mix: 0.0 };
+        this.setWaveshapingState(s.curve, s.drive, s.mix);
+        if (s.curve === 4 && s.customCurve && s.customCurve.length > 1) {
+            this.setWaveshapeCustomCurve(new Float32Array(s.customCurve));
+        }
+    }
+
+    private sendSaturationToWorklet(): void {
+        if (this.workletNode) {
+            this.workletNode.port.postMessage({
+                type: 'saturation',
+                mode: this.saturationMode,
+                drive: this.saturationDrive,
+                mix: this.saturationMix
+            });
+        }
+    }
+
+    public setSaturationState(mode: number, drive: number, mix: number): void {
+        this.saturationMode = mode;
+        this.saturationDrive = drive;
+        this.saturationMix = mix;
+        this.sendSaturationToWorklet();
+    }
+
+    public setSaturation(state: SaturationState | undefined): void {
+        const s = state || { mode: 0, drive: 1.0, mix: 0.0 };
+        this.setSaturationState(s.mode, s.drive, s.mix);
     }
 
     public setInterpSamples(samples: number): void {
@@ -427,6 +475,8 @@ export class AudioEngine {
             octaveDoubling: { low: number, high: number, multiplier: number },
             harmonicInjection: { count: number, falloff: number },
             spectralCopy: { shift: number, mix: number },
+            waveshape?: WaveshapeState,
+            saturation?: SaturationState,
             interpSamples: number,
             timeline?: { numFrames: number, frameSize: number },
             gainTimeline?: Float32Array,
@@ -481,6 +531,17 @@ export class AudioEngine {
             shift: params.spectralCopy.shift,
             mix: params.spectralCopy.mix
         });
+
+        // Send waveshaping + saturation (offline)
+        const ws = params.waveshape || { curve: this.waveshapeCurve, drive: this.waveshapeDrive, mix: this.waveshapeMix, customCurve: this.waveshapeCustomCurve ? Array.from(this.waveshapeCustomCurve) : undefined };
+        node.port.postMessage({ type: 'waveshape', curve: ws.curve, drive: ws.drive, mix: ws.mix });
+        if (ws.curve === 4 && ws.customCurve && ws.customCurve.length > 1) {
+            const lut = new Float32Array(ws.customCurve);
+            node.port.postMessage({ type: 'waveshape-lut', lut }, [lut.buffer]);
+        }
+
+        const sat = params.saturation || { mode: this.saturationMode, drive: this.saturationDrive, mix: this.saturationMix };
+        node.port.postMessage({ type: 'saturation', mode: sat.mode, drive: sat.drive, mix: sat.mix });
 
         if (params.mode === SynthMode.WAVETABLE) {
             const freq = 440 * Math.pow(2, (note - 69) / 12);

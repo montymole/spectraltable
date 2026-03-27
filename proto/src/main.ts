@@ -141,6 +141,12 @@ class SpectralTableApp {
         this.controls.setSpectralCopyChangeCallback((state) => {
             this.audioEngine.setSpectralCopy(state.shift, state.mix);
         });
+        this.controls.setWaveshapeChangeCallback((state) => {
+            this.audioEngine.setWaveshaping(state);
+        });
+        this.controls.setSaturationChangeCallback((state) => {
+            this.audioEngine.setSaturation(state);
+        });
         this.controls.setInterpSamplesChangeCallback((samples: number) => this.audioEngine.setInterpSamples(samples));
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
@@ -251,6 +257,8 @@ class SpectralTableApp {
         this.audioEngine.setCarrier(state.carrier);
         this.audioEngine.setFeedback(state.feedback);
         this.audioEngine.setInterpSamples(state.interpSamples || 64);
+        this.audioEngine.setWaveshaping(state.waveshape);
+        this.audioEngine.setSaturation(state.saturation);
         this.audioEngine.setMasterGainTarget(0, 0.001);
 
         // Apply piano octave
@@ -589,6 +597,8 @@ class SpectralTableApp {
                 },
                 harmonicInjection: this.audioEngine.getHarmonicInjection(),
                 spectralCopy: this.audioEngine.getSpectralCopy(),
+                waveshape: state.waveshape,
+                saturation: state.saturation,
                 interpSamples: state.interpSamples,
                 timeline: timelineInfo,
                 gainTimeline,

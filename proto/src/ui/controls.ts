@@ -8,7 +8,7 @@ import {
     PresetControls, OctaveDoublingState, defaultOctaveDoublingState,
     HarmonicInjectionState, defaultHarmonicInjectionState,
     SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState,
-    WaveshapeState, defaultWaveshapeState
+    WaveshapeState, defaultWaveshapeState, SaturationState, defaultSaturationState
 } from '../types';
 import { createDefaultModulatorStates, defaultEnvelopeState, defaultLFOState, estimateModulatorRange, normalizeModulatorState, resolveModulatorStates } from '../modulators/modulator';
 import { PresetManager } from './preset-manager';
@@ -72,6 +72,7 @@ export class ControlPanel {
     private onHarmonicInjectionChange: ((state: HarmonicInjectionState) => void) | null = null;
     private onSpectralCopyChange: ((state: SpectralCopyState) => void) | null = null;
     private onWaveshapeChange: ((state: WaveshapeState) => void) | null = null;
+    private onSaturationChange: ((state: SaturationState) => void) | null = null;
     private onInterpSamplesChange: ((samples: number) => void) | null = null;
 
     // Modulator Callbacks
@@ -91,6 +92,10 @@ export class ControlPanel {
 
     public setWaveshapeChangeCallback(callback: (state: WaveshapeState) => void): void {
         this.onWaveshapeChange = callback;
+    }
+
+    public setSaturationChangeCallback(callback: (state: SaturationState) => void): void {
+        this.onSaturationChange = callback;
     }
 
     public setWaveshapeState(state: WaveshapeState): void {
@@ -133,6 +138,9 @@ export class ControlPanel {
     private waveshapeState: WaveshapeState = { ...defaultWaveshapeState };
     private waveshapeDriveSlider!: HTMLInputElement;
     private waveshapeMixSlider!: HTMLInputElement;
+    private saturationState: SaturationState = { ...defaultSaturationState };
+    private saturationDriveSlider!: HTMLInputElement;
+    private saturationMixSlider!: HTMLInputElement;
 
     // Debounce timer for auto-save
     private autoSaveTimer: number | null = null;
@@ -409,15 +417,20 @@ export class ControlPanel {
         wsTitle.style.display = 'block';
         subGroup6.appendChild(wsTitle);
 
-        const wsCurveSelect = createSelect(subGroup6, 'waveshape-curve', 'Curve', [
+        createSelect(subGroup6, 'waveshape-curve', 'Curve', [
             { value: '0', label: 'None' },
             { value: '1', label: 'Tanh' },
             { value: '2', label: 'Polynomial' },
-            { value: '3', label: 'Sine Fold' }
+            { value: '3', label: 'Sine Fold' },
+            { value: '4', label: 'Custom (LUT)' }
         ], (val) => {
             this.waveshapeState.curve = parseInt(val);
+            if (this.waveshapeState.curve === 4 && (!this.waveshapeState.customCurve || this.waveshapeState.customCurve.length !== 1024)) {
+                this.waveshapeState.customCurve = this.createIdentityWaveshapeCurve(1024);
+            }
             if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
             this.scheduleAutoSave();
+            updateCustomUI();
         });
 
         this.waveshapeDriveSlider = createSlider(subGroup6, 'waveshape-drive', 'Drive', 1, 20, 1, 0.1, (val) => {
@@ -432,8 +445,169 @@ export class ControlPanel {
             this.scheduleAutoSave();
         });
 
+        const customContainer = document.createElement('div');
+        customContainer.className = 'control-group';
+        subGroup6.appendChild(customContainer);
+        const customLabel = document.createElement('label');
+        customLabel.textContent = 'Custom Curve';
+        customContainer.appendChild(customLabel);
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'modulator-preview-canvas';
+        canvas.style.height = '96px';
+        customContainer.appendChild(canvas);
+
+        const customButtonRow = document.createElement('div');
+        customButtonRow.style.display = 'flex';
+        customButtonRow.style.gap = '8px';
+        customContainer.appendChild(customButtonRow);
+        createButton(customButtonRow, 'waveshape-custom-reset', 'Reset', () => {
+            this.waveshapeState.customCurve = this.createIdentityWaveshapeCurve(1024);
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+            drawCurve();
+        }, 'reset-button');
+
+        let isDrawing = false;
+        let lastIndex: number | null = null;
+
+        const resizeCanvas = () => {
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+            canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+            drawCurve();
+        };
+
+        const drawCurve = () => {
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // zero line
+            ctx.strokeStyle = 'rgba(0,255,120,0.20)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height * 0.5);
+            ctx.lineTo(canvas.width, canvas.height * 0.5);
+            ctx.stroke();
+
+            const curve = this.waveshapeState.customCurve;
+            if (!curve || curve.length < 2) return;
+            ctx.strokeStyle = 'rgba(0,255,120,1)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < curve.length; i++) {
+                const x = (i / (curve.length - 1)) * canvas.width;
+                const y = (1 - ((curve[i] + 1) * 0.5)) * canvas.height;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        };
+
+        const setPointFromEvent = (e: PointerEvent) => {
+            if (this.waveshapeState.curve !== 4) return;
+            if (!this.waveshapeState.customCurve || this.waveshapeState.customCurve.length !== 1024) {
+                this.waveshapeState.customCurve = this.createIdentityWaveshapeCurve(1024);
+            }
+            const curve = this.waveshapeState.customCurve;
+            const rect = canvas.getBoundingClientRect();
+            const xN = (e.clientX - rect.left) / Math.max(1, rect.width);
+            const yN = (e.clientY - rect.top) / Math.max(1, rect.height);
+            const idx = Math.max(0, Math.min(curve.length - 1, Math.round(xN * (curve.length - 1))));
+            const value = Math.max(-1, Math.min(1, (1 - yN) * 2 - 1));
+
+            if (lastIndex !== null && lastIndex !== idx) {
+                const a = Math.min(lastIndex, idx);
+                const b = Math.max(lastIndex, idx);
+                const va = curve[lastIndex];
+                for (let i = a; i <= b; i++) {
+                    const t = (i - a) / Math.max(1, b - a);
+                    curve[i] = va * (1 - t) + value * t;
+                }
+            } else {
+                curve[idx] = value;
+            }
+
+            lastIndex = idx;
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+            drawCurve();
+        };
+
+        canvas.addEventListener('pointerdown', (e) => {
+            isDrawing = true;
+            lastIndex = null;
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            setPointFromEvent(e);
+        });
+        canvas.addEventListener('pointermove', (e) => {
+            if (!isDrawing) return;
+            setPointFromEvent(e);
+        });
+        canvas.addEventListener('pointerup', () => {
+            isDrawing = false;
+            lastIndex = null;
+        });
+        canvas.addEventListener('pointercancel', () => {
+            isDrawing = false;
+            lastIndex = null;
+        });
+
+        const updateCustomUI = () => {
+            customContainer.style.display = this.waveshapeState.curve === 4 ? 'block' : 'none';
+            resizeCanvas();
+        };
+        updateCustomUI();
+
+        // Saturation controls
+        const subGroup7 = document.createElement('div');
+        subGroup7.classList.add('sub-group');
+        container.appendChild(subGroup7);
+        const satTitle = document.createElement('label');
+        satTitle.textContent = 'Saturation';
+        satTitle.style.fontWeight = 'bold';
+        satTitle.style.marginBottom = '8px';
+        satTitle.style.display = 'block';
+        subGroup7.appendChild(satTitle);
+
+        createSelect(subGroup7, 'saturation-mode', 'Mode', [
+            { value: '0', label: 'None' },
+            { value: '1', label: 'Gentle' },
+            { value: '2', label: 'Transistor' },
+            { value: '3', label: 'Tube' }
+        ], (val) => {
+            this.saturationState.mode = parseInt(val);
+            if (this.onSaturationChange) this.onSaturationChange(this.saturationState);
+            this.scheduleAutoSave();
+        });
+
+        this.saturationDriveSlider = createSlider(subGroup7, 'saturation-drive', 'Drive', 1, 20, 1, 0.1, (val) => {
+            this.saturationState.drive = val;
+            if (this.onSaturationChange) this.onSaturationChange(this.saturationState);
+            this.scheduleAutoSave();
+        }, undefined, 'linear', 2);
+
+        this.saturationMixSlider = createSlider(subGroup7, 'saturation-mix', 'Mix', 0, 1, 0, 0.01, (val) => {
+            this.saturationState.mix = val;
+            if (this.onSaturationChange) this.onSaturationChange(this.saturationState);
+            this.scheduleAutoSave();
+        });
+
         // Initialize dynamic UI
         this.updateSynthModeUI(this.synthModeSelect.value as SynthMode);
+    }
+
+    private createIdentityWaveshapeCurve(size: number): number[] {
+        const n = Math.max(2, size);
+        const curve = new Array<number>(n);
+        for (let i = 0; i < n; i++) {
+            curve[i] = (i / (n - 1)) * 2 - 1;
+        }
+        return curve;
     }
 
     private updateSynthModeUI(mode: SynthMode): void {
@@ -919,6 +1093,8 @@ export class ControlPanel {
             octaveDoubling: { ...this.octaveDoublingState },
             harmonicInjection: { ...this.harmonicInjectionState },
             spectralCopy: { ...this.spectralCopyState },
+            waveshape: JSON.parse(JSON.stringify(this.waveshapeState)),
+            saturation: { ...this.saturationState },
             interpSamples: parseFloat(this.interpSamplesSlider.value)
         };
     }
@@ -1018,6 +1194,33 @@ export class ControlPanel {
             this.spectralShiftSlider.value = String(state.spectralCopy.shift);
             this.spectralMixSlider.value = String(state.spectralCopy.mix);
         }
+
+        if (state.waveshape) {
+            this.waveshapeState = JSON.parse(JSON.stringify(state.waveshape));
+        } else {
+            this.waveshapeState = { ...defaultWaveshapeState };
+        }
+
+        const wsCurveEl = document.getElementById('waveshape-curve') as HTMLSelectElement | null;
+        if (wsCurveEl) {
+            wsCurveEl.value = String(this.waveshapeState.curve);
+            wsCurveEl.dispatchEvent(new Event('change'));
+        }
+        if (this.waveshapeDriveSlider) this.waveshapeDriveSlider.value = String(this.waveshapeState.drive);
+        if (this.waveshapeMixSlider) this.waveshapeMixSlider.value = String(this.waveshapeState.mix);
+
+        if (state.saturation) {
+            this.saturationState = { ...state.saturation };
+        } else {
+            this.saturationState = { ...defaultSaturationState };
+        }
+        const satModeEl = document.getElementById('saturation-mode') as HTMLSelectElement | null;
+        if (satModeEl) {
+            satModeEl.value = String(this.saturationState.mode);
+            satModeEl.dispatchEvent(new Event('change'));
+        }
+        if (this.saturationDriveSlider) this.saturationDriveSlider.value = String(this.saturationState.drive);
+        if (this.saturationMixSlider) this.saturationMixSlider.value = String(this.saturationState.mix);
 
         this.updateAllDisplays();
         this.updateModulationRanges();
