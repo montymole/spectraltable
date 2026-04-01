@@ -42,6 +42,10 @@ void PluginEditor::paint(juce::Graphics &g) {
 
 void PluginEditor::resized() {
   auto bounds = getLocalBounds();
+  const int pianoHeight = juce::jlimit(120, 180, getHeight() / 5);
+  const int keyboardGap = 8;
+  auto keyboardArea = bounds.removeFromBottom(pianoHeight);
+  bounds.removeFromBottom(keyboardGap);
 
   // 55% left for visuals, 45% right for controls
   auto leftPanel = bounds.removeFromLeft((int)(bounds.getWidth() * 0.55f));
@@ -151,9 +155,8 @@ void PluginEditor::resized() {
   spectrogram.setBounds(leftPanel.removeFromTop(smallPanelHeight).reduced(4));
   scope.setBounds(leftPanel.reduced(4));
 
-  // Position piano keyboard at the bottom, spanning the entire width
-  const int pianoHeight = 100;
-  pianoKeyboard.setBounds(getLocalBounds().removeFromBottom(pianoHeight));
+  // Reserve dedicated space for the keyboard instead of overlaying it.
+  pianoKeyboard.setBounds(keyboardArea);
 }
 
 void PluginEditor::initControls() {

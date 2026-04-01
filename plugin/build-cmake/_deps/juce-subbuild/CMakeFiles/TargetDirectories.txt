@@ -1,3 +1,0 @@
-/Users/jlof/spectraltable/plugin/build-cmake/_deps/juce-subbuild/CMakeFiles/juce-populate.dir
-/Users/jlof/spectraltable/plugin/build-cmake/_deps/juce-subbuild/CMakeFiles/edit_cache.dir
-/Users/jlof/spectraltable/plugin/build-cmake/_deps/juce-subbuild/CMakeFiles/rebuild_cache.dir

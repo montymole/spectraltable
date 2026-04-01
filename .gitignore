@@ -14,7 +14,15 @@ proto/dist-ssr/
 # plugin/ – C++ VST3 plugin
 # ──────────────────────────────────────────────
 plugin/build/
+plugin/build-cmake/
+plugin/build-xcode/
 plugin/.cache/
+plugin/*.log
+plugin/*.xcworkspace
+plugin/**/*.xcuserdata/
+plugin/**/*.xcuserstate
+plugin/**/DerivedData/
+plugin/**/XCBuildData/
 # JUCE generated files
 *.jucer.bak
 *.openSUSE

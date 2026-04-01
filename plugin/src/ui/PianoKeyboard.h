@@ -59,6 +59,8 @@ private:
     juce::OwnedArray<KeyPosition> keys_;
     
     void rebuildKeys();
+    void updateKeyBounds();
+    int getTotalWhiteKeys() const;
     void sendNoteOn(int midiNote, float velocity);
     void sendNoteOff(int midiNote);
     

@@ -4,43 +4,92 @@
 PianoKeyboard::PianoKeyboard(int numOctaves, int startNote)
     : numOctaves_(numOctaves), startNote_(startNote) {
     rebuildKeys();
+    setOpaque(true);
     setMouseCursor(juce::MouseCursor::PointingHandCursor);
 }
 
 void PianoKeyboard::rebuildKeys() {
     keys_.clear();
-    
-    // Calculate total number of keys (white + black)
+
     const int whiteKeysPerOctave = 7; // C, D, E, F, G, A, B
-    const int totalWhiteKeys = numOctaves_ * whiteKeysPerOctave;
-    
-    // Black keys pattern per octave (between white keys)
-    const bool blackKeyPattern[] = {false, true, false, true, false, true, false, true, false, true, false};
-    
+    static constexpr bool blackKeyAfterWhite[] = {true, true, false, true, true, true, false};
+    static constexpr int whiteKeySteps[] = {2, 2, 1, 2, 2, 2, 1};
+
     int currentNote = startNote_;
-    int keyIndex = 0;
-    
-    // Create all keys
+
     for (int octave = 0; octave < numOctaves_; ++octave) {
         for (int whiteKey = 0; whiteKey < whiteKeysPerOctave; ++whiteKey) {
-            // Add white key
             auto *whiteKeyPos = new KeyPosition();
             whiteKeyPos->midiNote = currentNote;
             whiteKeyPos->isBlack = false;
             keys_.add(whiteKeyPos);
-            currentNote++;
-            keyIndex++;
-            
-            // Add black key if needed (according to pattern)
-            if (blackKeyPattern[whiteKey + 1]) {
+
+            if (blackKeyAfterWhite[whiteKey]) {
                 auto *blackKeyPos = new KeyPosition();
-                blackKeyPos->midiNote = currentNote;
+                blackKeyPos->midiNote = currentNote + 1;
                 blackKeyPos->isBlack = true;
                 keys_.add(blackKeyPos);
-                currentNote++;
-                keyIndex++;
             }
+
+            currentNote += whiteKeySteps[whiteKey];
         }
+    }
+}
+
+int PianoKeyboard::getTotalWhiteKeys() const {
+    return juce::jmax(1, numOctaves_ * 7);
+}
+
+void PianoKeyboard::updateKeyBounds() {
+    auto bounds = getLocalBounds().reduced(4, 4);
+
+    if (bounds.isEmpty()) {
+        for (auto* key : keys_) {
+            key->bounds = {};
+        }
+        return;
+    }
+
+    const float whiteKeyWidth = static_cast<float>(bounds.getWidth()) / static_cast<float>(getTotalWhiteKeys());
+    juce::Array<juce::Rectangle<int>> whiteKeyBounds;
+    whiteKeyBounds.ensureStorageAllocated(getTotalWhiteKeys());
+
+    int whiteKeyIndex = 0;
+    for (auto* key : keys_) {
+        if (key->isBlack) {
+            continue;
+        }
+
+        const int x0 = bounds.getX() + juce::roundToInt(whiteKeyIndex * whiteKeyWidth);
+        const int x1 = bounds.getX() + juce::roundToInt((whiteKeyIndex + 1) * whiteKeyWidth);
+        const int width = juce::jmax(1, x1 - x0);
+
+        key->bounds = juce::Rectangle<int>(x0, bounds.getY(), width, bounds.getHeight());
+        whiteKeyBounds.add(key->bounds);
+        ++whiteKeyIndex;
+    }
+
+    const int blackKeyHeight = static_cast<int>(bounds.getHeight() * blackKeyHeightRatio_);
+    const int blackKeyWidth = juce::jmax(8, juce::roundToInt(whiteKeyWidth * 0.62f));
+
+    whiteKeyIndex = 0;
+    for (auto* key : keys_) {
+        if (!key->isBlack) {
+            ++whiteKeyIndex;
+            continue;
+        }
+
+        if (whiteKeyIndex <= 0 || whiteKeyIndex >= whiteKeyBounds.size()) {
+            key->bounds = {};
+            continue;
+        }
+
+        const auto& leftWhite = whiteKeyBounds.getReference(whiteKeyIndex - 1);
+        const auto& rightWhite = whiteKeyBounds.getReference(whiteKeyIndex);
+        const int keyCenter = leftWhite.getRight();
+        const int keyX = keyCenter - (blackKeyWidth / 2);
+
+        key->bounds = juce::Rectangle<int>(keyX, bounds.getY(), blackKeyWidth, blackKeyHeight);
     }
 }
 
@@ -87,118 +136,102 @@ void PianoKeyboard::setMidiOutput(PluginProcessor &processor) {
 
 void PianoKeyboard::paint(juce::Graphics &g) {
     auto bounds = getLocalBounds();
-    
-    // Calculate key positions
-    int whiteKeyIndex = 0;
-    int blackKeyIndex = 0;
-    
+    updateKeyBounds();
+
+    g.fillAll(juce::Colour(0xff101214));
+    g.setColour(juce::Colour(0xff2c3136));
+    g.drawRect(bounds);
+
     for (int i = 0; i < keys_.size(); ++i) {
         auto *key = keys_[i];
-        
+
         if (key->isBlack) {
-            // Black key positioning
-            int whiteKeyX = whiteKeyIndex * keyWidth_;
-            int blackKeyX = whiteKeyX + keyWidth_ - (keyWidth_ / 3);
-            int blackKeyWidth = keyWidth_ * 2 / 3;
-            int blackKeyHeight = static_cast<int>(bounds.getHeight() * blackKeyHeightRatio_);
-            
-            key->bounds = juce::Rectangle<int>(blackKeyX, 0, blackKeyWidth, blackKeyHeight);
-            blackKeyIndex++;
-        } else {
-            // White key positioning
-            int whiteKeyX = whiteKeyIndex * keyWidth_;
-            key->bounds = juce::Rectangle<int>(whiteKeyX, 0, keyWidth_, bounds.getHeight());
-            whiteKeyIndex++;
+            continue;
+        }
+
+        juce::Colour keyColour = (key->midiNote == currentlyPressedNote_)
+            ? whiteKeyDownColour_ : whiteKeyColour_;
+
+        g.setColour(keyColour);
+        g.fillRect(key->bounds);
+
+        g.setColour(juce::Colours::black);
+        g.drawRect(key->bounds);
+
+        if (key->midiNote % 12 == 0) {
+            juce::String noteName =
+                juce::MidiMessage::getMidiNoteName(key->midiNote, true, true, 3);
+            g.setColour(textColour_);
+            g.setFont(juce::Font(10.0f));
+            g.drawText(noteName, key->bounds.reduced(2), juce::Justification::bottomLeft);
         }
     }
-    
-    // Draw keys
+
     for (int i = 0; i < keys_.size(); ++i) {
         auto *key = keys_[i];
-        
-        if (key->isBlack) {
-            // Draw black key
-            juce::Colour keyColour = (key->midiNote == currentlyPressedNote_)
-                ? blackKeyDownColour_ : blackKeyColour_;
-            
-            g.setColour(keyColour);
-            g.fillRect(key->bounds);
-            
-            // Draw note name on black keys
-            const int midiNote = key->midiNote;
-            const juce::String noteName =
-                juce::MidiMessage::getMidiNoteName(midiNote, true, true, 3);
-            g.setColour(textColour_);
-            g.setFont(juce::Font(10.0f, juce::Font::bold));
-            g.drawText(noteName, key->bounds, juce::Justification::centred);
-        } else {
-            // Draw white key
-            juce::Colour keyColour = (key->midiNote == currentlyPressedNote_)
-                ? whiteKeyDownColour_ : whiteKeyColour_;
-            
-            g.setColour(keyColour);
-            g.fillRect(key->bounds);
-            
-            // Draw outline for white keys
-            g.setColour(juce::Colours::black);
-            g.drawRect(key->bounds);
-            
-            // Draw note name on white keys (only for C notes to reduce clutter)
-            const int midiNote = key->midiNote;
-            if (midiNote % 12 == 0) { // C notes
-                juce::String noteName =
-                    juce::MidiMessage::getMidiNoteName(midiNote, true, true, 3);
-                g.setColour(textColour_);
-                g.setFont(juce::Font(10.0f));
-                g.drawText(noteName, key->bounds, juce::Justification::bottomRight);
-            }
+
+        if (!key->isBlack) {
+            continue;
         }
+
+        juce::Colour keyColour = (key->midiNote == currentlyPressedNote_)
+            ? blackKeyDownColour_ : blackKeyColour_;
+
+        g.setColour(keyColour);
+        g.fillRect(key->bounds);
+        g.setColour(juce::Colour(0xff101010));
+        g.drawRect(key->bounds);
     }
 }
 
 void PianoKeyboard::resized() {
-    // Resizing is handled in paint() to ensure proper layout
-    this->repaint();
+    updateKeyBounds();
+    repaint();
 }
 
 void PianoKeyboard::mouseDown(const juce::MouseEvent &event) {
     if (processor_ == nullptr) return;
-    
-    for (int i = 0; i < keys_.size(); ++i) {
-        auto *key = keys_[i];
+
+    KeyPosition* pressedKey = nullptr;
+    for (int i = keys_.size(); --i >= 0;) {
+        auto* key = keys_[i];
         if (key->bounds.contains(event.getPosition())) {
-            // Note pressed
-            currentlyPressedNote_ = key->midiNote;
-            sendNoteOn(key->midiNote, 1.0f);
-            this->repaint();
+            pressedKey = key;
             break;
         }
+    }
+
+    if (pressedKey != nullptr) {
+        auto* key = pressedKey;
+        currentlyPressedNote_ = key->midiNote;
+        sendNoteOn(key->midiNote, 1.0f);
+        this->repaint();
     }
 }
 
 void PianoKeyboard::mouseDrag(const juce::MouseEvent &event) {
     if (processor_ == nullptr) return;
-    
-    // Check if we're still over a key
-    bool overAnyKey = false;
-    for (int i = 0; i < keys_.size(); ++i) {
-        auto *key = keys_[i];
+
+    KeyPosition* hoveredKey = nullptr;
+    for (int i = keys_.size(); --i >= 0;) {
+        auto* key = keys_[i];
         if (key->bounds.contains(event.getPosition())) {
-            overAnyKey = true;
-            // If it's a different key, send note off for previous and on for new
-            if (key->midiNote != currentlyPressedNote_) {
-                if (currentlyPressedNote_ != -1) {
-                    sendNoteOff(currentlyPressedNote_);
-                }
-                currentlyPressedNote_ = key->midiNote;
-                sendNoteOn(key->midiNote, 1.0f);
-            }
+            hoveredKey = key;
             break;
         }
     }
-    
-    // If not over any key, release the current note
-    if (!overAnyKey && currentlyPressedNote_ != -1) {
+
+    if (hoveredKey != nullptr) {
+        auto* key = hoveredKey;
+        if (key->midiNote != currentlyPressedNote_) {
+            if (currentlyPressedNote_ != -1) {
+                sendNoteOff(currentlyPressedNote_);
+            }
+            currentlyPressedNote_ = key->midiNote;
+            sendNoteOn(key->midiNote, 1.0f);
+            this->repaint();
+        }
+    } else if (currentlyPressedNote_ != -1) {
         sendNoteOff(currentlyPressedNote_);
         currentlyPressedNote_ = -1;
         this->repaint();
