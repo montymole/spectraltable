@@ -1,0 +1,7 @@
+Target dependency graph (3 targets)
+Target 'ALL_BUILD' in project 'juce-populate'
+➜ Explicit dependency on target 'juce-populate' in project 'juce-populate'
+➜ Explicit dependency on target 'ZERO_CHECK' in project 'juce-populate'
+Target 'juce-populate' in project 'juce-populate'
+➜ Explicit dependency on target 'ZERO_CHECK' in project 'juce-populate'
+Target 'ZERO_CHECK' in project 'juce-populate' (no dependencies)

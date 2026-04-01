@@ -30,7 +30,21 @@ void main() {
 static const char *kPointFrag = R"(
 varying vec4 vColor;
 void main() {
-  gl_FragColor = vec4(vColor.rgb, 1.0);
+  // HSV to RGB: hue = vColor.g (phase), sat = 0.8, val = vColor.r (mag)
+  float h = fract(vColor.g) * 6.0;
+  float s = 0.8;
+  float v = clamp(vColor.r, 0.0, 1.0);
+  float c = v * s;
+  float x = c * (1.0 - abs(mod(h, 2.0) - 1.0));
+  float m = v - c;
+  vec3 rgb;
+  if      (h < 1.0) rgb = vec3(c, x, 0.0);
+  else if (h < 2.0) rgb = vec3(x, c, 0.0);
+  else if (h < 3.0) rgb = vec3(0.0, c, x);
+  else if (h < 4.0) rgb = vec3(0.0, x, c);
+  else if (h < 5.0) rgb = vec3(x, 0.0, c);
+  else              rgb = vec3(c, 0.0, x);
+  gl_FragColor = vec4(rgb + m, 1.0);
 }
 )";
 
@@ -374,7 +388,22 @@ void SpectralCubePanel::renderOpenGL() {
       glBegin(GL_POINTS);
       for (int i = 0; i < pointCount; ++i) {
         const size_t base = (size_t)i * 7;
-        glColor4f(points[base + 3], points[base + 4], points[base + 5], 1.0f);
+        float mag   = points[base + 3];
+        float phase = points[base + 4];
+        // HSV→RGB: hue=phase, sat=0.8, val=mag
+        float h = std::fmod(phase, 1.0f) * 6.0f;
+        float v = mag < 0.0f ? 0.0f : (mag > 1.0f ? 1.0f : mag);
+        float c = v * 0.8f;
+        float x = c * (1.0f - std::abs(std::fmod(h, 2.0f) - 1.0f));
+        float m = v - c;
+        float r, g, b;
+        if      (h < 1.0f) { r = c; g = x; b = 0; }
+        else if (h < 2.0f) { r = x; g = c; b = 0; }
+        else if (h < 3.0f) { r = 0; g = c; b = x; }
+        else if (h < 4.0f) { r = 0; g = x; b = c; }
+        else if (h < 5.0f) { r = x; g = 0; b = c; }
+        else               { r = c; g = 0; b = x; }
+        glColor4f(r + m, g + m, b + m, 1.0f);
         glVertex3f(points[base + 0], points[base + 1], points[base + 2]);
       }
       glEnd();

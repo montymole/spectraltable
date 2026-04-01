@@ -105,8 +105,16 @@ This document analyzes the current state of the SpectralTable VST plugin impleme
 - **Layout scaling**: May need adjustment for different screen sizes
 - **Control styling**: Mostly default JUCE appearance
 
-### ❌ Missing/Incomplete
-- **On-screen piano keyboard**: Missing
+### ✅ Newly Implemented
+- **On-screen piano keyboard**: ✅ Fully implemented with 5 octaves (C1-C6)
+  - Interactive GUI component at bottom of editor
+  - Mouse-controlled note triggering
+  - Visual feedback for pressed keys
+  - MIDI event generation integrated with processor
+  - Configurable octave range and starting note
+  - Customizable visual styling
+
+### ❌ Still Missing/Incomplete
 - **Graphical ADSR editor**: Only basic sliders
 - **Modulation routing UI**: Incomplete
 - **Preset management UI**: Missing
@@ -179,6 +187,75 @@ This document analyzes the current state of the SpectralTable VST plugin impleme
    - **macOS**: Clang compiler specifics
    - **Dependency management**: JUCE submodule handling
    - **Debug vs Release**: Different optimization behavior
+
+## Piano Keyboard Implementation
+
+### ✅ Fully Implemented
+
+**Component Architecture:**
+- **PianoKeyboard class**: `plugin/src/ui/PianoKeyboard.h/cpp`
+- **Integration**: Fully integrated with PluginEditor and PluginProcessor
+- **MIDI Handling**: Thread-safe MIDI event queue for cross-thread communication
+
+**Key Features:**
+
+1. **5-Octave Range**: C1 (MIDI note 36) to C6 (MIDI note 84)
+2. **Visual Design**:
+   - White keys with black outlines
+   - Black keys with proper positioning
+   - Note names displayed (C notes on white keys, all notes on black keys)
+   - Visual feedback for pressed keys (color change)
+3. **Interactive Controls**:
+   - Mouse click/drag for note triggering
+   - Proper note-on/note-off handling
+   - Slide between keys supported
+   - Mouse release handling
+4. **MIDI Integration**:
+   - Generates standard MIDI note events
+   - Channel 1 (can be easily changed)
+   - Velocity 1.0 (full velocity)
+   - Thread-safe queue system
+
+**Technical Implementation:**
+
+**PianoKeyboard Component:**
+- Inherits from `juce::Component`
+- Handles mouse events for interactive playing
+- Dynamic key layout based on component size
+- Configurable visual styling
+- Adjustable octave range and starting note
+
+**MIDI Event Flow:**
+```
+PianoKeyboard (UI Thread)
+    ↓ (mouse events)
+Generate MIDI Messages
+    ↓ (thread-safe queue)
+PluginProcessor::addMidiEventToQueue()
+    ↓ (audio thread)
+PluginProcessor::processBlock()
+    ↓ (MIDI processing)
+Existing MIDI handling (ADSR, synth)
+```
+
+**Thread Safety:**
+- Uses `juce::CriticalSection` for thread-safe MIDI queue
+- Separate queue for UI-generated MIDI events
+- Merged with real MIDI input in audio thread
+- No blocking operations
+
+**Customization Options:**
+- `setNumOctaves(int)`: Change octave count (1-10)
+- `setStartNote(int)`: Set starting MIDI note (0-127)
+- `setKeyWidth(int)`: Adjust key width (10-50 pixels)
+- `setBlackKeyHeightRatio(float)`: Control black key height (0.4-0.8)
+- `setColourScheme()`: Full visual customization
+
+**GUI Integration:**
+- Positioned at bottom of editor (100px height)
+- Spans full width of plugin
+- Automatically resizes with window
+- Non-intrusive design
 
 ## Windows Build System Implementation
 

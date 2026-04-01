@@ -1,0 +1,7 @@
+/Users/jlof/spectraltable/plugin/build-xcode/_deps/juce-build/tools/CMakeFiles/install.dir
+/Users/jlof/spectraltable/plugin/build-xcode/_deps/juce-build/tools/CMakeFiles/ALL_BUILD.dir
+/Users/jlof/spectraltable/plugin/build-xcode/_deps/juce-build/tools/CMakeFiles/ZERO_CHECK.dir
+/Users/jlof/spectraltable/plugin/build-xcode/_deps/juce-build/tools/modules/CMakeFiles/install.dir
+/Users/jlof/spectraltable/plugin/build-xcode/_deps/juce-build/tools/extras/Build/CMakeFiles/install.dir
+/Users/jlof/spectraltable/plugin/build-xcode/_deps/juce-build/tools/extras/Build/juceaide/CMakeFiles/juceaide.dir
+/Users/jlof/spectraltable/plugin/build-xcode/_deps/juce-build/tools/extras/Build/juceaide/CMakeFiles/install.dir

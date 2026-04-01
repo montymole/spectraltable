@@ -1,0 +1,4 @@
+# Hashes of file build rules.
+7a664b6a0c62521352dc06d1dc48eaab SpectralTable_artefacts/JuceLibraryCode/SpectralTable_AU/PkgInfo
+1016c0c49e4a338949469573a5c7bb02 SpectralTable_artefacts/JuceLibraryCode/SpectralTable_Standalone/PkgInfo
+f55c0a17ca7d85f5221a613981baa3bc SpectralTable_artefacts/JuceLibraryCode/SpectralTable_VST3/PkgInfo

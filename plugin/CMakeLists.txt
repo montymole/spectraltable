@@ -4,6 +4,7 @@ project(SpectralTable VERSION 0.1.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(SPECTRALTABLE_PRODUCT_NAME "Spectra Table" CACHE STRING "Display name for the built plugin bundle")
 
 # ── JUCE 8 via FetchContent ──────────────────────────────────────────────────
 include(FetchContent)
@@ -19,7 +20,7 @@ juce_add_plugin(SpectralTable
     PLUGIN_MANUFACTURER_CODE Spct
     PLUGIN_CODE             Sptb
     FORMATS                 VST3 AU Standalone
-    PRODUCT_NAME            "Spectra Table"
+    PRODUCT_NAME            "${SPECTRALTABLE_PRODUCT_NAME}"
     IS_SYNTH                TRUE
     NEEDS_MIDI_INPUT        TRUE
     NEEDS_MIDI_OUTPUT       FALSE
@@ -42,7 +43,8 @@ target_sources(SpectralTable PRIVATE
     src/dsp/ChirpSynth.cpp
     src/dsp/NoiseSynth.cpp
     src/dsp/SpectralAnalyzer.cpp
-    src/ui/SpectralCubePanel.cpp)
+    src/ui/SpectralCubePanel.cpp
+    src/ui/PianoKeyboard.cpp)
 
 # ── JUCE modules ─────────────────────────────────────────────────────────────
 target_compile_definitions(SpectralTable PUBLIC

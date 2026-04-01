@@ -108,6 +108,7 @@ public:
   SpectralVolume volume{VolumeResolution{64, 2, 128}};
 
   void importWavFiles(const juce::Array<juce::File>& files);
+  void addMidiEventToQueue(const juce::MidiMessage &message);
   std::atomic<float> loadProgress_{0.0f};
 
 private:
@@ -148,6 +149,10 @@ private:
   float animAccum_ = 0.0f;
   float genTime_ = 0.0f;
   void tickAnimatedGenerators(double sampleRate, int numSamples);
+
+  // MIDI event queue for piano keyboard
+  juce::MidiBuffer midiEventQueue_;
+  juce::CriticalSection midiQueueLock_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginProcessor)
 };

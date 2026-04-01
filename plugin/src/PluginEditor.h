@@ -1,6 +1,7 @@
 #pragma once
 #include "PluginProcessor.h"
 #include "ui/SpectralCubePanel.h"
+#include "ui/PianoKeyboard.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -30,8 +31,13 @@ public:
   void paint(juce::Graphics &) override;
   void resized() override;
 
+public:
+  // Method to handle MIDI events from piano keyboard
+  void handlePianoMidiEvent(const juce::MidiMessage &message);
+
 private:
   juce::AudioProcessorValueTreeState &apvts_;
+  PluginProcessor &processor_;
 
   SpectralCubePanel spectralCube;
   VisualizerPanel spectrogram{"Spectrogram (2D)"};
@@ -249,6 +255,9 @@ private:
   juce::TextButton resetButton{"Reset to Defaults"};
   juce::TextButton importButton{"Import WAV..."};
   std::unique_ptr<juce::FileChooser> fileChooser;
+
+  // Piano Keyboard
+  PianoKeyboard pianoKeyboard;
 
   // ---- Dynamic generator parameter controls ----
   // Section header

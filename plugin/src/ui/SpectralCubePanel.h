@@ -75,7 +75,7 @@ private:
   juce::Point<int> lastMousePos;
 
   bool showWireframe = true;
-  bool showPoints = false;
+  bool showPoints = true;
   bool showLine = false;
   bool showPlane = true;
 

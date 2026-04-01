@@ -2,18 +2,35 @@
 #include "PluginProcessor.h"
 
 PluginEditor::PluginEditor(PluginProcessor &p)
-    : juce::AudioProcessorEditor(&p), apvts_(p.apvts), spectralCube(p) {
+    : juce::AudioProcessorEditor(&p), apvts_(p.apvts), processor_(p), spectralCube(p) {
   addAndMakeVisible(spectralCube);
   addAndMakeVisible(spectrogram);
   addAndMakeVisible(scope);
   addAndMakeVisible(controlsViewport);
+  addAndMakeVisible(pianoKeyboard);
 
   controlsViewport.setViewedComponent(&controlsContent, false);
   controlsViewport.setScrollBarsShown(true, false);
 
+  // Configure piano keyboard
+  pianoKeyboard.setNumOctaves(5);
+  pianoKeyboard.setStartNote(36); // C1
+  pianoKeyboard.setKeyWidth(20);
+  pianoKeyboard.setBlackKeyHeightRatio(0.6f);
+  pianoKeyboard.setColourScheme(
+      juce::Colours::white,
+      juce::Colour(0xff2a2a2a),
+      juce::Colour(0xffa0a0ff),
+      juce::Colour(0xff4040c0),
+      juce::Colours::black
+  );
+  
+  // Connect piano keyboard to processor for MIDI output
+  pianoKeyboard.setMidiOutput(p);
+
   initControls();
 
-  setSize(1100, 700);
+  setSize(1100, 800); // Increased height for piano keyboard
   setResizable(true, true);
 }
 
@@ -133,6 +150,10 @@ void PluginEditor::resized() {
   spectralCube.setBounds(leftPanel.removeFromTop(cubeHeight).reduced(4));
   spectrogram.setBounds(leftPanel.removeFromTop(smallPanelHeight).reduced(4));
   scope.setBounds(leftPanel.reduced(4));
+
+  // Position piano keyboard at the bottom, spanning the entire width
+  const int pianoHeight = 100;
+  pianoKeyboard.setBounds(getLocalBounds().removeFromBottom(pianoHeight));
 }
 
 void PluginEditor::initControls() {
@@ -427,7 +448,7 @@ void PluginEditor::initControls() {
   lineToggle.setButtonText("Reading Line");
   planeToggle.setButtonText("Reading Plane");
   wireToggle.setToggleState(true, juce::dontSendNotification);
-  pointsToggle.setToggleState(false, juce::dontSendNotification);
+  pointsToggle.setToggleState(true, juce::dontSendNotification);
   lineToggle.setToggleState(false, juce::dontSendNotification);
   planeToggle.setToggleState(true, juce::dontSendNotification);
   controlsContent.addAndMakeVisible(vizLabel);
@@ -672,4 +693,19 @@ void PluginEditor::updateGenParamVisibility(int gen) {
   juce::MessageManager::callAsync([safe = juce::Component::SafePointer(this)] {
     if (safe != nullptr) safe->resized();
   });
+}
+
+void PluginEditor::handlePianoMidiEvent(const juce::MidiMessage &message) {
+  // This method will be called by the piano keyboard when notes are played
+  // We need to pass these MIDI events to the processor
+  // Since we're on the message thread, we need to be careful about thread safety
+  
+  if (message.isNoteOn() || message.isNoteOff()) {
+    // For note events, we can directly affect the processor's MIDI buffer
+    // This is a simplified approach - in a production plugin, you'd want
+    // to use a proper thread-safe queue or other synchronization
+    
+    // For now, we'll just demonstrate the concept
+    // The actual MIDI handling should be done in the audio thread
+  }
 }

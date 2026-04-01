@@ -113,7 +113,7 @@ PluginProcessor::createParameterLayout() {
       juce::ParameterID{ParamID::LFO2_TARGET, 1}, "LFO2 Target", 0, 3, 0));
 
   params.push_back(std::make_unique<juce::AudioParameterInt>(
-      juce::ParameterID{ParamID::GENERATOR, 1}, "Generator", 0, 6, 6));
+      juce::ParameterID{ParamID::GENERATOR, 1}, "Generator", 0, 6, 0));
   params.push_back(std::make_unique<juce::AudioParameterFloat>(
       juce::ParameterID{ParamID::BPM, 1}, "BPM", 20.0f, 300.0f, 120.0f));
 
@@ -178,6 +178,18 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                                    juce::MidiBuffer &midiMessages) {
   juce::ScopedNoDenormals noDenormals;
   int numSamples = buffer.getNumSamples();
+
+  // Process queued MIDI events from piano keyboard
+  {
+    const juce::ScopedLock lock(midiQueueLock_);
+    if (!midiEventQueue_.isEmpty()) {
+      // Merge queued events into the main MIDI buffer
+      for (const auto metadata : midiEventQueue_) {
+        midiMessages.addEvent(metadata.getMessage(), metadata.samplePosition);
+      }
+      midiEventQueue_.clear();
+    }
+  }
 
   int newMode =
       static_cast<int>(apvts.getRawParameterValue(ParamID::SYNTH_MODE)->load());
@@ -531,6 +543,11 @@ void PluginProcessor::tickAnimatedGenerators(double sampleRate, int numSamples) 
       volume.stepGameOfLife();
     }
   }
+}
+
+void PluginProcessor::addMidiEventToQueue(const juce::MidiMessage &message) {
+  const juce::ScopedLock lock(midiQueueLock_);
+  midiEventQueue_.addEvent(message, 0); // Sample position 0 - will be processed immediately
 }
 
 juce::AudioProcessor *JUCE_CALLTYPE createPluginFilter() {

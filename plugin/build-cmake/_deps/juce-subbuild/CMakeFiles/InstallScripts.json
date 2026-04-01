@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/jlof/spectraltable/plugin/build-cmake/_deps/juce-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
