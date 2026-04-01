@@ -1,6 +1,6 @@
 /**
  * Wavetable Processor (AM Synthesis with Feedback)
- * Carrier wave (sine/saw/square/tri) modulated by reading line magnitudes.
+ * Carrier wave(sine / saw / square / tri) modulated by reading line magnitudes.
  * Magnitude 0 = silence, Magnitude 1 = full carrier amplitude.
  * Feedback: previous output mixed back into carrier for evolving timbres.
  */
