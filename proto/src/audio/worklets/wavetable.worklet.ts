@@ -25,6 +25,11 @@ class WavetableProcessor extends AudioWorkletProcessor {
     private harmonicPhases = new Float32Array(20);
     private harmonicEnvPhases = new Float32Array(20);
 
+    // Waveshaping
+    private waveshapeCurve = 0;  // 0=none, 1=tanh, 2=polynomial, 3=sine fold
+    private waveshapeDrive = 1.0;
+    private waveshapeMix = 0.0;
+
     // Harmonic Injection (Integer harmonics)
     private harmonicCount = 0;
     private harmonicFalloff = 1.0;
@@ -114,6 +119,11 @@ class WavetableProcessor extends AudioWorkletProcessor {
                 case 'interp-samples':
                     this.interpSamples = e.data.value;
                     this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+                    break;
+                case 'waveshape':
+                    this.waveshapeCurve = e.data.curve;
+                    this.waveshapeDrive = e.data.drive;
+                    this.waveshapeMix = e.data.mix;
                     break;
             }
         };
@@ -286,6 +296,29 @@ class WavetableProcessor extends AudioWorkletProcessor {
             }
 
             this.lastSample = totalSample;
+
+            // Waveshaping post-process
+            if (this.waveshapeCurve > 0 && this.waveshapeMix > 0.001) {
+                const dry = totalSample;
+                const driven = totalSample * this.waveshapeDrive;
+                let shaped: number;
+                switch (this.waveshapeCurve) {
+                    case 1: // tanh — warm symmetric saturation
+                        shaped = Math.tanh(driven);
+                        break;
+                    case 2: // polynomial — x - x^3, gentle odd-harmonic addition
+                        shaped = driven - driven * driven * driven * 0.333;
+                        shaped = Math.max(-1, Math.min(1, shaped));
+                        break;
+                    case 3: // sine fold — wraps signal through sin()
+                        shaped = Math.sin(driven);
+                        break;
+                    default:
+                        shaped = driven;
+                        break;
+                }
+                totalSample = dry * (1 - this.waveshapeMix) + shaped * this.waveshapeMix;
+            }
 
             const gain = 0.5;
             channelL[i] = totalSample * gain;

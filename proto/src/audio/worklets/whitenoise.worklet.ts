@@ -24,6 +24,11 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
     private timelineTotalSamples = 0;
     private sampleCount = 0;
 
+    // Waveshaping
+    private waveshapeCurve = 0;
+    private waveshapeDrive = 1.0;
+    private waveshapeMix = 0.0;
+
     constructor() {
         super();
         this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
@@ -60,6 +65,10 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
             } else if (e.data.type === 'interp-samples') {
                 this.interpSamples = e.data.value;
                 this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+            } else if (e.data.type === 'waveshape') {
+                this.waveshapeCurve = e.data.curve;
+                this.waveshapeDrive = e.data.drive;
+                this.waveshapeMix = e.data.mix;
             }
         };
     }
@@ -144,7 +153,21 @@ class WhitenoiseProcessor extends AudioWorkletProcessor {
                 sumSubtracted += band * suppression;
             }
 
-            const sample = noise - sumSubtracted;
+            let sample = noise - sumSubtracted;
+
+            if (this.waveshapeCurve > 0 && this.waveshapeMix > 0.001) {
+                const dry = sample;
+                const driven = sample * this.waveshapeDrive;
+                let shaped: number;
+                switch (this.waveshapeCurve) {
+                    case 1: shaped = Math.tanh(driven); break;
+                    case 2: shaped = driven - driven * driven * driven * 0.333; shaped = Math.max(-1, Math.min(1, shaped)); break;
+                    case 3: shaped = Math.sin(driven); break;
+                    default: shaped = driven; break;
+                }
+                sample = dry * (1 - this.waveshapeMix) + shaped * this.waveshapeMix;
+            }
+
             const gain = 0.01;
             channelL[i] = sample * gain;
             channelR[i] = sample * gain;

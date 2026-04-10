@@ -116,6 +116,19 @@ export const defaultSpectralCopyState: SpectralCopyState = {
     mix: 0.0
 };
 
+// Waveshaping state
+export interface WaveshapeState {
+    curve: number;   // 0=none, 1=tanh, 2=polynomial, 3=sine fold
+    drive: number;   // 1.0-20.0, pre-curve gain
+    mix: number;     // 0.0-1.0, dry/wet blend
+}
+
+export const defaultWaveshapeState: WaveshapeState = {
+    curve: 0,
+    drive: 1.0,
+    mix: 0.0
+};
+
 // Generator parameter interfaces
 export interface JuliaParams {
     scale: number;      // 0.5 - 2.0, default 1.2
@@ -177,6 +190,7 @@ export interface PresetControls {
     octaveDoubling?: OctaveDoublingState;
     harmonicInjection?: HarmonicInjectionState;
     spectralCopy?: SpectralCopyState;
+    waveshape?: WaveshapeState;
     interpSamples: number;
     bpm: number;
 }

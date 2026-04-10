@@ -32,6 +32,11 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
     private harmonicCount = 0;
     private harmonicFalloff = 1.0;
 
+    // Waveshaping
+    private waveshapeCurve = 0;
+    private waveshapeDrive = 1.0;
+    private waveshapeMix = 0.0;
+
     // Pre-allocated block buffers to avoid GC
     private blockL = new Float32Array(MAX_BLOCK_SIZE);
     private blockR = new Float32Array(MAX_BLOCK_SIZE);
@@ -86,6 +91,11 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
                 case 'interp-samples':
                     this.interpSamples = e.data.value;
                     this.interpStep = this.interpSamples > 0 ? 1.0 / (this.interpSamples + 1) : 1.0;
+                    break;
+                case 'waveshape':
+                    this.waveshapeCurve = e.data.curve;
+                    this.waveshapeDrive = e.data.drive;
+                    this.waveshapeMix = e.data.mix;
                     break;
             }
         };
@@ -245,14 +255,33 @@ class ChirpSpectralProcessor extends AudioWorkletProcessor {
         // 2. Synthesize
         this.synthesize(length);
 
-        // 3. Copy to output with scaling
+        // 3. Waveshaping + Output
         const scale = 0.1;
-        for (let i = 0; i < length; i++) {
-            channelL[i] = this.blockL[i] * scale;
-            channelR[i] = this.blockR[i] * scale;
+        if (this.waveshapeCurve > 0 && this.waveshapeMix > 0.001) {
+            for (let i = 0; i < length; i++) {
+                channelL[i] = this.applyWaveshape(this.blockL[i]) * scale;
+                channelR[i] = this.applyWaveshape(this.blockR[i]) * scale;
+            }
+        } else {
+            for (let i = 0; i < length; i++) {
+                channelL[i] = this.blockL[i] * scale;
+                channelR[i] = this.blockR[i] * scale;
+            }
         }
 
         return true;
+    }
+
+    private applyWaveshape(x: number): number {
+        const driven = x * this.waveshapeDrive;
+        let shaped: number;
+        switch (this.waveshapeCurve) {
+            case 1: shaped = Math.tanh(driven); break;
+            case 2: shaped = driven - driven * driven * driven * 0.333; shaped = Math.max(-1, Math.min(1, shaped)); break;
+            case 3: shaped = Math.sin(driven); break;
+            default: return x;
+        }
+        return x * (1 - this.waveshapeMix) + shaped * this.waveshapeMix;
     }
 }
 

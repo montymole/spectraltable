@@ -101,16 +101,20 @@ export class AudioEngine {
         }
     }
 
+    private modeMap = {
+        [SynthMode.SPECTRAL]: 'spectral-processor',
+        [SynthMode.SPECTRAL_CHIRP]: 'chirp-spectral-processor',
+        [SynthMode.WAVETABLE]: 'wavetable-processor',
+        [SynthMode.WHITENOISE_BAND_Q_FILTER]: 'whitenoise-processor',
+    }
+
     private createWorkletNode(): void {
         if (this.workletNode) {
             this.workletNode.disconnect();
             this.workletNode = null;
         }
 
-        let processorName = 'wavetable-processor';
-        if (this.currentMode === SynthMode.SPECTRAL) processorName = 'spectral-processor';
-        if (this.currentMode === SynthMode.SPECTRAL_CHIRP) processorName = 'chirp-spectral-processor';
-        if (this.currentMode === SynthMode.WHITENOISE_BAND_Q_FILTER) processorName = 'whitenoise-processor';
+        const processorName = this.modeMap[this.currentMode] || 'wavetable-processor';
 
         this.workletNode = new AudioWorkletNode(this.ctx, processorName, {
             numberOfInputs: 0,
