@@ -23,7 +23,7 @@ export const SECTION_ICONS: Record<string, string> = {
         <path d="M 8 40 C 20 40, 30 10, 55 15" stroke-width="2" />
         <circle cx="55" cy="15" r="3" fill="currentColor" />
     </svg>`,
-    'LFOs': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+    'Modulators': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
         <circle cx="32" cy="32" r="28" stroke-dasharray="4 4" stroke-opacity="0.3" />
         <path d="M 12 32 C 12 10, 32 10, 32 32 C 32 54, 52 54, 52 32" />
         <path d="M 50 32 L 54 32" />

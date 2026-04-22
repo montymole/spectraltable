@@ -7,14 +7,13 @@ import { StereoScopeWebGL as StereoScope } from './ui/scope-webgl';
 import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
 import { MidiHandler } from './audio/midi-handler';
-import { EnvelopeEditor } from './ui/envelope-editor';
 import { PianoKeyboard } from './ui/piano';
 import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType,
     VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, PresetControls, OctaveDoublingState
 } from './types';
-import { LFO, LFOWaveform } from './modulators/lfo';
+import { createDefaultModulatorStates, Modulator, resolveModulatorStates } from './modulators/modulator';
 import { noteToName } from './ui/ui-elements';
 
 // Main application entry point
@@ -48,18 +47,16 @@ class SpectralTableApp {
     private sinePlasmaLastUpdate = 0;
 
     // Modulation Logic
-    private lfos: LFO[] = [
-        new LFO(0.5),
-        new LFO(0.5),
-        new LFO(0.5),
-        new LFO(0.5)
-    ];
-    private pathYSource: string = 'none'; // 'none', 'lfo1', 'lfo2'
+    private modulators: Modulator[];
+    private pathYSource: string = 'none';
     private scanPhaseSource: string = 'none';
     private shapePhaseSource: string = 'none';
+    private amplitudeSource: string = 'mod1';
+    private currentBpm = 140;
 
     constructor() {
         console.log('Spectra Table Synthesis - Initializing...');
+        this.modulators = createDefaultModulatorStates(4).map((state) => new Modulator(state));
 
         // Initialize WebGL
         this.canvas = document.getElementById('gl-canvas') as HTMLCanvasElement;
@@ -77,7 +74,7 @@ class SpectralTableApp {
 
         // Initialize UI controls
         this.controls = new ControlPanel('controls', {
-            lfos: this.lfos,
+            modulators: this.modulators.map((modulator) => modulator.getState()),
         });
 
         // Create Spectrogram and Scope
@@ -86,14 +83,6 @@ class SpectralTableApp {
 
         // Initialize Audio Engine
         this.audioEngine = new AudioEngine();
-
-        // Initialize envelope editor logic
-        const envCanvas = this.controls.envelopeCanvas;
-        if (envCanvas) {
-            new EnvelopeEditor(envCanvas, this.audioEngine);
-        } else {
-            console.error('Envelope canvas not created in controls');
-        }
 
         // Initialize Audio Analyzer
         this.audioAnalyzer = new AudioAnalyzer();
@@ -157,26 +146,21 @@ class SpectralTableApp {
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
         this.controls.setRenderWavCallback(this.onRenderWav.bind(this));
         this.controls.setBPMCallback((bpm) => {
-            this.lfos.forEach(lfo => lfo.setBPM(bpm));
+            this.currentBpm = bpm;
+            this.modulators.forEach(modulator => modulator.setBPM(bpm));
         });
-
-
-        // LFO Wiring
-        this.controls.setLFOParamChangeCallback((index: number, param: string, value: any) => {
-            const lfo = this.lfos[index];
-            if (!lfo) return;   // Invalid index
-            if (param === 'waveform') lfo.setWaveform(value as LFOWaveform);
-            if (param === 'frequency') lfo.setFrequency(value);
-            if (param === 'amplitude') lfo.setAmplitude(value);
-            if (param === 'offset') lfo.setOffset(value);
-            if (param === 'isSynced') lfo.setSync(value);
-            if (param === 'division') lfo.setDivision(value);
+        this.controls.setModulatorChangeCallback((index, state) => {
+            const modulator = this.modulators[index];
+            if (!modulator) return;
+            modulator.setState(state);
+            modulator.setBPM(this.controls.getFullState().bpm);
         });
 
         this.controls.setModulationRoutingChangeCallback((target: string, source: string) => {
             if (target === 'pathY') this.pathYSource = source;
             if (target === 'scanPhase') this.scanPhaseSource = source;
             if (target === 'shapePhase') this.shapePhaseSource = source;
+            if (target === 'amplitude') this.amplitudeSource = source;
         });
 
         // Handle window resize
@@ -243,25 +227,22 @@ class SpectralTableApp {
 
         // Apply BPM
         if (state.bpm !== undefined) {
-            this.lfos.forEach(lfo => lfo.setBPM(state.bpm));
+            this.currentBpm = state.bpm;
+            this.modulators.forEach(modulator => modulator.setBPM(state.bpm));
         }
 
-        // Apply to LFOs
-        this.lfos.forEach((lfo, index) => {
-            if (!state.lfos || index >= state.lfos.length) return;
-            const s = state.lfos[index];
-            lfo.setWaveform(s.waveform as any);
-            lfo.setFrequency(s.frequency);
-            lfo.setAmplitude(s.amplitude);
-            lfo.setOffset(s.offset);
-            if (s.isSynced !== undefined) lfo.setSync(s.isSynced);
-            if (s.division !== undefined) lfo.setDivision(s.division);
+        const modulatorStates = resolveModulatorStates(state, this.modulators.length);
+        this.modulators = modulatorStates.map((modulatorState) => {
+            const modulator = new Modulator(modulatorState);
+            modulator.setBPM(state.bpm || this.controls.getFullState().bpm);
+            return modulator;
         });
 
         // Apply modulation routing
         this.pathYSource = state.modRouting.pathY;
         this.scanPhaseSource = state.modRouting.scanPhase;
         this.shapePhaseSource = state.modRouting.shapePhase;
+        this.amplitudeSource = state.modRouting.amplitude || 'mod1';
 
         // Apply audio settings
         this.audioEngine.setMode(state.synthMode as SynthMode);
@@ -270,14 +251,7 @@ class SpectralTableApp {
         this.audioEngine.setCarrier(state.carrier);
         this.audioEngine.setFeedback(state.feedback);
         this.audioEngine.setInterpSamples(state.interpSamples || 64);
-
-        // Apply amp envelope (always first envelope)
-        if (state.envelopes?.[0]) {
-            this.audioEngine.attack = state.envelopes[0].attack;
-            this.audioEngine.decay = state.envelopes[0].decay;
-            this.audioEngine.sustain = state.envelopes[0].sustain;
-            this.audioEngine.release = state.envelopes[0].release;
-        }
+        this.audioEngine.setMasterGainTarget(0, 0.001);
 
         // Apply piano octave
         this.piano.setBaseOctave(state.octave);
@@ -430,11 +404,49 @@ class SpectralTableApp {
         this.renderer.updateSpectralData(dataSet, params);
     }
 
+    private getModulatorIndex(source: string): number {
+        if (!source.startsWith('mod')) return -1;
+        return parseInt(source.replace('mod', ''), 10) - 1;
+    }
+
+    private getModulatorValue(source: string, outputs: number[]): number {
+        const index = this.getModulatorIndex(source);
+        return index >= 0 && index < outputs.length ? outputs[index] : 0;
+    }
+
+    private applyModulatedPathState(state: ReadingPathState, outputs: number[]): boolean {
+        let changed = false;
+
+        if (this.pathYSource !== 'none') {
+            state.position.y = Math.max(-1, Math.min(1, this.getModulatorValue(this.pathYSource, outputs)));
+            this.controls.updatePathY(state.position.y);
+            changed = true;
+        }
+        if (this.scanPhaseSource !== 'none') {
+            state.scanPosition = Math.max(-1, Math.min(1, this.getModulatorValue(this.scanPhaseSource, outputs)));
+            this.controls.updateScanPosition(state.scanPosition);
+            changed = true;
+        }
+        if (this.shapePhaseSource !== 'none') {
+            state.shapePhase = Math.max(-1, Math.min(1, this.getModulatorValue(this.shapePhaseSource, outputs)));
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private getAmplitudeValue(outputs: number[], noteActive: boolean = this.currentNote !== null): number {
+        if (this.amplitudeSource === 'none') {
+            return noteActive ? 1 : 0;
+        }
+        return Math.max(0, Math.min(1, this.getModulatorValue(this.amplitudeSource, outputs)));
+    }
+
     private onMidiNote(note: number | null): void {
         // Handle Note Off / All Keys Up
         if (note === null) {
             this.currentNote = null;
-            this.audioEngine.triggerRelease();
+            this.modulators.forEach((modulator) => modulator.noteOff());
             return;
         }
 
@@ -464,8 +476,7 @@ class SpectralTableApp {
             this.audioEngine.setSpectralPitch(multiplier);
         }
 
-        // Trigger Envelope Attack (Multi-trigger behavior: every new note triggers attack)
-        this.audioEngine.triggerAttack();
+        this.modulators.forEach((modulator) => modulator.noteOn());
     }
 
     private async onRenderWav(note: number, duration: number): Promise<void> {
@@ -473,7 +484,9 @@ class SpectralTableApp {
         const bpm = (fullState as any).bpm || 140;
 
         let actualDuration = duration;
-        const anySynced = this.lfos.some(lfo => lfo.isSynced);
+        const anySynced = this.modulators.some((modulator) =>
+            modulator.getState().slots.some((slot) => slot.type === 'lfo' && slot.lfo?.isSynced)
+        );
 
         if (anySynced) {
             actualDuration = duration * (60 / bpm);
@@ -484,84 +497,79 @@ class SpectralTableApp {
 
         const octaveDoubling = this.audioEngine.getOctaveDoubling();
         const state = fullState;
-        const envState = this.audioEngine.getEnvelopeState();
-        const totalDuration = actualDuration + envState.release;
+        const releaseDuration = this.amplitudeSource === 'none'
+            ? 0
+            : this.modulators[Math.max(0, this.getModulatorIndex(this.amplitudeSource))]?.getMaxReleaseTime() || 0;
+        const totalDuration = actualDuration + releaseDuration;
 
-        // Check if any LFO modulation is active
-        const hasModulation = this.pathYSource !== 'none' ||
+        const hasPathModulation = this.pathYSource !== 'none' ||
             this.scanPhaseSource !== 'none' ||
             this.shapePhaseSource !== 'none';
 
         let spectralData: Float32Array;
         let timelineInfo: { numFrames: number, frameSize: number } | undefined;
+        let gainTimeline: Float32Array | undefined;
 
-        if (hasModulation) {
-            // Simulate LFO modulations at 60fps
-            const fps = 60;
-            const numFrames = Math.ceil(totalDuration * fps);
-            const deltaTime = 1 / fps;
+        const fps = 60;
+        const numFrames = Math.max(1, Math.ceil(totalDuration * fps));
+        const deltaTime = 1 / fps;
+        const simModulators = this.modulators.map((modulator) => {
+            const clone = modulator.clone();
+            clone.setBPM(bpm);
+            return clone;
+        });
+        simModulators.forEach((modulator) => modulator.noteOn());
 
-            // Clone LFO state to avoid modifying originals
-            const simLfos = this.lfos.map(lfo => {
-                const simLfo = new LFO(lfo.frequency);
-                simLfo.setWaveform(lfo.waveform);
-                simLfo.setAmplitude(lfo.amplitude);
-                simLfo.setOffset(lfo.offset);
-                simLfo.setSync(lfo.isSynced);
-                simLfo.setDivision(lfo.division);
-                simLfo.setBPM((state as any).bpm || 140);
-                return simLfo;
-            });
+        const pathState = this.controls.getState();
+        const initialPathY = pathState.position.y;
+        const initialScanPos = pathState.scanPosition;
+        const initialShapePhase = pathState.shapePhase;
 
-            // Get initial path state
-            const pathState = this.controls.getState();
-            const initialPathY = pathState.position.y;
-            const initialScanPos = pathState.scanPosition;
-            const initialShapePhase = pathState.shapePhase;
-
-            // First frame to determine frame size
+        if (hasPathModulation) {
             const firstFrame = this.renderer.getReadingLineSpectralData();
             const frameSize = firstFrame.length;
-
-            // Allocate timeline buffer
             const timeline = new Float32Array(numFrames * frameSize);
+            gainTimeline = new Float32Array(numFrames);
 
-            // Generate frames
+            let released = false;
             for (let f = 0; f < numFrames; f++) {
-                // Update LFOs and apply modulations
-                simLfos.forEach((lfo, index) => {
-                    const lfoOut = lfo.update(deltaTime);
-                    const sourceName = `lfo${index + 1}`;
-                    if (this.pathYSource === sourceName) {
-                        pathState.position.y = lfoOut;
-                    }
-                    if (this.scanPhaseSource === sourceName) {
-                        pathState.scanPosition = lfoOut;
-                    }
-                    if (this.shapePhaseSource === sourceName) {
-                        pathState.shapePhase = lfoOut;
-                    }
-                });
+                const currentTime = f * deltaTime;
+                if (!released && currentTime >= actualDuration) {
+                    simModulators.forEach((modulator) => modulator.noteOff());
+                    released = true;
+                }
 
-                // Update renderer and capture spectral data
+                const outputs = simModulators.map((modulator) => modulator.update(f === 0 ? 0 : deltaTime));
+                this.applyModulatedPathState(pathState, outputs);
+                gainTimeline[f] = this.getAmplitudeValue(outputs, currentTime < actualDuration || !released);
+
                 this.renderer.updateReadingPath(pathState);
                 const frame = this.renderer.getReadingLineSpectralData();
                 timeline.set(frame, f * frameSize);
             }
 
-            // Restore original state
-            pathState.position.y = initialPathY;
-            pathState.scanPosition = initialScanPos;
-            pathState.shapePhase = initialShapePhase;
-            this.renderer.updateReadingPath(pathState);
-
             spectralData = timeline;
             timelineInfo = { numFrames, frameSize };
-            console.log(`Generated ${numFrames} frames for LFO modulation simulation`);
+            console.log(`Generated ${numFrames} frames for modulator simulation`);
         } else {
-            // No modulation - use single snapshot
+            let released = false;
+            gainTimeline = new Float32Array(numFrames);
+            for (let f = 0; f < numFrames; f++) {
+                const currentTime = f * deltaTime;
+                if (!released && currentTime >= actualDuration) {
+                    simModulators.forEach((modulator) => modulator.noteOff());
+                    released = true;
+                }
+                const outputs = simModulators.map((modulator) => modulator.update(f === 0 ? 0 : deltaTime));
+                gainTimeline[f] = this.getAmplitudeValue(outputs, currentTime < actualDuration || !released);
+            }
             spectralData = this.renderer.getReadingLineSpectralData();
         }
+
+        pathState.position.y = initialPathY;
+        pathState.scanPosition = initialScanPos;
+        pathState.shapePhase = initialShapePhase;
+        this.renderer.updateReadingPath(pathState);
 
         try {
             this.controls.showProgress('render');
@@ -582,7 +590,9 @@ class SpectralTableApp {
                 harmonicInjection: this.audioEngine.getHarmonicInjection(),
                 spectralCopy: this.audioEngine.getSpectralCopy(),
                 interpSamples: state.interpSamples,
-                timeline: timelineInfo
+                timeline: timelineInfo,
+                gainTimeline,
+                releaseDuration
             });
 
             this.controls.updateProgress('render', 100);
@@ -720,32 +730,18 @@ class SpectralTableApp {
                 }
             }
 
-            // LFO modulation update
-            let pathModulated = false;
+            // Modulator update
             const state = this.controls.getState();
-
-            this.lfos.forEach((lfo, index) => {
-                const lfoOut = lfo.update(deltaTime);
-                const sourceName = `lfo${index + 1}`;
-                if (this.pathYSource === sourceName) {
-                    state.position.y = lfoOut;
-                    this.controls.updatePathY(lfoOut);
-                    pathModulated = true;
-                }
-                if (this.scanPhaseSource === sourceName) {
-                    state.scanPosition = lfoOut;
-                    this.controls.updateScanPosition(lfoOut);
-                    pathModulated = true;
-                }
-                if (this.shapePhaseSource === sourceName) {
-                    state.shapePhase = lfoOut;
-                    pathModulated = true;
-                }
-            });
-
+            const modOutputs = this.modulators.map((modulator) => modulator.update(deltaTime));
+            const beatDuration = 60 / Math.max(this.currentBpm, 1);
+            this.controls.updateModulatorPreviewCurves(
+                this.modulators.map((modulator) => modulator.samplePreview(beatDuration, 256))
+            );
+            const pathModulated = this.applyModulatedPathState(state, modOutputs);
             if (pathModulated) {
                 this.renderer.updateReadingPath(state);
             }
+            this.audioEngine.setMasterGainTarget(this.getAmplitudeValue(modOutputs));
 
             this.renderer.render(deltaTime);
 

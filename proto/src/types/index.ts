@@ -81,6 +81,29 @@ export interface LFOState {
     division: string;
 }
 
+export interface EnvelopeState {
+    attack: number;
+    decay: number;
+    sustain: number;
+    release: number;
+}
+
+export type ModulatorOperator = '+' | '-' | '*';
+export type ModulatorSlotType = 'none' | 'lfo' | 'envelope' | 'slider';
+
+export interface ModulatorSlotState {
+    type: ModulatorSlotType;
+    lfo?: LFOState;
+    envelope?: EnvelopeState;
+    value?: number;
+}
+
+export interface ModulatorState {
+    name: string;
+    slots: ModulatorSlotState[];
+    operators: ModulatorOperator[];
+}
+
 // Octave doubling state for octave layering
 export interface OctaveDoublingState {
     lowCount: number;      // 0-10, number of octaves below base frequency
@@ -183,9 +206,10 @@ export interface PresetControls {
     densityZ: number;
     spectralData: string;
     generatorParams?: GeneratorParams;
-    lfos: LFOState[];
-    envelopes: { attack: number; decay: number; sustain: number; release: number }[];
-    modRouting: { pathY: string; scanPhase: string; shapePhase: string };
+    lfos?: LFOState[];
+    envelopes?: EnvelopeState[];
+    modulators?: ModulatorState[];
+    modRouting: { pathY: string; scanPhase: string; shapePhase: string; amplitude: string };
     octave: number;
     octaveDoubling?: OctaveDoublingState;
     harmonicInjection?: HarmonicInjectionState;

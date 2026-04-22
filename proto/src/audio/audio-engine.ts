@@ -332,6 +332,13 @@ export class AudioEngine {
         }
     }
 
+    public setMasterGainTarget(value: number, smoothingTime: number = 0.01): void {
+        const now = this.ctx.currentTime;
+        const clamped = Math.max(0, Math.min(1, value));
+        this.masterGain.gain.cancelScheduledValues(now);
+        this.masterGain.gain.setTargetAtTime(clamped, now, Math.max(0.001, smoothingTime));
+    }
+
     public triggerAttack(params?: { a: number, d: number, s: number }): void {
         const now = this.ctx.currentTime;
         this.lastNoteTime = now;
@@ -395,11 +402,13 @@ export class AudioEngine {
             harmonicInjection: { count: number, falloff: number },
             spectralCopy: { shift: number, mix: number },
             interpSamples: number,
-            timeline?: { numFrames: number, frameSize: number }
+            timeline?: { numFrames: number, frameSize: number },
+            gainTimeline?: Float32Array,
+            releaseDuration?: number
         }
     ): Promise<Blob> {
         const offlineSampleRate = 44100;
-        const totalDuration = duration + this.release;
+        const totalDuration = duration + (params.releaseDuration ?? this.release);
         const lengthSamples = Math.ceil(totalDuration * offlineSampleRate);
 
         const offlineCtx = new OfflineAudioContext(2, lengthSamples, offlineSampleRate);
@@ -479,15 +488,21 @@ export class AudioEngine {
             };
         });
 
-        // Envelope automation
-        const now = 0;
-        masterGain.gain.setValueAtTime(0, now);
-        masterGain.gain.linearRampToValueAtTime(1.0, now + this.attack);
-        masterGain.gain.linearRampToValueAtTime(this.sustain, now + this.attack + this.decay);
+        if (params.gainTimeline && params.gainTimeline.length > 1) {
+            masterGain.gain.setValueCurveAtTime(params.gainTimeline, 0, totalDuration);
+        } else if (params.gainTimeline && params.gainTimeline.length === 1) {
+            masterGain.gain.setValueAtTime(params.gainTimeline[0], 0);
+        } else {
+            // Legacy ADSR fallback
+            const now = 0;
+            masterGain.gain.setValueAtTime(0, now);
+            masterGain.gain.linearRampToValueAtTime(1.0, now + this.attack);
+            masterGain.gain.linearRampToValueAtTime(this.sustain, now + this.attack + this.decay);
 
-        const releaseStart = duration;
-        masterGain.gain.setValueAtTime(this.sustain, releaseStart);
-        masterGain.gain.linearRampToValueAtTime(0, releaseStart + this.release);
+            const releaseStart = duration;
+            masterGain.gain.setValueAtTime(this.sustain, releaseStart);
+            masterGain.gain.linearRampToValueAtTime(0, releaseStart + this.release);
+        }
 
         const renderedBuffer = await offlineCtx.startRendering();
         return this.audioBufferToWav(renderedBuffer);

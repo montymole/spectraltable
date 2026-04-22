@@ -108,4 +108,16 @@ export class LFO {
         // Clamp to -1 to 1
         return Math.max(-1.0, Math.min(1.0, output));
     }
+
+    public clone(): LFO {
+        const clone = new LFO(this.frequency);
+        clone.waveform = this.waveform;
+        clone.amplitude = this.amplitude;
+        clone.phase = this.phase;
+        clone.offset = this.offset;
+        clone.isSynced = this.isSynced;
+        clone.division = this.division;
+        clone.bpm = this.bpm;
+        return clone;
+    }
 }
