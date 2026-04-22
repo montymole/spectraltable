@@ -216,10 +216,12 @@ export class AudioEngine {
     public updateSpectralData(data: Float32Array): void {
         if (!this.workletNode || !this.isInitialized) return;
 
+        const transferData = data.slice();
+
         this.workletNode.port.postMessage({
             type: 'spectral-data',
-            data: data
-        }, [data.buffer]);
+            data: transferData
+        }, [transferData.buffer]);
     }
 
     public setOctaveDoubling(low: number, high: number, multiplier: number): void {

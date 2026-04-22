@@ -33,6 +33,7 @@ class SpectralTableApp {
     private canvas: HTMLCanvasElement;
     private currentNote: number | null = null;
     private animationFrameId: number = 0;
+    private lastAudioSpectralRevision = -1;
 
     // Store uploaded spectral volumes
     private uploadedVolumes: Map<string, Float32Array> = new Map();
@@ -264,6 +265,7 @@ class SpectralTableApp {
 
         // Apply audio settings
         this.audioEngine.setMode(state.synthMode as SynthMode);
+        this.lastAudioSpectralRevision = -1;
         this.audioEngine.setWavetableFrequency(state.frequency);
         this.audioEngine.setCarrier(state.carrier);
         this.audioEngine.setFeedback(state.feedback);
@@ -364,6 +366,7 @@ class SpectralTableApp {
         if (this.uploadedVolumes.has(dataSet)) {
             const volumeData = this.uploadedVolumes.get(dataSet)!;
             this.renderer.getSpectralVolume().setData(volumeData);
+            this.renderer.markReadingLineDirty();
             this.controls.hideDynamicParam();
         } else if (dataSet === 'game-of-life') {
             // Initialize Game of Life with current params
@@ -402,6 +405,7 @@ class SpectralTableApp {
 
     private onSynthModeChange(mode: SynthMode): void {
         this.audioEngine.setMode(mode);
+        this.lastAudioSpectralRevision = -1;
         console.log(`✓ Synth mode: ${mode}`);
     }
 
@@ -639,6 +643,7 @@ class SpectralTableApp {
 
             // Set volume data directly
             this.renderer.getSpectralVolume().setData(volumeData);
+            this.renderer.markReadingLineDirty();
 
             // Add to dropdown and select it
             this.controls.addSpectralDataOption(volumeName);
@@ -695,6 +700,7 @@ class SpectralTableApp {
 
                 if (timeSinceLastUpdate >= delay) {
                     this.renderer.getSpectralVolume().stepGameOfLife();
+                    this.renderer.markReadingLineDirty();
                     this.gameOfLifeLastUpdate = time;
                 }
             }
@@ -709,6 +715,7 @@ class SpectralTableApp {
 
                 if (timeSinceLastUpdate >= delay) {
                     this.renderer.getSpectralVolume().stepSinePlasma();
+                    this.renderer.markReadingLineDirty();
                     this.sinePlasmaLastUpdate = time;
                 }
             }
@@ -745,8 +752,12 @@ class SpectralTableApp {
             // Get spectral data (RGBA)
             const spectralData = this.renderer.getReadingLineSpectralData();
 
-            // Update Audio
-            this.audioEngine.updateSpectralData(spectralData);
+            // Only resend to the worklet when the sampled reading line changed.
+            const spectralRevision = this.renderer.getReadingLineRevision();
+            if (spectralRevision !== this.lastAudioSpectralRevision) {
+                this.audioEngine.updateSpectralData(spectralData);
+                this.lastAudioSpectralRevision = spectralRevision;
+            }
 
             // Get Audio FFT data
             const audioSpectralData = this.audioEngine.getAudioSpectralData();
