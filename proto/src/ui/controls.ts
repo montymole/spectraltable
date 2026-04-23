@@ -131,6 +131,8 @@ export class ControlPanel {
 
     // Waveshaping state
     private waveshapeState: WaveshapeState = { ...defaultWaveshapeState };
+    private waveshapeDriveSlider!: HTMLInputElement;
+    private waveshapeMixSlider!: HTMLInputElement;
 
     // Debounce timer for auto-save
     private autoSaveTimer: number | null = null;
@@ -396,6 +398,39 @@ export class ControlPanel {
             copyUpdate();
         });
 
+        // Waveshaping controls
+        const subGroup6 = document.createElement('div');
+        subGroup6.classList.add('sub-group');
+        container.appendChild(subGroup6);
+        const wsTitle = document.createElement('label');
+        wsTitle.textContent = 'Waveshaping';
+        wsTitle.style.fontWeight = 'bold';
+        wsTitle.style.marginBottom = '8px';
+        wsTitle.style.display = 'block';
+        subGroup6.appendChild(wsTitle);
+
+        const wsCurveSelect = createSelect(subGroup6, 'waveshape-curve', 'Curve', [
+            { value: '0', label: 'None' },
+            { value: '1', label: 'Tanh' },
+            { value: '2', label: 'Polynomial' },
+            { value: '3', label: 'Sine Fold' }
+        ], (val) => {
+            this.waveshapeState.curve = parseInt(val);
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+        });
+
+        this.waveshapeDriveSlider = createSlider(subGroup6, 'waveshape-drive', 'Drive', 1, 20, 1, 0.1, (val) => {
+            this.waveshapeState.drive = val;
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+        }, undefined, 'linear', 2);
+
+        this.waveshapeMixSlider = createSlider(subGroup6, 'waveshape-mix', 'Mix', 0, 1, 0, 0.01, (val) => {
+            this.waveshapeState.mix = val;
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+        });
 
         // Initialize dynamic UI
         this.updateSynthModeUI(this.synthModeSelect.value as SynthMode);

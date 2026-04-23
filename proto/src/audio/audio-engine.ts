@@ -60,6 +60,11 @@ export class AudioEngine {
     private spectralCopyShift = 12;
     private spectralCopyMix = 0.0;
 
+    // Waveshaping state
+    private waveshapeCurve = 0;
+    private waveshapeDrive = 1.0;
+    private waveshapeMix = 0.0;
+
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
@@ -151,6 +156,9 @@ export class AudioEngine {
             shift: this.spectralCopyShift,
             mix: this.spectralCopyMix
         });
+
+        // Send waveshaping state
+        this.sendWaveshapingToWorklet();
     }
 
     public setMode(mode: SynthMode): void {
@@ -285,6 +293,24 @@ export class AudioEngine {
             shift: this.spectralCopyShift,
             mix: this.spectralCopyMix
         };
+    }
+
+    private sendWaveshapingToWorklet(): void {
+        if (this.workletNode && this.isInitialized) {
+            this.workletNode.port.postMessage({
+                type: 'waveshape',
+                curve: this.waveshapeCurve,
+                drive: this.waveshapeDrive,
+                mix: this.waveshapeMix
+            });
+        }
+    }
+
+    public setWaveshapingState(curve: number, drive: number, mix: number): void {
+        this.waveshapeCurve = curve;
+        this.waveshapeDrive = drive;
+        this.waveshapeMix = mix;
+        this.sendWaveshapingToWorklet();
     }
 
     public setInterpSamples(samples: number): void {
