@@ -54,6 +54,10 @@ export class Renderer {
     private lineUMVP: WebGLUniformLocation;
     private lineUColor: WebGLUniformLocation;
     private lineVertexCount = 0; // Added this property
+    private linePositions: Float32Array = new Float32Array(0);
+    private readingLineSpectralData: Float32Array = new Float32Array(0);
+    private readingLineRevision = 0;
+    private readingLineCacheValid = false;
 
     // Axes rendering
     private axesVAO: WebGLVertexArrayObject | null = null;
@@ -528,8 +532,13 @@ export class Renderer {
             this.pathState.scanPosition,
             this.pathState.shapePhase
         );
+        this.linePositions = linePositions;
 
         this.lineVertexCount = linePositions.length / 3;
+        if (this.readingLineSpectralData.length !== this.lineVertexCount * 4) {
+            this.readingLineSpectralData = new Float32Array(this.lineVertexCount * 4);
+        }
+        this.markReadingLineDirty();
 
         const lineVAO = gl.createVertexArray();
         if (!lineVAO) throw new Error('Failed to create line VAO');
@@ -691,6 +700,7 @@ export class Renderer {
         this.updateReadingPathGeometry();
         // Also update reading line resolution
         this.updateReadingLineGeometry(resolution.x);
+        this.markReadingLineDirty();
     }
 
     public getSpectralVolume(): SpectralVolume {
@@ -701,6 +711,12 @@ export class Renderer {
         const typeChanged = state.planeType !== this.pathState.planeType;
         const scanChanged = state.scanPosition !== this.pathState.scanPosition;
         const phaseChanged = state.shapePhase !== this.pathState.shapePhase;
+        const positionChanged =
+            state.position.x !== this.pathState.position.x ||
+            state.position.y !== this.pathState.position.y ||
+            state.position.z !== this.pathState.position.z;
+        const rotationChanged =
+            state.rotation.y !== this.pathState.rotation.y;
 
         // Always preserve mouse-controlled rotation (x and z)
         // Since rotation sliders were removed, controls always return 0 for rotation
@@ -719,6 +735,8 @@ export class Renderer {
         } else if (scanChanged) {
             const resolution = this.spectralVolume.getResolution();
             this.updateReadingLineGeometry(resolution.x);
+        } else if (positionChanged || rotationChanged) {
+            this.markReadingLineDirty();
         }
     }
 
@@ -743,19 +761,15 @@ export class Renderer {
                 this.spectralVolume.clearData();
                 break;
         }
+        this.markReadingLineDirty();
     }
 
     public getReadingLineSpectralData(): Float32Array {
-        // 1. Get reading line positions in plane space
-        const resolution = this.spectralVolume.getResolution();
-        const linePositions = ReadingPathGeometry.generateReadingLine(
-            this.pathState.planeType,
-            resolution.x, // Use X resolution for sampling density
-            this.pathState.scanPosition,
-            this.pathState.shapePhase
-        );
+        if (this.readingLineCacheValid) {
+            return this.readingLineSpectralData;
+        }
 
-        // 2. Calculate plane transform matrix
+        // 1. Calculate plane transform matrix
         const pRotX = mat4RotateX(this.pathState.rotation.x);
         const pRotY = mat4RotateY(this.pathState.rotation.y);
         const pRotZ = mat4RotateZ(this.pathState.rotation.z);
@@ -769,14 +783,13 @@ export class Renderer {
         planeModel = mat4Multiply(pRotZ, planeModel);
         planeModel = mat4Multiply(pTrans, planeModel);
 
-        // 3. Transform points to world space and sample volume
-        const numPoints = linePositions.length / 3;
-        const result = new Float32Array(numPoints * 4); // RGBA per point
+        // 2. Transform points to world space and sample volume
+        const numPoints = this.linePositions.length / 3;
 
         for (let i = 0; i < numPoints; i++) {
-            const px = linePositions[i * 3];
-            const py = linePositions[i * 3 + 1];
-            const pz = linePositions[i * 3 + 2];
+            const px = this.linePositions[i * 3];
+            const py = this.linePositions[i * 3 + 1];
+            const pz = this.linePositions[i * 3 + 2];
 
             // Transform to world space
             const worldPos = vec3TransformMat4([px, py, pz], planeModel);
@@ -787,16 +800,20 @@ export class Renderer {
             const tz = (worldPos[2] + 1.0) * 0.5;
 
             // Sample volume
-            const sample = this.spectralVolume.sample(tx, ty, tz);
-
-            // Store all channels
-            result[i * 4] = sample[0];     // R: Magnitude
-            result[i * 4 + 1] = sample[1]; // G: Phase
-            result[i * 4 + 2] = sample[2]; // B: Pan
-            result[i * 4 + 3] = sample[3]; // A: Width
+            this.spectralVolume.sampleInto(tx, ty, tz, this.readingLineSpectralData, i * 4);
         }
 
-        return result;
+        this.readingLineCacheValid = true;
+        return this.readingLineSpectralData;
+    }
+
+    public markReadingLineDirty(): void {
+        this.readingLineRevision += 1;
+        this.readingLineCacheValid = false;
+    }
+
+    public getReadingLineRevision(): number {
+        return this.readingLineRevision;
     }
 
     // Mouse interaction
@@ -836,6 +853,7 @@ export class Renderer {
             // Limit rotation to avoid flipping
             this.pathState.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pathState.rotation.x));
             this.pathState.rotation.z = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pathState.rotation.z));
+            this.markReadingLineDirty();
         }
     }
 
@@ -860,6 +878,8 @@ export class Renderer {
     public update(deltaTime: number): void {
         // Auto-reset plane rotation if not dragging
         if (!this.isDragging) {
+            const prevRotationX = this.pathState.rotation.x;
+            const prevRotationZ = this.pathState.rotation.z;
             const decay = 5.0 * deltaTime; // Speed of return
 
             // Lerp towards 0
@@ -869,6 +889,10 @@ export class Renderer {
             // Snap to 0 if very close
             if (Math.abs(this.pathState.rotation.x) < 0.001) this.pathState.rotation.x = 0;
             if (Math.abs(this.pathState.rotation.z) < 0.001) this.pathState.rotation.z = 0;
+
+            if (this.pathState.rotation.x !== prevRotationX || this.pathState.rotation.z !== prevRotationZ) {
+                this.markReadingLineDirty();
+            }
         }
     }
 

@@ -101,16 +101,20 @@ export class AudioEngine {
         }
     }
 
+    private modeMap = {
+        [SynthMode.SPECTRAL]: 'spectral-processor',
+        [SynthMode.SPECTRAL_CHIRP]: 'chirp-spectral-processor',
+        [SynthMode.WAVETABLE]: 'wavetable-processor',
+        [SynthMode.WHITENOISE_BAND_Q_FILTER]: 'whitenoise-processor',
+    }
+
     private createWorkletNode(): void {
         if (this.workletNode) {
             this.workletNode.disconnect();
             this.workletNode = null;
         }
 
-        let processorName = 'wavetable-processor';
-        if (this.currentMode === SynthMode.SPECTRAL) processorName = 'spectral-processor';
-        if (this.currentMode === SynthMode.SPECTRAL_CHIRP) processorName = 'chirp-spectral-processor';
-        if (this.currentMode === SynthMode.WHITENOISE_BAND_Q_FILTER) processorName = 'whitenoise-processor';
+        const processorName = this.modeMap[this.currentMode] || 'wavetable-processor';
 
         this.workletNode = new AudioWorkletNode(this.ctx, processorName, {
             numberOfInputs: 0,
@@ -212,10 +216,12 @@ export class AudioEngine {
     public updateSpectralData(data: Float32Array): void {
         if (!this.workletNode || !this.isInitialized) return;
 
+        const transferData = data.slice();
+
         this.workletNode.port.postMessage({
             type: 'spectral-data',
-            data: data
-        }, [data.buffer]);
+            data: transferData
+        }, [transferData.buffer]);
     }
 
     public setOctaveDoubling(low: number, high: number, multiplier: number): void {
@@ -326,6 +332,13 @@ export class AudioEngine {
         }
     }
 
+    public setMasterGainTarget(value: number, smoothingTime: number = 0.01): void {
+        const now = this.ctx.currentTime;
+        const clamped = Math.max(0, Math.min(1, value));
+        this.masterGain.gain.cancelScheduledValues(now);
+        this.masterGain.gain.setTargetAtTime(clamped, now, Math.max(0.001, smoothingTime));
+    }
+
     public triggerAttack(params?: { a: number, d: number, s: number }): void {
         const now = this.ctx.currentTime;
         this.lastNoteTime = now;
@@ -389,11 +402,13 @@ export class AudioEngine {
             harmonicInjection: { count: number, falloff: number },
             spectralCopy: { shift: number, mix: number },
             interpSamples: number,
-            timeline?: { numFrames: number, frameSize: number }
+            timeline?: { numFrames: number, frameSize: number },
+            gainTimeline?: Float32Array,
+            releaseDuration?: number
         }
     ): Promise<Blob> {
         const offlineSampleRate = 44100;
-        const totalDuration = duration + this.release;
+        const totalDuration = duration + (params.releaseDuration ?? this.release);
         const lengthSamples = Math.ceil(totalDuration * offlineSampleRate);
 
         const offlineCtx = new OfflineAudioContext(2, lengthSamples, offlineSampleRate);
@@ -473,15 +488,21 @@ export class AudioEngine {
             };
         });
 
-        // Envelope automation
-        const now = 0;
-        masterGain.gain.setValueAtTime(0, now);
-        masterGain.gain.linearRampToValueAtTime(1.0, now + this.attack);
-        masterGain.gain.linearRampToValueAtTime(this.sustain, now + this.attack + this.decay);
+        if (params.gainTimeline && params.gainTimeline.length > 1) {
+            masterGain.gain.setValueCurveAtTime(params.gainTimeline, 0, totalDuration);
+        } else if (params.gainTimeline && params.gainTimeline.length === 1) {
+            masterGain.gain.setValueAtTime(params.gainTimeline[0], 0);
+        } else {
+            // Legacy ADSR fallback
+            const now = 0;
+            masterGain.gain.setValueAtTime(0, now);
+            masterGain.gain.linearRampToValueAtTime(1.0, now + this.attack);
+            masterGain.gain.linearRampToValueAtTime(this.sustain, now + this.attack + this.decay);
 
-        const releaseStart = duration;
-        masterGain.gain.setValueAtTime(this.sustain, releaseStart);
-        masterGain.gain.linearRampToValueAtTime(0, releaseStart + this.release);
+            const releaseStart = duration;
+            masterGain.gain.setValueAtTime(this.sustain, releaseStart);
+            masterGain.gain.linearRampToValueAtTime(0, releaseStart + this.release);
+        }
 
         const renderedBuffer = await offlineCtx.startRendering();
         return this.audioBufferToWav(renderedBuffer);

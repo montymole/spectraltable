@@ -1,4 +1,3 @@
-import { LFO } from '../modulators/lfo';
 import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType, PlaneType,
     VOLUME_DENSITY_X_MIN, VOLUME_DENSITY_X_MAX, VOLUME_DENSITY_X_DEFAULT,
@@ -6,11 +5,13 @@ import {
     VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
     defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
-    PresetControls, LFOState, OctaveDoublingState, defaultOctaveDoublingState,
+    PresetControls, OctaveDoublingState, defaultOctaveDoublingState,
     HarmonicInjectionState, defaultHarmonicInjectionState,
-    SpectralCopyState, defaultSpectralCopyState
+    SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState
 } from '../types';
+import { createDefaultModulatorStates, defaultEnvelopeState, defaultLFOState, estimateModulatorRange, normalizeModulatorState, resolveModulatorStates } from '../modulators/modulator';
 import { PresetManager } from './preset-manager';
+import { ModulatorPreviewWebGL } from './modulator-preview-webgl';
 import {
     createSection, createSlider, createSelect, createModulatableSlider,
     createFileInput, createButton, createNumberInput, WAVEFORM_ICONS, CONTROL_STYLE,
@@ -71,8 +72,8 @@ export class ControlPanel {
     private onSpectralCopyChange: ((state: SpectralCopyState) => void) | null = null;
     private onInterpSamplesChange: ((samples: number) => void) | null = null;
 
-    // LFO Callbacks
-    private onLFOParamChange: ((index: number, param: string, value: any) => void) | null = null;
+    // Modulator Callbacks
+    private onModulatorChange: ((index: number, state: ModulatorState) => void) | null = null;
     private onModulationRoutingChange: ((target: string, source: string) => void) | null = null;
 
     // Generator params callback
@@ -94,10 +95,12 @@ export class ControlPanel {
     private presetSelect: HTMLSelectElement | null = null;
     private onPresetLoad: ((controls: PresetControls) => void) | null = null;
 
-    // LFO state for serialization
-    private lfoLabels: string[] = ['None'];
-    private lfoState: LFOState[] = [];
-    private modRoutingState = { pathY: 'none', scanPhase: 'none', shapePhase: 'none' };
+    // Modulator state for serialization
+    private modulatorLabels: string[] = ['None'];
+    private modulatorStates: ModulatorState[] = [];
+    private modulatorSectionContainer: HTMLElement | null = null;
+    private modulatorPreviews: ModulatorPreviewWebGL[] = [];
+    private modRoutingState = { pathY: 'none', scanPhase: 'none', shapePhase: 'none', amplitude: 'mod1' };
     private octaveValue = 3;
 
     // Octave doubling state
@@ -123,44 +126,24 @@ export class ControlPanel {
     private bpmValue: number = 140;
     private onBPMChange: ((bpm: number) => void) | null = null;
 
-    // LFO UI element references for state restoration
-    private lfoWaveSelects: HTMLSelectElement[] = [];
-    private lfoFreqSliders: HTMLInputElement[] = [];
-    private lfoAmpSliders: HTMLInputElement[] = [];
-    private lfoOffsetSliders: HTMLInputElement[] = [];
-    private lfoSyncCheckboxes: HTMLInputElement[] = [];
-    private lfoDivisionSliders: HTMLInputElement[] = [];
-
     private renderDurationLabel: HTMLElement | null = null;
 
     // Waveform Icon containers
     private carrierIconContainer: HTMLElement | null = null;
-    private lfoIconContainers: HTMLElement[] = [];
 
     // Modulation routing selects
     private pathYSourceSelect: HTMLSelectElement | null = null;
     private scanPhaseSourceSelect: HTMLSelectElement | null = null;
     private shapePhaseSourceSelect: HTMLSelectElement | null = null;
+    private amplitudeSourceSelect: HTMLSelectElement | null = null;
 
-    public envelopeCanvas: HTMLCanvasElement | null = null;
-
-    constructor(containerId: string, options: { lfos: LFO[] }) {
+    constructor(containerId: string, options: { modulators?: ModulatorState[] }) {
         const el = document.getElementById(containerId);
         if (!el) throw new Error(`Container not found: ${containerId}`);
         this.container = el;
 
-        this.lfoState = options.lfos.map((lfo, index) => {
-            const label = `LFO ${index + 1}`;
-            this.lfoLabels.push(label);
-            return {
-                waveform: lfo.waveform,
-                frequency: lfo.frequency,
-                amplitude: lfo.amplitude,
-                offset: lfo.offset,
-                isSynced: lfo.isSynced,
-                division: lfo.division
-            };
-        });
+        this.modulatorStates = resolveModulatorStates({ modulators: options.modulators || createDefaultModulatorStates() });
+        this.modulatorLabels = ['None', ...this.modulatorStates.map((mod, index) => mod.name || `Mod ${index + 1}`)];
 
         // Initialize preset manager
         this.presetManager = new PresetManager();
@@ -170,7 +153,7 @@ export class ControlPanel {
             { title: 'Wave/Spectral Volume', populate: (c) => this.populateVolumeSection(c) },
             { title: 'Audio Synthesis', populate: (c) => this.populateSynthesisSection(c) },
             { title: 'Reading Path', populate: (c) => this.populatePathSection(c) },
-            { title: 'LFOs', populate: (c) => this.populateLFOSection(c) },
+            { title: 'Modulators', populate: (c) => this.populateModulatorSection(c) },
             { title: 'Visualization', populate: (c) => this.populateVisualizationSection(c), mode: 'slider' },
             { title: 'Offline Render', populate: (c) => this.populateOfflineRenderSection(c) }
         ];
@@ -234,9 +217,9 @@ export class ControlPanel {
     }
 
     private populatePathSection(container: HTMLElement): void {
-        const lfoOptions = this.lfoLabels.map(l => ({
-            value: l.toLowerCase().replace(' ', ''),
-            label: l
+        const modulatorOptions = this.modulatorLabels.map((label, index) => ({
+            value: index === 0 ? 'none' : `mod${index}`,
+            label
         }));
         const spGroup = document.createElement('div');
         spGroup.className = 'control-group';
@@ -248,7 +231,7 @@ export class ControlPanel {
             if (this.onPathChange) this.onPathChange(this.getState());
             this.scheduleAutoSave();
         });
-        this.shapePhaseSourceSelect = createSelect(spGroup, 'shape-phase-source', 'Shape Phase Source', lfoOptions, (source) => {
+        this.shapePhaseSourceSelect = createSelect(spGroup, 'shape-phase-source', 'Shape Phase Source', modulatorOptions, (source) => {
             this.modRoutingState.shapePhase = source;
             if (this.onModulationRoutingChange) this.onModulationRoutingChange('shapePhase', source);
             this.scheduleAutoSave();
@@ -256,7 +239,7 @@ export class ControlPanel {
         const nGroup = document.createElement('div');
         nGroup.className = 'control-group';
         container.appendChild(nGroup);
-        const pathYControl = createModulatableSlider(nGroup, 'path-y', 'Position Y (Morph)', -1, 1, 0, 0.001, lfoOptions,
+        const pathYControl = createModulatableSlider(nGroup, 'path-y', 'Position Y (Morph)', -1, 1, 0, 0.001, modulatorOptions,
             (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
             (source) => {
                 this.modRoutingState.pathY = source;
@@ -268,7 +251,7 @@ export class ControlPanel {
         );
         this.pathYSlider = pathYControl.slider;
         this.pathYSourceSelect = pathYControl.select;
-        const scanControl = createModulatableSlider(nGroup, 'scan-pos', 'Scan Phase', -1, 1, 0, 0.001, lfoOptions as any,
+        const scanControl = createModulatableSlider(nGroup, 'scan-pos', 'Scan Phase', -1, 1, 0, 0.001, modulatorOptions,
             (_v) => { if (this.onPathChange) this.onPathChange(this.getState()); this.scheduleAutoSave(); },
             (source) => {
                 this.modRoutingState.scanPhase = source;
@@ -296,7 +279,14 @@ export class ControlPanel {
             this.scheduleAutoSave();
         });
 
-        this.createEnvelopeUI(subGroup);
+        const modulatorOptions = this.modulatorLabels
+            .slice(1)
+            .map((label, index) => ({ value: `mod${index + 1}`, label }));
+        this.amplitudeSourceSelect = createSelect(subGroup, 'amplitude-source', 'Amplitude Source', modulatorOptions, (source) => {
+            this.modRoutingState.amplitude = source;
+            if (this.onModulationRoutingChange) this.onModulationRoutingChange('amplitude', source);
+            this.scheduleAutoSave();
+        });
         this.midiSelect = this.createMidiSelect(subGroup);
         this.createOctaveSelect(subGroup);
 
@@ -408,8 +398,9 @@ export class ControlPanel {
         }
     }
 
-    private populateLFOSection(container: HTMLElement): void {
-        this.lfoState.forEach((_, index) => this.createLFOUnit(container, index));
+    private populateModulatorSection(container: HTMLElement): void {
+        this.modulatorSectionContainer = container;
+        this.renderModulatorSection();
     }
 
     private populateVisualizationSection(container: HTMLElement): void {
@@ -469,11 +460,8 @@ export class ControlPanel {
         this.bpmSlider = createSlider(tempoGroup, 'global-bpm', 'Global BPM', 30, 300, this.bpmValue, 1, (val) => {
             this.bpmValue = val;
             if (this.onBPMChange) this.onBPMChange(val);
-            // Re-trigger value update to refresh the Hz display in division sliders
-            this.lfoDivisionSliders.forEach(slider => {
-                if (slider) slider.value = slider.value;
-            });
             this.scheduleAutoSave();
+            this.renderModulatorSection();
             this.updateSyncUI();
         }, CONTROL_STYLE, 'linear', 0);
 
@@ -495,43 +483,145 @@ export class ControlPanel {
         this.onBPMChange = callback;
     }
 
-    private createLFOUnit(container: HTMLElement, index: number): void {
+    private renderModulatorSection(): void {
+        if (!this.modulatorSectionContainer) return;
+        this.modulatorPreviews.forEach((preview) => preview.destroy());
+        this.modulatorPreviews = [];
+        this.modulatorSectionContainer.innerHTML = '';
+        this.modulatorStates.forEach((modulator, index) => {
+            this.appendControl(this.modulatorSectionContainer!, this.createModulatorUnit(index, modulator));
+        });
+    }
+
+    private createModulatorUnit(index: number, modulator: ModulatorState): HTMLElement {
         const wrapper = document.createElement('div');
         wrapper.className = 'lfo-unit';
-        if (CONTROL_STYLE === 'knob') wrapper.classList.add('knob-layout');
+
+        const headerRow = document.createElement('div');
+        headerRow.className = 'control-group';
+        headerRow.style.display = 'flex';
+        headerRow.style.alignItems = 'center';
+        headerRow.style.justifyContent = 'space-between';
+        headerRow.style.gap = '8px';
+        wrapper.appendChild(headerRow);
 
         const title = document.createElement('label');
-        title.innerText = `LFO ${index + 1}`;
-        wrapper.appendChild(title);
+        title.innerText = modulator.name || `Mod ${index + 1}`;
+        headerRow.appendChild(title);
 
+        const buttonRow = document.createElement('div');
+        buttonRow.style.display = 'flex';
+        buttonRow.style.gap = '6px';
+        headerRow.appendChild(buttonRow);
+
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.className = 'reset-button';
+        addButton.textContent = '+ Slot';
+        addButton.addEventListener('click', () => {
+            this.modulatorStates[index].slots.push({ type: 'none' });
+            this.modulatorStates[index].operators.push('+');
+            this.modulatorStates[index] = normalizeModulatorState(this.modulatorStates[index]);
+            this.emitModulatorChange(index, true);
+        });
+        buttonRow.appendChild(addButton);
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'reset-button';
+        removeButton.textContent = '- Slot';
+        removeButton.disabled = modulator.slots.length <= 1;
+        removeButton.addEventListener('click', () => {
+            if (this.modulatorStates[index].slots.length <= 1) return;
+            this.modulatorStates[index].slots.pop();
+            this.modulatorStates[index].operators.pop();
+            this.modulatorStates[index] = normalizeModulatorState(this.modulatorStates[index]);
+            this.emitModulatorChange(index, true);
+        });
+        buttonRow.appendChild(removeButton);
+
+        modulator.slots.forEach((slot, slotIndex) => {
+            if (slotIndex > 0) {
+                const operatorSelect = createSelect(wrapper, `mod-${index}-op-${slotIndex}`, `Op ${slotIndex}`, [
+                    { value: '+', label: '+' },
+                    { value: '-', label: '-' },
+                    { value: '*', label: '*' }
+                ], (value) => {
+                    this.modulatorStates[index].operators[slotIndex - 1] = value as ModulatorOperator;
+                    this.modulatorStates[index] = normalizeModulatorState(this.modulatorStates[index]);
+                    this.emitModulatorChange(index);
+                });
+                operatorSelect.value = modulator.operators[slotIndex - 1] || '+';
+            }
+
+            const slotContainer = document.createElement('div');
+            slotContainer.className = 'sub-group';
+            wrapper.appendChild(slotContainer);
+
+            const typeSelect = createSelect(slotContainer, `mod-${index}-slot-${slotIndex}-type`, `Slot ${slotIndex + 1}`, [
+                { value: 'none', label: 'None' },
+                { value: 'lfo', label: 'LFO' },
+                { value: 'envelope', label: 'Envelope' },
+                { value: 'slider', label: 'Slider' }
+            ], (value) => {
+                this.modulatorStates[index].slots[slotIndex] = this.createSlotState(value as ModulatorSlotType);
+                this.modulatorStates[index] = normalizeModulatorState(this.modulatorStates[index]);
+                this.emitModulatorChange(index, true);
+            });
+            typeSelect.value = slot.type;
+
+            if (slot.type === 'lfo') {
+                this.createModulatorLFOSlot(slotContainer, index, slotIndex, slot);
+            } else if (slot.type === 'envelope') {
+                this.createModulatorEnvelopeSlot(slotContainer, index, slotIndex, slot);
+            } else if (slot.type === 'slider') {
+                this.createModulatorSliderSlot(slotContainer, index, slotIndex, slot);
+            }
+        });
+
+        const previewWrapper = document.createElement('div');
+        previewWrapper.className = 'control-group';
+        const previewLabel = document.createElement('label');
+        previewLabel.textContent = 'Output';
+        previewWrapper.appendChild(previewLabel);
+
+        const previewCanvas = document.createElement('canvas');
+        previewCanvas.className = 'modulator-preview-canvas';
+        previewWrapper.appendChild(previewCanvas);
+        wrapper.appendChild(previewWrapper);
+
+        this.modulatorPreviews[index] = new ModulatorPreviewWebGL(previewCanvas);
+
+        return wrapper;
+    }
+
+    private createModulatorLFOSlot(container: HTMLElement, modIndex: number, slotIndex: number, slot: ModulatorSlotState): void {
+        const lfo = slot.lfo || defaultLFOState();
         const iconContainer = document.createElement('div');
         iconContainer.className = 'waveform-icon';
-        iconContainer.innerHTML = WAVEFORM_ICONS[this.lfoState[index].waveform] || WAVEFORM_ICONS['sine'];
-        this.lfoIconContainers[index] = iconContainer;
+        iconContainer.innerHTML = WAVEFORM_ICONS[lfo.waveform] || WAVEFORM_ICONS['sine'];
 
-        const waveSelect = createSelect(wrapper, `lfo-${index}-wave`, 'Waveform', [
+        const waveSelect = createSelect(container, `mod-${modIndex}-slot-${slotIndex}-wave`, 'Waveform', [
             { value: 'sine', label: 'Sine' },
             { value: 'square', label: 'Square' },
             { value: 'saw', label: 'Saw' },
             { value: 'triangle', label: 'Triangle' }
-        ], (val) => {
-            this.lfoState[index].waveform = val;
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'waveform', val);
-            iconContainer.innerHTML = WAVEFORM_ICONS[val] || WAVEFORM_ICONS['sine'];
-            this.scheduleAutoSave();
+        ], (value) => {
+            const target = this.ensureLFOSlot(modIndex, slotIndex);
+            target.waveform = value;
+            iconContainer.innerHTML = WAVEFORM_ICONS[value] || WAVEFORM_ICONS['sine'];
+            this.emitModulatorChange(modIndex);
         });
-
-        const waveLabelRow = wrapper.querySelector('.label-row') as HTMLElement;
+        waveSelect.value = lfo.waveform;
+        const waveLabelRow = container.querySelector('.label-row:last-of-type') as HTMLElement | null;
         if (waveLabelRow) waveLabelRow.appendChild(iconContainer);
-        this.lfoWaveSelects[index] = waveSelect;
 
-        // Sync Controls
         const syncRow = document.createElement('div');
         syncRow.className = 'control-group';
         syncRow.style.display = 'flex';
         syncRow.style.alignItems = 'center';
         syncRow.style.gap = '8px';
-        wrapper.appendChild(syncRow);
+        container.appendChild(syncRow);
 
         const syncLabel = document.createElement('label');
         syncLabel.textContent = 'Tempo Sync';
@@ -539,95 +629,125 @@ export class ControlPanel {
 
         const syncCheck = document.createElement('input');
         syncCheck.type = 'checkbox';
-        syncCheck.checked = this.lfoState[index].isSynced;
-        syncCheck.addEventListener('change', () => {
-            const synced = syncCheck.checked;
-            this.lfoState[index].isSynced = synced;
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'isSynced', synced);
-
-            freqContainer.style.display = synced ? 'none' : 'block';
-            syncParamsRow.style.display = synced ? 'flex' : 'none';
-            this.updateSyncUI();
-            this.scheduleAutoSave();
-        });
+        syncCheck.checked = lfo.isSynced;
         syncRow.appendChild(syncCheck);
-        this.lfoSyncCheckboxes[index] = syncCheck;
 
         const freqContainer = document.createElement('div');
-        this.lfoFreqSliders[index] = createSlider(freqContainer, `lfo-${index}-freq`, 'Freq', 0, 5.0, this.lfoState[index].frequency, 0.001, (val) => {
-            this.lfoState[index].frequency = val;
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'frequency', val);
-            this.scheduleAutoSave();
+        container.appendChild(freqContainer);
+        const freqSlider = createSlider(freqContainer, `mod-${modIndex}-slot-${slotIndex}-freq`, 'Freq', 0, 5, lfo.frequency, 0.001, (value) => {
+            this.ensureLFOSlot(modIndex, slotIndex).frequency = value;
+            this.emitModulatorChange(modIndex);
         }, CONTROL_STYLE, 'linear', 3);
-        wrapper.appendChild(freqContainer);
 
-        const syncParamsRow = document.createElement('div');
-        syncParamsRow.className = 'control-group';
-        syncParamsRow.style.display = this.lfoState[index].isSynced ? 'flex' : 'none';
-        syncParamsRow.style.alignItems = 'center';
-        syncParamsRow.style.gap = '8px';
-        wrapper.appendChild(syncParamsRow);
+        const syncContainer = document.createElement('div');
+        container.appendChild(syncContainer);
+        const divisionOptions = ['1/1', '1/1T', '1/2', '1/2T', '1/4', '1/4T', '1/8', '1/8T', '1/16', '1/16T'];
+        const divisionSlider = createEnumSlider(syncContainer, `mod-${modIndex}-slot-${slotIndex}-div`, 'Div', divisionOptions, lfo.division, (value) => {
+            this.ensureLFOSlot(modIndex, slotIndex).division = value;
+            this.emitModulatorChange(modIndex);
+        }, CONTROL_STYLE, (value) => this.formatDivisionLabel(value));
 
-        const divisionOptions = [
-            '1/1', '1/1T', '1/2', '1/2T', '1/4', '1/4T', '1/8', '1/8T', '1/16', '1/16T'
-        ];
+        const applySyncVisibility = () => {
+            freqContainer.style.display = syncCheck.checked ? 'none' : 'block';
+            syncContainer.style.display = syncCheck.checked ? 'block' : 'none';
+        };
 
-        const divSlider = createEnumSlider(syncParamsRow, `lfo-${index}-div`, 'Div', divisionOptions, this.lfoState[index].division, (val: string) => {
-            this.lfoState[index].division = val;
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'division', val);
-            this.scheduleAutoSave();
-        }, CONTROL_STYLE, (val: string) => {
-            // Calculate Hz for display
-            const isTriplet = val.endsWith('T');
-            const cleanDiv = isTriplet ? val.slice(0, -1) : val;
-            const parts = cleanDiv.split('/');
-            const num = parseInt(parts[0]);
-            const den = parseInt(parts[1]);
-            const durationInBeats = 4 * (num / den);
-            const bps = this.bpmValue / 60;
-            let freq = bps / durationInBeats;
-            if (isTriplet) freq *= 1.5;
-            return `${val} (${freq.toFixed(2)} Hz)`;
+        syncCheck.addEventListener('change', () => {
+            this.ensureLFOSlot(modIndex, slotIndex).isSynced = syncCheck.checked;
+            applySyncVisibility();
+            this.emitModulatorChange(modIndex);
+            this.updateSyncUI();
         });
+        applySyncVisibility();
 
-        this.lfoDivisionSliders[index] = divSlider;
+        freqSlider.value = String(lfo.frequency);
+        divisionSlider.value = lfo.division;
 
-        freqContainer.style.display = this.lfoState[index].isSynced ? 'none' : 'block';
+        createSlider(container, `mod-${modIndex}-slot-${slotIndex}-amp`, 'Amp', 0, 1, lfo.amplitude, 0.001, (value) => {
+            this.ensureLFOSlot(modIndex, slotIndex).amplitude = value;
+            this.emitModulatorChange(modIndex);
+        }, CONTROL_STYLE, 'linear', 3);
 
-        this.lfoAmpSliders[index] = createSlider(wrapper, `lfo-${index}-amp`, 'Amp', 0, 1, this.lfoState[index].amplitude, 0.001, (val) => {
-            this.lfoState[index].amplitude = val;
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'amplitude', val);
-            this.scheduleAutoSave();
-            this.updateModulationRanges();
-        });
-
-        this.lfoOffsetSliders[index] = createSlider(wrapper, `lfo-${index}-offset`, 'Offset', -1, 1, this.lfoState[index].offset, 0.001, (val) => {
-            this.lfoState[index].offset = val;
-            if (this.onLFOParamChange) this.onLFOParamChange(index, 'offset', val);
-            this.scheduleAutoSave();
-            this.updateModulationRanges();
-        });
-
-        this.appendControl(container, wrapper);
+        createSlider(container, `mod-${modIndex}-slot-${slotIndex}-offset`, 'Offset', -1, 1, lfo.offset, 0.001, (value) => {
+            this.ensureLFOSlot(modIndex, slotIndex).offset = value;
+            this.emitModulatorChange(modIndex);
+        }, CONTROL_STYLE, 'linear', 3);
     }
 
-    private createEnvelopeUI(container: HTMLElement): void {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'control-group';
-        wrapper.style.height = '150px';
+    private createModulatorEnvelopeSlot(container: HTMLElement, modIndex: number, slotIndex: number, slot: ModulatorSlotState): void {
+        const envelope = slot.envelope || defaultEnvelopeState();
+        createSlider(container, `mod-${modIndex}-slot-${slotIndex}-attack`, 'Attack', 0, 2, envelope.attack, 0.001, (value) => {
+            this.ensureEnvelopeSlot(modIndex, slotIndex).attack = value;
+            this.emitModulatorChange(modIndex);
+        }, CONTROL_STYLE, 'linear', 3);
+        createSlider(container, `mod-${modIndex}-slot-${slotIndex}-decay`, 'Decay', 0, 2, envelope.decay, 0.001, (value) => {
+            this.ensureEnvelopeSlot(modIndex, slotIndex).decay = value;
+            this.emitModulatorChange(modIndex);
+        }, CONTROL_STYLE, 'linear', 3);
+        createSlider(container, `mod-${modIndex}-slot-${slotIndex}-sustain`, 'Sustain', 0, 1, envelope.sustain, 0.001, (value) => {
+            this.ensureEnvelopeSlot(modIndex, slotIndex).sustain = value;
+            this.emitModulatorChange(modIndex);
+        }, CONTROL_STYLE, 'linear', 3);
+        createSlider(container, `mod-${modIndex}-slot-${slotIndex}-release`, 'Release', 0, 3, envelope.release, 0.001, (value) => {
+            this.ensureEnvelopeSlot(modIndex, slotIndex).release = value;
+            this.emitModulatorChange(modIndex);
+        }, CONTROL_STYLE, 'linear', 3);
+    }
 
-        const canvas = document.createElement('canvas');
-        canvas.id = 'envelope-canvas-control';
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-        canvas.style.display = 'block';
-        canvas.style.background = '#08080c';
-        canvas.style.borderRadius = '4px';
-        canvas.style.border = '1px solid var(--border-subtle)';
+    private createModulatorSliderSlot(container: HTMLElement, modIndex: number, slotIndex: number, slot: ModulatorSlotState): void {
+        createSlider(container, `mod-${modIndex}-slot-${slotIndex}-value`, 'Value', 0, 1, slot.value ?? 1, 0.001, (value) => {
+            this.modulatorStates[modIndex].slots[slotIndex].value = value;
+            this.emitModulatorChange(modIndex);
+        }, CONTROL_STYLE, 'linear', 3);
+    }
 
-        wrapper.appendChild(canvas);
-        this.appendControl(container, wrapper);
-        this.envelopeCanvas = canvas;
+    private createSlotState(type: ModulatorSlotType): ModulatorSlotState {
+        if (type === 'lfo') {
+            return { type, lfo: defaultLFOState() };
+        }
+        if (type === 'envelope') {
+            return { type, envelope: defaultEnvelopeState() };
+        }
+        if (type === 'slider') {
+            return { type, value: 1 };
+        }
+        return { type: 'none' };
+    }
+
+    private ensureLFOSlot(modIndex: number, slotIndex: number) {
+        const slot = this.modulatorStates[modIndex].slots[slotIndex];
+        if (!slot.lfo) slot.lfo = defaultLFOState();
+        return slot.lfo;
+    }
+
+    private ensureEnvelopeSlot(modIndex: number, slotIndex: number) {
+        const slot = this.modulatorStates[modIndex].slots[slotIndex];
+        if (!slot.envelope) slot.envelope = defaultEnvelopeState();
+        return slot.envelope;
+    }
+
+    private emitModulatorChange(index: number, rerender: boolean = false): void {
+        this.modulatorStates[index] = normalizeModulatorState(this.modulatorStates[index]);
+        if (this.onModulatorChange) {
+            this.onModulatorChange(index, JSON.parse(JSON.stringify(this.modulatorStates[index])));
+        }
+        this.scheduleAutoSave();
+        this.updateModulationRanges();
+        this.updateSyncUI();
+        if (rerender) this.renderModulatorSection();
+    }
+
+    private formatDivisionLabel(value: string): string {
+        const isTriplet = value.endsWith('T');
+        const cleanDiv = isTriplet ? value.slice(0, -1) : value;
+        const parts = cleanDiv.split('/');
+        const numerator = parseInt(parts[0], 10);
+        const denominator = parseInt(parts[1], 10);
+        const durationInBeats = 4 * (numerator / denominator);
+        const bps = this.bpmValue / 60;
+        let freq = bps / durationInBeats;
+        if (isTriplet) freq *= 1.5;
+        return `${value} (${freq.toFixed(2)} Hz)`;
     }
 
     private createCarrierSelect(container: HTMLElement): HTMLSelectElement {
@@ -744,9 +864,9 @@ export class ControlPanel {
             densityZ: parseFloat(this.densityZSlider.value),
             spectralData: this.spectralDataSelect.value,
             generatorParams: this.currentGeneratorParams || undefined,
-            lfos: this.lfoState.map(lfo => ({ ...lfo })),
+            modulators: this.modulatorStates.map(modulator => JSON.parse(JSON.stringify(modulator))),
             modRouting: { ...this.modRoutingState },
-            envelopes: [{ attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.5 }], // Will be updated from AudioEngine
+            envelopes: this.extractLegacyEnvelopeCompatibility(),
             octave: this.octaveValue,
             octaveDoubling: { ...this.octaveDoublingState },
             harmonicInjection: { ...this.harmonicInjectionState },
@@ -813,16 +933,14 @@ export class ControlPanel {
             }
         }
 
-        // Store LFO and routing state
-        if (state.lfos) {
-            state.lfos.forEach((lfoData, index) => {
-                if (this.lfoState[index]) {
-                    this.lfoState[index] = { ...lfoData };
-                    this.updateLFOUI(index, lfoData);
-                }
-            });
-        }
-        this.modRoutingState = { ...state.modRouting };
+        this.modulatorStates = resolveModulatorStates(state, this.modulatorStates.length || 4);
+        this.modRoutingState = {
+            pathY: state.modRouting?.pathY || 'none',
+            scanPhase: state.modRouting?.scanPhase || 'none',
+            shapePhase: state.modRouting?.shapePhase || 'none',
+            amplitude: state.modRouting?.amplitude || 'mod1'
+        };
+        this.renderModulatorSection();
 
         // Update modulation routing UI
         this.updateModRoutingUI();
@@ -855,57 +973,13 @@ export class ControlPanel {
 
         this.updateAllDisplays();
         this.updateModulationRanges();
-
-        // Refresh division slider displays AFTER lfoState is fully populated
-        this.lfoDivisionSliders.forEach(slider => {
-            if (slider) slider.value = slider.value;
-        });
-
         this.updateSyncUI();
     }
 
-    private updateLFOUI(index: number, lfo: LFOState): void {
-        if (this.lfoWaveSelects[index]) {
-            this.lfoWaveSelects[index].value = lfo.waveform;
-            if (this.lfoIconContainers[index]) {
-                this.lfoIconContainers[index].innerHTML = WAVEFORM_ICONS[lfo.waveform] || WAVEFORM_ICONS['sine'];
-            }
-        }
-        if (this.lfoSyncCheckboxes[index]) {
-            this.lfoSyncCheckboxes[index].checked = lfo.isSynced;
-        }
-        if (this.lfoDivisionSliders[index]) {
-            this.lfoDivisionSliders[index].value = lfo.division;
-        }
-
-        if (this.lfoFreqSliders[index]) {
-            this.lfoFreqSliders[index].value = String(lfo.frequency);
-        }
-        if (this.lfoAmpSliders[index]) {
-            this.lfoAmpSliders[index].value = String(lfo.amplitude);
-        }
-        if (this.lfoOffsetSliders[index]) {
-            this.lfoOffsetSliders[index].value = String(lfo.offset);
-        }
-
-        // Find the LFO unit's elements to toggle visibility
-        const sliderGroup = this.lfoFreqSliders[index]?.parentElement;
-        const freqContainer = sliderGroup?.parentElement;
-
-        const divSliderGroup = this.lfoDivisionSliders[index]?.parentElement;
-        const syncParamsRow = divSliderGroup?.parentElement;
-
-        if (freqContainer && syncParamsRow) {
-            freqContainer.style.display = lfo.isSynced ? 'none' : 'block';
-            syncParamsRow.style.display = lfo.isSynced ? 'flex' : 'none';
-        } else if (this.lfoSyncCheckboxes[index]) {
-            // Fallback: If we can't find containers via parent-traversal, 
-            // the createLFOUnit logic should have initialized them correctly.
-        }
-    }
-
     private updateSyncUI(): void {
-        const anySynced = this.lfoState.some(lfo => lfo.isSynced);
+        const anySynced = this.modulatorStates.some(modulator =>
+            modulator.slots.some(slot => slot.type === 'lfo' && slot.lfo?.isSynced)
+        );
         if (this.renderDurationLabel) {
             this.renderDurationLabel.textContent = anySynced ? 'Duration (beats)' : 'Duration (s)';
         }
@@ -925,6 +999,9 @@ export class ControlPanel {
         // Update shapePhase source select
         if (this.shapePhaseSourceSelect) {
             this.shapePhaseSourceSelect.value = this.modRoutingState.shapePhase;
+        }
+        if (this.amplitudeSourceSelect) {
+            this.amplitudeSourceSelect.value = this.modRoutingState.amplitude;
         }
         this.updateModulationRanges();
     }
@@ -961,12 +1038,13 @@ export class ControlPanel {
             if (source === 'none') {
                 inputAny.hasModulation = false;
             } else {
-                const lfoIdx = parseInt(source.replace('lfo', '')) - 1;
-                const lfo = this.lfoState[lfoIdx];
-                if (lfo) {
+                const modIdx = parseInt(source.replace('mod', '')) - 1;
+                const modulator = this.modulatorStates[modIdx];
+                if (modulator) {
+                    const [min, max] = estimateModulatorRange(modulator);
                     inputAny.hasModulation = true;
-                    inputAny.modOffset = lfo.offset;
-                    inputAny.modAmplitude = lfo.amplitude;
+                    inputAny.modOffset = (min + max) * 0.5;
+                    inputAny.modAmplitude = (max - min) * 0.5;
                 } else {
                     inputAny.hasModulation = false;
                 }
@@ -976,6 +1054,13 @@ export class ControlPanel {
 
         syncMod(this.pathYSlider, this.modRoutingState.pathY);
         syncMod(this.scanPositionSlider, this.modRoutingState.scanPhase);
+    }
+
+    private extractLegacyEnvelopeCompatibility() {
+        const envelopeSlot = this.modulatorStates
+            .flatMap(modulator => modulator.slots)
+            .find(slot => slot.type === 'envelope' && slot.envelope);
+        return [envelopeSlot?.envelope || defaultEnvelopeState()];
     }
 
     private createGeneratorParamsContainer(container: HTMLElement): void {
@@ -1181,8 +1266,8 @@ export class ControlPanel {
         this.onOctaveChange = callback;
     }
 
-    public setLFOParamChangeCallback(callback: (index: number, param: string, value: any) => void): void {
-        this.onLFOParamChange = callback;
+    public setModulatorChangeCallback(callback: (index: number, state: ModulatorState) => void): void {
+        this.onModulatorChange = callback;
     }
 
     public setModulationRoutingChangeCallback(callback: (target: string, source: string) => void): void {
@@ -1264,5 +1349,12 @@ export class ControlPanel {
     public updateScanPosition(val: number): void {
         const display = document.getElementById('scan-pos-value');
         if (display) display.textContent = val.toFixed(3);
+    }
+
+    public updateModulatorPreviewCurves(curves: Float32Array[]): void {
+        curves.forEach((curve, index) => {
+            const preview = this.modulatorPreviews[index];
+            if (preview) preview.setSamples(curve);
+        });
     }
 }

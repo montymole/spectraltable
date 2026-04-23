@@ -81,6 +81,29 @@ export interface LFOState {
     division: string;
 }
 
+export interface EnvelopeState {
+    attack: number;
+    decay: number;
+    sustain: number;
+    release: number;
+}
+
+export type ModulatorOperator = '+' | '-' | '*';
+export type ModulatorSlotType = 'none' | 'lfo' | 'envelope' | 'slider';
+
+export interface ModulatorSlotState {
+    type: ModulatorSlotType;
+    lfo?: LFOState;
+    envelope?: EnvelopeState;
+    value?: number;
+}
+
+export interface ModulatorState {
+    name: string;
+    slots: ModulatorSlotState[];
+    operators: ModulatorOperator[];
+}
+
 // Octave doubling state for octave layering
 export interface OctaveDoublingState {
     lowCount: number;      // 0-10, number of octaves below base frequency
@@ -113,6 +136,19 @@ export interface SpectralCopyState {
 
 export const defaultSpectralCopyState: SpectralCopyState = {
     shift: 12,
+    mix: 0.0
+};
+
+// Waveshaping state
+export interface WaveshapeState {
+    curve: number;   // 0=none, 1=tanh, 2=polynomial, 3=sine fold
+    drive: number;   // 1.0-20.0, pre-curve gain
+    mix: number;     // 0.0-1.0, dry/wet blend
+}
+
+export const defaultWaveshapeState: WaveshapeState = {
+    curve: 0,
+    drive: 1.0,
     mix: 0.0
 };
 
@@ -170,13 +206,15 @@ export interface PresetControls {
     densityZ: number;
     spectralData: string;
     generatorParams?: GeneratorParams;
-    lfos: LFOState[];
-    envelopes: { attack: number; decay: number; sustain: number; release: number }[];
-    modRouting: { pathY: string; scanPhase: string; shapePhase: string };
+    lfos?: LFOState[];
+    envelopes?: EnvelopeState[];
+    modulators?: ModulatorState[];
+    modRouting: { pathY: string; scanPhase: string; shapePhase: string; amplitude: string };
     octave: number;
     octaveDoubling?: OctaveDoublingState;
     harmonicInjection?: HarmonicInjectionState;
     spectralCopy?: SpectralCopyState;
+    waveshape?: WaveshapeState;
     interpSamples: number;
     bpm: number;
 }

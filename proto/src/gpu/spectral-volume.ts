@@ -426,8 +426,14 @@ export class SpectralVolume {
         this.setData(data);
     }
 
-    public sample(x: number, y: number, z: number): Float32Array {
-        if (!this.data) return new Float32Array([0, 0, 0, 0]);
+    public sampleInto(x: number, y: number, z: number, target: Float32Array, offset: number = 0): void {
+        if (!this.data) {
+            target[offset] = 0;
+            target[offset + 1] = 0;
+            target[offset + 2] = 0;
+            target[offset + 3] = 0;
+            return;
+        }
 
         const { x: w, y: h, z: d } = this.resolution;
 
@@ -469,8 +475,6 @@ export class SpectralVolume {
         const c011 = getIdx(x0, y1, z1);
         const c111 = getIdx(x1, y1, z1);
 
-        const result = new Float32Array(4);
-
         // Trilinear interpolation for each channel
         for (let i = 0; i < 4; i++) {
             const v000 = this.data[c000 + i];
@@ -493,9 +497,13 @@ export class SpectralVolume {
             const c1 = c01 * (1 - fy) + c11 * fy;
 
             // Interpolate along z
-            result[i] = c0 * (1 - fz) + c1 * fz;
+            target[offset + i] = c0 * (1 - fz) + c1 * fz;
         }
+    }
 
+    public sample(x: number, y: number, z: number): Float32Array {
+        const result = new Float32Array(4);
+        this.sampleInto(x, y, z, result);
         return result;
     }
 

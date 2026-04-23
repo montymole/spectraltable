@@ -32,9 +32,13 @@ export class StereoScopeWebGL {
                 x = (index / (u_numSamples - 1.0)) * 2.0 - 1.0;
                 y = a_sample * 0.8;
             } else {
-                // Lissajous mode: X=L, Y=R
-                x = a_sample * 0.8;
-                y = -a_other_sample * 0.8;
+                // Vectorscope: Mid/Side encoding (standard)
+                // Side = L - R on X axis, Mid = L + R on Y axis
+                // 0.707 = 1/sqrt(2) preserves amplitude
+                float L = a_sample;
+                float R = a_other_sample;
+                x = (L - R) * 0.707 * 0.8;
+                y = (L + R) * 0.707 * 0.8;
             }
             
             gl_Position = vec4(x, y, 0.0, 1.0);
