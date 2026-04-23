@@ -47,8 +47,10 @@ export class ModulatorPreviewWebGL {
 
         this.resizeHandler = () => this.resize();
         window.addEventListener('resize', this.resizeHandler);
-        this.resize();
-        this.draw();
+        requestAnimationFrame(() => {
+            this.resize();
+            this.draw();
+        });
     }
 
     public setSamples(samples: Float32Array): void {
