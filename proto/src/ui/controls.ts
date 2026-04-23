@@ -7,7 +7,8 @@ import {
     defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
     PresetControls, OctaveDoublingState, defaultOctaveDoublingState,
     HarmonicInjectionState, defaultHarmonicInjectionState,
-    SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState
+    SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState,
+    WaveshapeState, defaultWaveshapeState
 } from '../types';
 import { createDefaultModulatorStates, defaultEnvelopeState, defaultLFOState, estimateModulatorRange, normalizeModulatorState, resolveModulatorStates } from '../modulators/modulator';
 import { PresetManager } from './preset-manager';
@@ -70,6 +71,7 @@ export class ControlPanel {
     private onOctaveDoublingChange: ((state: OctaveDoublingState) => void) | null = null;
     private onHarmonicInjectionChange: ((state: HarmonicInjectionState) => void) | null = null;
     private onSpectralCopyChange: ((state: SpectralCopyState) => void) | null = null;
+    private onWaveshapeChange: ((state: WaveshapeState) => void) | null = null;
     private onInterpSamplesChange: ((samples: number) => void) | null = null;
 
     // Modulator Callbacks
@@ -85,6 +87,14 @@ export class ControlPanel {
 
     public setSpectralCopyChangeCallback(callback: (state: SpectralCopyState) => void): void {
         this.onSpectralCopyChange = callback;
+    }
+
+    public setWaveshapeChangeCallback(callback: (state: WaveshapeState) => void): void {
+        this.onWaveshapeChange = callback;
+    }
+
+    public setWaveshapeState(state: WaveshapeState): void {
+        this.waveshapeState = state;
     }
 
     // Offline Render callback
@@ -118,6 +128,9 @@ export class ControlPanel {
     private spectralCopyState: SpectralCopyState = { ...defaultSpectralCopyState };
     private spectralShiftSlider!: HTMLInputElement;
     private spectralMixSlider!: HTMLInputElement;
+
+    // Waveshaping state
+    private waveshapeState: WaveshapeState = { ...defaultWaveshapeState };
 
     // Debounce timer for auto-save
     private autoSaveTimer: number | null = null;
