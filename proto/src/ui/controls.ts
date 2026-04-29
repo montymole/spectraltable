@@ -8,7 +8,9 @@ import {
     PresetControls, OctaveDoublingState, defaultOctaveDoublingState,
     HarmonicInjectionState, defaultHarmonicInjectionState,
     SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState,
-    WaveshapeState, defaultWaveshapeState, SaturationState, defaultSaturationState
+    WaveshapeState, defaultWaveshapeState, SaturationState, defaultSaturationState,
+    FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
+    ModRoutingState
 } from '../types';
 import { createDefaultModulatorStates, defaultEnvelopeState, defaultLFOState, estimateModulatorRange, normalizeModulatorState, resolveModulatorStates } from '../modulators/modulator';
 import { PresetManager } from './preset-manager';
@@ -74,6 +76,7 @@ export class ControlPanel {
     private onWaveshapeChange: ((state: WaveshapeState) => void) | null = null;
     private onSaturationChange: ((state: SaturationState) => void) | null = null;
     private onInterpSamplesChange: ((samples: number) => void) | null = null;
+    private onFilterChange: ((state: FilterState) => void) | null = null;
 
     // Modulator Callbacks
     private onModulatorChange: ((index: number, state: ModulatorState) => void) | null = null;
@@ -98,6 +101,10 @@ export class ControlPanel {
         this.onSaturationChange = callback;
     }
 
+    public setFilterChangeCallback(callback: (state: FilterState) => void): void {
+        this.onFilterChange = callback;
+    }
+
     public setWaveshapeState(state: WaveshapeState): void {
         this.waveshapeState = state;
     }
@@ -115,7 +122,14 @@ export class ControlPanel {
     private modulatorStates: ModulatorState[] = [];
     private modulatorSectionContainer: HTMLElement | null = null;
     private modulatorPreviews: ModulatorPreviewWebGL[] = [];
-    private modRoutingState = { pathY: 'none', scanPhase: 'none', shapePhase: 'none', amplitude: 'mod1' };
+    private modRoutingState: ModRoutingState = {
+        pathY: 'none',
+        scanPhase: 'none',
+        shapePhase: 'none',
+        amplitude: 'mod1',
+        filterCutoff: 'none',
+        filterResonance: 'none'
+    };
     private octaveValue = 3;
 
     // Octave doubling state
@@ -141,6 +155,13 @@ export class ControlPanel {
     private saturationState: SaturationState = { ...defaultSaturationState };
     private saturationDriveSlider!: HTMLInputElement;
     private saturationMixSlider!: HTMLInputElement;
+    private filterState: FilterState = { ...defaultFilterState };
+    private filterModeSelect!: HTMLSelectElement;
+    private filterOrderSelect!: HTMLSelectElement;
+    private filterCutoffSlider!: HTMLInputElement;
+    private filterResonanceSlider!: HTMLInputElement;
+    private filterCutoffSourceSelect: HTMLSelectElement | null = null;
+    private filterResonanceSourceSelect: HTMLSelectElement | null = null;
 
     // Debounce timer for auto-save
     private autoSaveTimer: number | null = null;
@@ -597,8 +618,111 @@ export class ControlPanel {
             this.scheduleAutoSave();
         });
 
+        const filterGroup = document.createElement('div');
+        filterGroup.classList.add('sub-group');
+        container.appendChild(filterGroup);
+
+        const filterTitle = document.createElement('label');
+        filterTitle.textContent = 'Filter';
+        filterTitle.style.fontWeight = 'bold';
+        filterTitle.style.marginBottom = '8px';
+        filterTitle.style.display = 'block';
+        filterGroup.appendChild(filterTitle);
+
+        const emitFilterChange = () => {
+            if (this.onFilterChange) this.onFilterChange({ ...this.filterState });
+            this.scheduleAutoSave();
+        };
+
+        this.filterModeSelect = createSelect(filterGroup, 'filter-mode', 'Type', [
+            { value: 'none', label: 'No Filter' },
+            { value: 'lowpass', label: 'Lowpass' },
+            { value: 'bandpass', label: 'Bandpass' },
+            { value: 'highpass', label: 'Hipass' }
+        ], (val) => {
+            this.filterState.mode = val as FilterState['mode'];
+            this.updateFilterUIState();
+            emitFilterChange();
+        });
+
+        this.filterOrderSelect = createSelect(filterGroup, 'filter-order', 'Order', [
+            { value: '2', label: '2nd Order' },
+            { value: '4', label: '4th Order' }
+        ], (val) => {
+            this.filterState.order = parseInt(val, 10) as FilterState['order'];
+            emitFilterChange();
+        });
+
+        const filterModulatorOptions = this.modulatorLabels.map((label, index) => ({
+            value: index === 0 ? 'none' : `mod${index}`,
+            label
+        }));
+
+        const cutoffControl = createModulatableSlider(
+            filterGroup,
+            'filter-cutoff',
+            'Cutoff',
+            FILTER_CUTOFF_MIN,
+            FILTER_CUTOFF_MAX,
+            this.filterState.cutoff,
+            1,
+            filterModulatorOptions,
+            (val) => {
+                this.filterState.cutoff = val;
+                emitFilterChange();
+            },
+            (source) => {
+                this.modRoutingState.filterCutoff = source;
+                if (this.onModulationRoutingChange) this.onModulationRoutingChange('filterCutoff', source);
+                this.scheduleAutoSave();
+                this.updateModulationRanges();
+            },
+            CONTROL_STYLE,
+            'logarithmic',
+            0
+        );
+        this.filterCutoffSlider = cutoffControl.slider;
+        this.filterCutoffSourceSelect = cutoffControl.select;
+
+        const resonanceControl = createModulatableSlider(
+            filterGroup,
+            'filter-resonance',
+            'Resonance',
+            FILTER_RESONANCE_MIN,
+            FILTER_RESONANCE_MAX,
+            this.filterState.resonance,
+            0.01,
+            filterModulatorOptions,
+            (val) => {
+                this.filterState.resonance = val;
+                emitFilterChange();
+            },
+            (source) => {
+                this.modRoutingState.filterResonance = source;
+                if (this.onModulationRoutingChange) this.onModulationRoutingChange('filterResonance', source);
+                this.scheduleAutoSave();
+                this.updateModulationRanges();
+            },
+            CONTROL_STYLE,
+            'linear',
+            2
+        );
+        this.filterResonanceSlider = resonanceControl.slider;
+        this.filterResonanceSourceSelect = resonanceControl.select;
+
+        this.updateFilterUIState();
+
         // Initialize dynamic UI
         this.updateSynthModeUI(this.synthModeSelect.value as SynthMode);
+    }
+
+    private updateFilterUIState(): void {
+        const filterDisabled = this.filterState.mode === 'none';
+        if (this.filterOrderSelect) this.filterOrderSelect.disabled = filterDisabled;
+        if (this.filterCutoffSlider) this.filterCutoffSlider.disabled = filterDisabled || this.modRoutingState.filterCutoff !== 'none';
+        if (this.filterResonanceSlider) this.filterResonanceSlider.disabled = filterDisabled || this.modRoutingState.filterResonance !== 'none';
+        if (this.filterCutoffSourceSelect) this.filterCutoffSourceSelect.disabled = filterDisabled;
+        if (this.filterResonanceSourceSelect) this.filterResonanceSourceSelect.disabled = filterDisabled;
     }
 
     private createIdentityWaveshapeCurve(size: number): number[] {
@@ -1088,6 +1212,7 @@ export class ControlPanel {
             generatorParams: this.currentGeneratorParams || undefined,
             modulators: this.modulatorStates.map(modulator => JSON.parse(JSON.stringify(modulator))),
             modRouting: { ...this.modRoutingState },
+            filter: { ...this.filterState },
             envelopes: this.extractLegacyEnvelopeCompatibility(),
             octave: this.octaveValue,
             octaveDoubling: { ...this.octaveDoublingState },
@@ -1162,7 +1287,9 @@ export class ControlPanel {
             pathY: state.modRouting?.pathY || 'none',
             scanPhase: state.modRouting?.scanPhase || 'none',
             shapePhase: state.modRouting?.shapePhase || 'none',
-            amplitude: state.modRouting?.amplitude || 'mod1'
+            amplitude: state.modRouting?.amplitude || 'mod1',
+            filterCutoff: state.modRouting?.filterCutoff || 'none',
+            filterResonance: state.modRouting?.filterResonance || 'none'
         };
         this.renderModulatorSection();
 
@@ -1222,6 +1349,13 @@ export class ControlPanel {
         if (this.saturationDriveSlider) this.saturationDriveSlider.value = String(this.saturationState.drive);
         if (this.saturationMixSlider) this.saturationMixSlider.value = String(this.saturationState.mix);
 
+        this.filterState = state.filter ? { ...state.filter } : { ...defaultFilterState };
+        if (this.filterModeSelect) this.filterModeSelect.value = this.filterState.mode;
+        if (this.filterOrderSelect) this.filterOrderSelect.value = String(this.filterState.order);
+        if (this.filterCutoffSlider) this.filterCutoffSlider.value = String(this.filterState.cutoff);
+        if (this.filterResonanceSlider) this.filterResonanceSlider.value = String(this.filterState.resonance);
+        this.updateFilterUIState();
+
         this.updateAllDisplays();
         this.updateModulationRanges();
         this.updateSyncUI();
@@ -1254,6 +1388,13 @@ export class ControlPanel {
         if (this.amplitudeSourceSelect) {
             this.amplitudeSourceSelect.value = this.modRoutingState.amplitude;
         }
+        if (this.filterCutoffSourceSelect) {
+            this.filterCutoffSourceSelect.value = this.modRoutingState.filterCutoff;
+        }
+        if (this.filterResonanceSourceSelect) {
+            this.filterResonanceSourceSelect.value = this.modRoutingState.filterResonance;
+        }
+        this.updateFilterUIState();
         this.updateModulationRanges();
     }
 
@@ -1303,8 +1444,25 @@ export class ControlPanel {
             if (inputAny.updateKnob) inputAny.updateKnob();
         };
 
+        const syncFullRangeMod = (slider: HTMLInputElement, source: string) => {
+            if (!slider) return;
+            const inputAny = slider as any;
+            if (source === 'none') {
+                inputAny.hasModulation = false;
+            } else {
+                const min = typeof inputAny.realMin === 'number' ? inputAny.realMin : parseFloat(slider.min);
+                const max = typeof inputAny.realMax === 'number' ? inputAny.realMax : parseFloat(slider.max);
+                inputAny.hasModulation = true;
+                inputAny.modOffset = (min + max) * 0.5;
+                inputAny.modAmplitude = (max - min) * 0.5;
+            }
+            if (inputAny.updateKnob) inputAny.updateKnob();
+        };
+
         syncMod(this.pathYSlider, this.modRoutingState.pathY);
         syncMod(this.scanPositionSlider, this.modRoutingState.scanPhase);
+        syncFullRangeMod(this.filterCutoffSlider, this.modRoutingState.filterCutoff);
+        syncFullRangeMod(this.filterResonanceSlider, this.modRoutingState.filterResonance);
     }
 
     private extractLegacyEnvelopeCompatibility() {
