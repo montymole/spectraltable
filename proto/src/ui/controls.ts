@@ -7,7 +7,10 @@ import {
     defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
     PresetControls, OctaveDoublingState, defaultOctaveDoublingState,
     HarmonicInjectionState, defaultHarmonicInjectionState,
-    SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState
+    SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState,
+    WaveshapeState, defaultWaveshapeState, SaturationState, defaultSaturationState,
+    FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
+    ModRoutingState
 } from '../types';
 import { createDefaultModulatorStates, defaultEnvelopeState, defaultLFOState, estimateModulatorRange, normalizeModulatorState, resolveModulatorStates } from '../modulators/modulator';
 import { PresetManager } from './preset-manager';
@@ -70,7 +73,10 @@ export class ControlPanel {
     private onOctaveDoublingChange: ((state: OctaveDoublingState) => void) | null = null;
     private onHarmonicInjectionChange: ((state: HarmonicInjectionState) => void) | null = null;
     private onSpectralCopyChange: ((state: SpectralCopyState) => void) | null = null;
+    private onWaveshapeChange: ((state: WaveshapeState) => void) | null = null;
+    private onSaturationChange: ((state: SaturationState) => void) | null = null;
     private onInterpSamplesChange: ((samples: number) => void) | null = null;
+    private onFilterChange: ((state: FilterState) => void) | null = null;
 
     // Modulator Callbacks
     private onModulatorChange: ((index: number, state: ModulatorState) => void) | null = null;
@@ -87,6 +93,22 @@ export class ControlPanel {
         this.onSpectralCopyChange = callback;
     }
 
+    public setWaveshapeChangeCallback(callback: (state: WaveshapeState) => void): void {
+        this.onWaveshapeChange = callback;
+    }
+
+    public setSaturationChangeCallback(callback: (state: SaturationState) => void): void {
+        this.onSaturationChange = callback;
+    }
+
+    public setFilterChangeCallback(callback: (state: FilterState) => void): void {
+        this.onFilterChange = callback;
+    }
+
+    public setWaveshapeState(state: WaveshapeState): void {
+        this.waveshapeState = state;
+    }
+
     // Offline Render callback
     private onRenderWav: ((note: number, duration: number) => void) | null = null;
 
@@ -100,7 +122,14 @@ export class ControlPanel {
     private modulatorStates: ModulatorState[] = [];
     private modulatorSectionContainer: HTMLElement | null = null;
     private modulatorPreviews: ModulatorPreviewWebGL[] = [];
-    private modRoutingState = { pathY: 'none', scanPhase: 'none', shapePhase: 'none', amplitude: 'mod1' };
+    private modRoutingState: ModRoutingState = {
+        pathY: 'none',
+        scanPhase: 'none',
+        shapePhase: 'none',
+        amplitude: 'mod1',
+        filterCutoff: 'none',
+        filterResonance: 'none'
+    };
     private octaveValue = 3;
 
     // Octave doubling state
@@ -118,6 +147,21 @@ export class ControlPanel {
     private spectralCopyState: SpectralCopyState = { ...defaultSpectralCopyState };
     private spectralShiftSlider!: HTMLInputElement;
     private spectralMixSlider!: HTMLInputElement;
+
+    // Waveshaping state
+    private waveshapeState: WaveshapeState = { ...defaultWaveshapeState };
+    private waveshapeDriveSlider!: HTMLInputElement;
+    private waveshapeMixSlider!: HTMLInputElement;
+    private saturationState: SaturationState = { ...defaultSaturationState };
+    private saturationDriveSlider!: HTMLInputElement;
+    private saturationMixSlider!: HTMLInputElement;
+    private filterState: FilterState = { ...defaultFilterState };
+    private filterModeSelect!: HTMLSelectElement;
+    private filterOrderSelect!: HTMLSelectElement;
+    private filterCutoffSlider!: HTMLInputElement;
+    private filterResonanceSlider!: HTMLInputElement;
+    private filterCutoffSourceSelect: HTMLSelectElement | null = null;
+    private filterResonanceSourceSelect: HTMLSelectElement | null = null;
 
     // Debounce timer for auto-save
     private autoSaveTimer: number | null = null;
@@ -383,9 +427,311 @@ export class ControlPanel {
             copyUpdate();
         });
 
+        // Waveshaping controls
+        const subGroup6 = document.createElement('div');
+        subGroup6.classList.add('sub-group');
+        container.appendChild(subGroup6);
+        const wsTitle = document.createElement('label');
+        wsTitle.textContent = 'Waveshaping';
+        wsTitle.style.fontWeight = 'bold';
+        wsTitle.style.marginBottom = '8px';
+        wsTitle.style.display = 'block';
+        subGroup6.appendChild(wsTitle);
+
+        createSelect(subGroup6, 'waveshape-curve', 'Curve', [
+            { value: '0', label: 'None' },
+            { value: '1', label: 'Tanh' },
+            { value: '2', label: 'Polynomial' },
+            { value: '3', label: 'Sine Fold' },
+            { value: '4', label: 'Custom (LUT)' }
+        ], (val) => {
+            this.waveshapeState.curve = parseInt(val);
+            if (this.waveshapeState.curve === 4 && (!this.waveshapeState.customCurve || this.waveshapeState.customCurve.length !== 1024)) {
+                this.waveshapeState.customCurve = this.createIdentityWaveshapeCurve(1024);
+            }
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+            updateCustomUI();
+        });
+
+        this.waveshapeDriveSlider = createSlider(subGroup6, 'waveshape-drive', 'Drive', 1, 20, 1, 0.1, (val) => {
+            this.waveshapeState.drive = val;
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+        }, undefined, 'linear', 2);
+
+        this.waveshapeMixSlider = createSlider(subGroup6, 'waveshape-mix', 'Mix', 0, 1, 0, 0.01, (val) => {
+            this.waveshapeState.mix = val;
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+        });
+
+        const customContainer = document.createElement('div');
+        customContainer.className = 'control-group';
+        subGroup6.appendChild(customContainer);
+        const customLabel = document.createElement('label');
+        customLabel.textContent = 'Custom Curve';
+        customContainer.appendChild(customLabel);
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'modulator-preview-canvas';
+        canvas.style.height = '96px';
+        customContainer.appendChild(canvas);
+
+        const customButtonRow = document.createElement('div');
+        customButtonRow.style.display = 'flex';
+        customButtonRow.style.gap = '8px';
+        customContainer.appendChild(customButtonRow);
+        createButton(customButtonRow, 'waveshape-custom-reset', 'Reset', () => {
+            this.waveshapeState.customCurve = this.createIdentityWaveshapeCurve(1024);
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+            drawCurve();
+        }, 'reset-button');
+
+        let isDrawing = false;
+        let lastIndex: number | null = null;
+
+        const resizeCanvas = () => {
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+            canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+            drawCurve();
+        };
+
+        const drawCurve = () => {
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // zero line
+            ctx.strokeStyle = 'rgba(0,255,120,0.20)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height * 0.5);
+            ctx.lineTo(canvas.width, canvas.height * 0.5);
+            ctx.stroke();
+
+            const curve = this.waveshapeState.customCurve;
+            if (!curve || curve.length < 2) return;
+            ctx.strokeStyle = 'rgba(0,255,120,1)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < curve.length; i++) {
+                const x = (i / (curve.length - 1)) * canvas.width;
+                const y = (1 - ((curve[i] + 1) * 0.5)) * canvas.height;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        };
+
+        const setPointFromEvent = (e: PointerEvent) => {
+            if (this.waveshapeState.curve !== 4) return;
+            if (!this.waveshapeState.customCurve || this.waveshapeState.customCurve.length !== 1024) {
+                this.waveshapeState.customCurve = this.createIdentityWaveshapeCurve(1024);
+            }
+            const curve = this.waveshapeState.customCurve;
+            const rect = canvas.getBoundingClientRect();
+            const xN = (e.clientX - rect.left) / Math.max(1, rect.width);
+            const yN = (e.clientY - rect.top) / Math.max(1, rect.height);
+            const idx = Math.max(0, Math.min(curve.length - 1, Math.round(xN * (curve.length - 1))));
+            const value = Math.max(-1, Math.min(1, (1 - yN) * 2 - 1));
+
+            if (lastIndex !== null && lastIndex !== idx) {
+                const a = Math.min(lastIndex, idx);
+                const b = Math.max(lastIndex, idx);
+                const va = curve[lastIndex];
+                for (let i = a; i <= b; i++) {
+                    const t = (i - a) / Math.max(1, b - a);
+                    curve[i] = va * (1 - t) + value * t;
+                }
+            } else {
+                curve[idx] = value;
+            }
+
+            lastIndex = idx;
+            if (this.onWaveshapeChange) this.onWaveshapeChange(this.waveshapeState);
+            this.scheduleAutoSave();
+            drawCurve();
+        };
+
+        canvas.addEventListener('pointerdown', (e) => {
+            isDrawing = true;
+            lastIndex = null;
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            setPointFromEvent(e);
+        });
+        canvas.addEventListener('pointermove', (e) => {
+            if (!isDrawing) return;
+            setPointFromEvent(e);
+        });
+        canvas.addEventListener('pointerup', () => {
+            isDrawing = false;
+            lastIndex = null;
+        });
+        canvas.addEventListener('pointercancel', () => {
+            isDrawing = false;
+            lastIndex = null;
+        });
+
+        const updateCustomUI = () => {
+            customContainer.style.display = this.waveshapeState.curve === 4 ? 'block' : 'none';
+            resizeCanvas();
+        };
+        updateCustomUI();
+
+        // Saturation controls
+        const subGroup7 = document.createElement('div');
+        subGroup7.classList.add('sub-group');
+        container.appendChild(subGroup7);
+        const satTitle = document.createElement('label');
+        satTitle.textContent = 'Saturation';
+        satTitle.style.fontWeight = 'bold';
+        satTitle.style.marginBottom = '8px';
+        satTitle.style.display = 'block';
+        subGroup7.appendChild(satTitle);
+
+        createSelect(subGroup7, 'saturation-mode', 'Mode', [
+            { value: '0', label: 'None' },
+            { value: '1', label: 'Gentle' },
+            { value: '2', label: 'Transistor' },
+            { value: '3', label: 'Tube' }
+        ], (val) => {
+            this.saturationState.mode = parseInt(val);
+            if (this.onSaturationChange) this.onSaturationChange(this.saturationState);
+            this.scheduleAutoSave();
+        });
+
+        this.saturationDriveSlider = createSlider(subGroup7, 'saturation-drive', 'Drive', 1, 20, 1, 0.1, (val) => {
+            this.saturationState.drive = val;
+            if (this.onSaturationChange) this.onSaturationChange(this.saturationState);
+            this.scheduleAutoSave();
+        }, undefined, 'linear', 2);
+
+        this.saturationMixSlider = createSlider(subGroup7, 'saturation-mix', 'Mix', 0, 1, 0, 0.01, (val) => {
+            this.saturationState.mix = val;
+            if (this.onSaturationChange) this.onSaturationChange(this.saturationState);
+            this.scheduleAutoSave();
+        });
+
+        const filterGroup = document.createElement('div');
+        filterGroup.classList.add('sub-group');
+        container.appendChild(filterGroup);
+
+        const filterTitle = document.createElement('label');
+        filterTitle.textContent = 'Filter';
+        filterTitle.style.fontWeight = 'bold';
+        filterTitle.style.marginBottom = '8px';
+        filterTitle.style.display = 'block';
+        filterGroup.appendChild(filterTitle);
+
+        const emitFilterChange = () => {
+            if (this.onFilterChange) this.onFilterChange({ ...this.filterState });
+            this.scheduleAutoSave();
+        };
+
+        this.filterModeSelect = createSelect(filterGroup, 'filter-mode', 'Type', [
+            { value: 'none', label: 'No Filter' },
+            { value: 'lowpass', label: 'Lowpass' },
+            { value: 'bandpass', label: 'Bandpass' },
+            { value: 'highpass', label: 'Hipass' }
+        ], (val) => {
+            this.filterState.mode = val as FilterState['mode'];
+            this.updateFilterUIState();
+            emitFilterChange();
+        });
+
+        this.filterOrderSelect = createSelect(filterGroup, 'filter-order', 'Order', [
+            { value: '2', label: '2nd Order' },
+            { value: '4', label: '4th Order' }
+        ], (val) => {
+            this.filterState.order = parseInt(val, 10) as FilterState['order'];
+            emitFilterChange();
+        });
+
+        const filterModulatorOptions = this.modulatorLabels.map((label, index) => ({
+            value: index === 0 ? 'none' : `mod${index}`,
+            label
+        }));
+
+        const cutoffControl = createModulatableSlider(
+            filterGroup,
+            'filter-cutoff',
+            'Cutoff',
+            FILTER_CUTOFF_MIN,
+            FILTER_CUTOFF_MAX,
+            this.filterState.cutoff,
+            1,
+            filterModulatorOptions,
+            (val) => {
+                this.filterState.cutoff = val;
+                emitFilterChange();
+            },
+            (source) => {
+                this.modRoutingState.filterCutoff = source;
+                if (this.onModulationRoutingChange) this.onModulationRoutingChange('filterCutoff', source);
+                this.scheduleAutoSave();
+                this.updateModulationRanges();
+            },
+            CONTROL_STYLE,
+            'logarithmic',
+            0
+        );
+        this.filterCutoffSlider = cutoffControl.slider;
+        this.filterCutoffSourceSelect = cutoffControl.select;
+
+        const resonanceControl = createModulatableSlider(
+            filterGroup,
+            'filter-resonance',
+            'Resonance',
+            FILTER_RESONANCE_MIN,
+            FILTER_RESONANCE_MAX,
+            this.filterState.resonance,
+            0.01,
+            filterModulatorOptions,
+            (val) => {
+                this.filterState.resonance = val;
+                emitFilterChange();
+            },
+            (source) => {
+                this.modRoutingState.filterResonance = source;
+                if (this.onModulationRoutingChange) this.onModulationRoutingChange('filterResonance', source);
+                this.scheduleAutoSave();
+                this.updateModulationRanges();
+            },
+            CONTROL_STYLE,
+            'linear',
+            2
+        );
+        this.filterResonanceSlider = resonanceControl.slider;
+        this.filterResonanceSourceSelect = resonanceControl.select;
+
+        this.updateFilterUIState();
 
         // Initialize dynamic UI
         this.updateSynthModeUI(this.synthModeSelect.value as SynthMode);
+    }
+
+    private updateFilterUIState(): void {
+        const filterDisabled = this.filterState.mode === 'none';
+        if (this.filterOrderSelect) this.filterOrderSelect.disabled = filterDisabled;
+        if (this.filterCutoffSlider) this.filterCutoffSlider.disabled = filterDisabled || this.modRoutingState.filterCutoff !== 'none';
+        if (this.filterResonanceSlider) this.filterResonanceSlider.disabled = filterDisabled || this.modRoutingState.filterResonance !== 'none';
+        if (this.filterCutoffSourceSelect) this.filterCutoffSourceSelect.disabled = filterDisabled;
+        if (this.filterResonanceSourceSelect) this.filterResonanceSourceSelect.disabled = filterDisabled;
+    }
+
+    private createIdentityWaveshapeCurve(size: number): number[] {
+        const n = Math.max(2, size);
+        const curve = new Array<number>(n);
+        for (let i = 0; i < n; i++) {
+            curve[i] = (i / (n - 1)) * 2 - 1;
+        }
+        return curve;
     }
 
     private updateSynthModeUI(mode: SynthMode): void {
@@ -866,11 +1212,14 @@ export class ControlPanel {
             generatorParams: this.currentGeneratorParams || undefined,
             modulators: this.modulatorStates.map(modulator => JSON.parse(JSON.stringify(modulator))),
             modRouting: { ...this.modRoutingState },
+            filter: { ...this.filterState },
             envelopes: this.extractLegacyEnvelopeCompatibility(),
             octave: this.octaveValue,
             octaveDoubling: { ...this.octaveDoublingState },
             harmonicInjection: { ...this.harmonicInjectionState },
             spectralCopy: { ...this.spectralCopyState },
+            waveshape: JSON.parse(JSON.stringify(this.waveshapeState)),
+            saturation: { ...this.saturationState },
             interpSamples: parseFloat(this.interpSamplesSlider.value)
         };
     }
@@ -938,7 +1287,9 @@ export class ControlPanel {
             pathY: state.modRouting?.pathY || 'none',
             scanPhase: state.modRouting?.scanPhase || 'none',
             shapePhase: state.modRouting?.shapePhase || 'none',
-            amplitude: state.modRouting?.amplitude || 'mod1'
+            amplitude: state.modRouting?.amplitude || 'mod1',
+            filterCutoff: state.modRouting?.filterCutoff || 'none',
+            filterResonance: state.modRouting?.filterResonance || 'none'
         };
         this.renderModulatorSection();
 
@@ -970,6 +1321,40 @@ export class ControlPanel {
             this.spectralShiftSlider.value = String(state.spectralCopy.shift);
             this.spectralMixSlider.value = String(state.spectralCopy.mix);
         }
+
+        if (state.waveshape) {
+            this.waveshapeState = JSON.parse(JSON.stringify(state.waveshape));
+        } else {
+            this.waveshapeState = { ...defaultWaveshapeState };
+        }
+
+        const wsCurveEl = document.getElementById('waveshape-curve') as HTMLSelectElement | null;
+        if (wsCurveEl) {
+            wsCurveEl.value = String(this.waveshapeState.curve);
+            wsCurveEl.dispatchEvent(new Event('change'));
+        }
+        if (this.waveshapeDriveSlider) this.waveshapeDriveSlider.value = String(this.waveshapeState.drive);
+        if (this.waveshapeMixSlider) this.waveshapeMixSlider.value = String(this.waveshapeState.mix);
+
+        if (state.saturation) {
+            this.saturationState = { ...state.saturation };
+        } else {
+            this.saturationState = { ...defaultSaturationState };
+        }
+        const satModeEl = document.getElementById('saturation-mode') as HTMLSelectElement | null;
+        if (satModeEl) {
+            satModeEl.value = String(this.saturationState.mode);
+            satModeEl.dispatchEvent(new Event('change'));
+        }
+        if (this.saturationDriveSlider) this.saturationDriveSlider.value = String(this.saturationState.drive);
+        if (this.saturationMixSlider) this.saturationMixSlider.value = String(this.saturationState.mix);
+
+        this.filterState = state.filter ? { ...state.filter } : { ...defaultFilterState };
+        if (this.filterModeSelect) this.filterModeSelect.value = this.filterState.mode;
+        if (this.filterOrderSelect) this.filterOrderSelect.value = String(this.filterState.order);
+        if (this.filterCutoffSlider) this.filterCutoffSlider.value = String(this.filterState.cutoff);
+        if (this.filterResonanceSlider) this.filterResonanceSlider.value = String(this.filterState.resonance);
+        this.updateFilterUIState();
 
         this.updateAllDisplays();
         this.updateModulationRanges();
@@ -1003,6 +1388,13 @@ export class ControlPanel {
         if (this.amplitudeSourceSelect) {
             this.amplitudeSourceSelect.value = this.modRoutingState.amplitude;
         }
+        if (this.filterCutoffSourceSelect) {
+            this.filterCutoffSourceSelect.value = this.modRoutingState.filterCutoff;
+        }
+        if (this.filterResonanceSourceSelect) {
+            this.filterResonanceSourceSelect.value = this.modRoutingState.filterResonance;
+        }
+        this.updateFilterUIState();
         this.updateModulationRanges();
     }
 
@@ -1052,8 +1444,25 @@ export class ControlPanel {
             if (inputAny.updateKnob) inputAny.updateKnob();
         };
 
+        const syncFullRangeMod = (slider: HTMLInputElement, source: string) => {
+            if (!slider) return;
+            const inputAny = slider as any;
+            if (source === 'none') {
+                inputAny.hasModulation = false;
+            } else {
+                const min = typeof inputAny.realMin === 'number' ? inputAny.realMin : parseFloat(slider.min);
+                const max = typeof inputAny.realMax === 'number' ? inputAny.realMax : parseFloat(slider.max);
+                inputAny.hasModulation = true;
+                inputAny.modOffset = (min + max) * 0.5;
+                inputAny.modAmplitude = (max - min) * 0.5;
+            }
+            if (inputAny.updateKnob) inputAny.updateKnob();
+        };
+
         syncMod(this.pathYSlider, this.modRoutingState.pathY);
         syncMod(this.scanPositionSlider, this.modRoutingState.scanPhase);
+        syncFullRangeMod(this.filterCutoffSlider, this.modRoutingState.filterCutoff);
+        syncFullRangeMod(this.filterResonanceSlider, this.modRoutingState.filterResonance);
     }
 
     private extractLegacyEnvelopeCompatibility() {

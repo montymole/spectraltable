@@ -104,6 +104,37 @@ export interface ModulatorState {
     operators: ModulatorOperator[];
 }
 
+export type FilterMode = 'none' | 'lowpass' | 'bandpass' | 'highpass';
+export type FilterOrder = 2 | 4;
+
+export interface FilterState {
+    mode: FilterMode;
+    order: FilterOrder;
+    cutoff: number;
+    resonance: number;
+}
+
+export const FILTER_CUTOFF_MIN = 20;
+export const FILTER_CUTOFF_MAX = 20000;
+export const FILTER_RESONANCE_MIN = 0.1;
+export const FILTER_RESONANCE_MAX = 20;
+
+export const defaultFilterState: FilterState = {
+    mode: 'none',
+    order: 2,
+    cutoff: FILTER_CUTOFF_MAX,
+    resonance: 0.707
+};
+
+export interface ModRoutingState {
+    pathY: string;
+    scanPhase: string;
+    shapePhase: string;
+    amplitude: string;
+    filterCutoff: string;
+    filterResonance: string;
+}
+
 // Octave doubling state for octave layering
 export interface OctaveDoublingState {
     lowCount: number;      // 0-10, number of octaves below base frequency
@@ -141,13 +172,27 @@ export const defaultSpectralCopyState: SpectralCopyState = {
 
 // Waveshaping state
 export interface WaveshapeState {
-    curve: number;   // 0=none, 1=tanh, 2=polynomial, 3=sine fold
+    curve: number;   // 0=none, 1=tanh, 2=polynomial, 3=sine fold, 4=custom LUT
     drive: number;   // 1.0-20.0, pre-curve gain
     mix: number;     // 0.0-1.0, dry/wet blend
+    customCurve?: number[]; // 1024 samples mapping [-1..1] -> [-1..1]
 }
 
 export const defaultWaveshapeState: WaveshapeState = {
     curve: 0,
+    drive: 1.0,
+    mix: 0.0
+};
+
+// Saturation / soft clipping (post-waveshape)
+export interface SaturationState {
+    mode: number;  // 0=none, 1=gentle, 2=transistor (sym), 3=tube (asym)
+    drive: number; // 1.0-20.0
+    mix: number;   // 0.0-1.0
+}
+
+export const defaultSaturationState: SaturationState = {
+    mode: 0,
     drive: 1.0,
     mix: 0.0
 };
@@ -209,12 +254,14 @@ export interface PresetControls {
     lfos?: LFOState[];
     envelopes?: EnvelopeState[];
     modulators?: ModulatorState[];
-    modRouting: { pathY: string; scanPhase: string; shapePhase: string; amplitude: string };
+    modRouting: ModRoutingState;
+    filter?: FilterState;
     octave: number;
     octaveDoubling?: OctaveDoublingState;
     harmonicInjection?: HarmonicInjectionState;
     spectralCopy?: SpectralCopyState;
     waveshape?: WaveshapeState;
+    saturation?: SaturationState;
     interpSamples: number;
     bpm: number;
 }

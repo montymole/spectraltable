@@ -9,7 +9,18 @@
  * - WHITENOISE_BAND_Q_FILTER: Subtractive noise filtering
  */
 
-import { SynthMode } from '../types';
+import {
+    defaultFilterState,
+    FILTER_CUTOFF_MAX,
+    FILTER_CUTOFF_MIN,
+    FILTER_RESONANCE_MAX,
+    FILTER_RESONANCE_MIN,
+    FilterOrder,
+    FilterState,
+    SaturationState,
+    SynthMode,
+    WaveshapeState
+} from '../types';
 
 // Vite imports worklet files as URLs for AudioWorklet.addModule()
 import spectralWorkletUrl from './worklets/spectral.worklet.ts?worker&url';
@@ -32,6 +43,8 @@ export class AudioEngine {
     private analyserL: AnalyserNode;
     private analyserR: AnalyserNode;
     private masterGain: GainNode;
+    private filterStageA: BiquadFilterNode;
+    private filterStageB: BiquadFilterNode;
 
     // ADSR Envelope
     public attack = 0.1;
@@ -60,6 +73,18 @@ export class AudioEngine {
     private spectralCopyShift = 12;
     private spectralCopyMix = 0.0;
 
+    // Waveshaping state
+    private waveshapeCurve = 0;
+    private waveshapeDrive = 1.0;
+    private waveshapeMix = 0.0;
+    private waveshapeCustomCurve: Float32Array | null = null;
+
+    // Saturation state
+    private saturationMode = 0;
+    private saturationDrive = 1.0;
+    private saturationMix = 0.0;
+    private filterState: FilterState = { ...defaultFilterState };
+
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
@@ -69,6 +94,8 @@ export class AudioEngine {
 
         this.masterGain = this.ctx.createGain();
         this.masterGain.gain.value = 0;
+        this.filterStageA = this.ctx.createBiquadFilter();
+        this.filterStageB = this.ctx.createBiquadFilter();
 
         this.analyserL.fftSize = 2048;
         this.analyserR.fftSize = 2048;
@@ -80,6 +107,15 @@ export class AudioEngine {
 
         this.splitNode.connect(this.analyserL, 0);
         this.splitNode.connect(this.analyserR, 1);
+        this.masterGain.connect(this.ctx.destination);
+        this.masterGain.connect(this.splitNode);
+        this.applyFilterStateToNodes(
+            this.ctx,
+            [this.filterStageA, this.filterStageB],
+            this.filterState,
+            this.ctx.currentTime,
+            0
+        );
     }
 
     public async initialize(): Promise<void> {
@@ -110,7 +146,7 @@ export class AudioEngine {
 
     private createWorkletNode(): void {
         if (this.workletNode) {
-            this.workletNode.disconnect();
+            this.safeDisconnect(this.workletNode);
             this.workletNode = null;
         }
 
@@ -122,9 +158,7 @@ export class AudioEngine {
             outputChannelCount: [2]
         });
 
-        this.workletNode.connect(this.masterGain);
-        this.masterGain.connect(this.ctx.destination);
-        this.masterGain.connect(this.splitNode);
+        this.reconnectLiveGraph();
 
         if (this.currentMode === SynthMode.WAVETABLE) {
             this.workletNode.port.postMessage({
@@ -151,6 +185,99 @@ export class AudioEngine {
             shift: this.spectralCopyShift,
             mix: this.spectralCopyMix
         });
+
+        // Send waveshaping state
+        this.sendWaveshapingToWorklet();
+        this.sendSaturationToWorklet();
+    }
+
+    private safeDisconnect(node: AudioNode | null): void {
+        if (!node) return;
+        try {
+            node.disconnect();
+        } catch {
+            // Ignore disconnect errors when nodes are already detached.
+        }
+    }
+
+    private clampFilterCutoff(value: number, sampleRate: number): number {
+        const nyquistSafeMax = Math.min(FILTER_CUTOFF_MAX, sampleRate * 0.45);
+        return Math.max(FILTER_CUTOFF_MIN, Math.min(nyquistSafeMax, value));
+    }
+
+    private clampFilterResonance(value: number): number {
+        return Math.max(FILTER_RESONANCE_MIN, Math.min(FILTER_RESONANCE_MAX, value));
+    }
+
+    private applyFilterStateToNodes(
+        context: BaseAudioContext,
+        nodes: [BiquadFilterNode, BiquadFilterNode],
+        state: FilterState,
+        startTime: number,
+        smoothingTime: number
+    ): void {
+        if (state.mode === 'none') return;
+        const cutoff = this.clampFilterCutoff(state.cutoff, context.sampleRate);
+        const resonance = this.clampFilterResonance(state.resonance);
+        const biquadType: BiquadFilterType = state.mode;
+
+        nodes.forEach((node) => {
+            node.type = biquadType;
+            if (smoothingTime > 0) {
+                node.frequency.cancelScheduledValues(startTime);
+                node.Q.cancelScheduledValues(startTime);
+                node.frequency.setTargetAtTime(cutoff, startTime, smoothingTime);
+                node.Q.setTargetAtTime(resonance, startTime, smoothingTime);
+            } else {
+                node.frequency.setValueAtTime(cutoff, startTime);
+                node.Q.setValueAtTime(resonance, startTime);
+            }
+        });
+    }
+
+    private connectFilterChain(
+        source: AudioNode,
+        stages: [BiquadFilterNode, BiquadFilterNode],
+        destination: AudioNode,
+        order: FilterOrder
+    ): void {
+        this.safeDisconnect(source);
+        this.safeDisconnect(stages[0]);
+        this.safeDisconnect(stages[1]);
+
+        source.connect(stages[0]);
+        if (order === 4) {
+            stages[0].connect(stages[1]);
+            stages[1].connect(destination);
+        } else {
+            stages[0].connect(destination);
+        }
+    }
+
+    private reconnectLiveGraph(): void {
+        if (!this.workletNode) return;
+        this.safeDisconnect(this.workletNode);
+        this.safeDisconnect(this.filterStageA);
+        this.safeDisconnect(this.filterStageB);
+
+        if (this.filterState.mode === 'none') {
+            this.workletNode.connect(this.masterGain);
+            return;
+        }
+
+        this.connectFilterChain(
+            this.workletNode,
+            [this.filterStageA, this.filterStageB],
+            this.masterGain,
+            this.filterState.order
+        );
+        this.applyFilterStateToNodes(
+            this.ctx,
+            [this.filterStageA, this.filterStageB],
+            this.filterState,
+            this.ctx.currentTime,
+            0
+        );
     }
 
     public setMode(mode: SynthMode): void {
@@ -287,6 +414,93 @@ export class AudioEngine {
         };
     }
 
+    private sendWaveshapingToWorklet(): void {
+        if (this.workletNode) {
+            this.workletNode.port.postMessage({
+                type: 'waveshape',
+                curve: this.waveshapeCurve,
+                drive: this.waveshapeDrive,
+                mix: this.waveshapeMix
+            });
+
+            if (this.waveshapeCurve === 4 && this.waveshapeCustomCurve) {
+                const lut = this.waveshapeCustomCurve.slice();
+                this.workletNode.port.postMessage({ type: 'waveshape-lut', lut }, [lut.buffer]);
+            }
+        }
+    }
+
+    public setWaveshapingState(curve: number, drive: number, mix: number): void {
+        this.waveshapeCurve = curve;
+        this.waveshapeDrive = drive;
+        this.waveshapeMix = mix;
+        this.sendWaveshapingToWorklet();
+    }
+
+    public setWaveshapeCustomCurve(curve: Float32Array | null): void {
+        this.waveshapeCustomCurve = curve ? curve.slice() : null;
+        if (this.waveshapeCurve === 4) this.sendWaveshapingToWorklet();
+    }
+
+    public setWaveshaping(state: WaveshapeState | undefined): void {
+        const s = state || { curve: 0, drive: 1.0, mix: 0.0 };
+        this.setWaveshapingState(s.curve, s.drive, s.mix);
+        if (s.curve === 4 && s.customCurve && s.customCurve.length > 1) {
+            this.setWaveshapeCustomCurve(new Float32Array(s.customCurve));
+        }
+    }
+
+    private sendSaturationToWorklet(): void {
+        if (this.workletNode) {
+            this.workletNode.port.postMessage({
+                type: 'saturation',
+                mode: this.saturationMode,
+                drive: this.saturationDrive,
+                mix: this.saturationMix
+            });
+        }
+    }
+
+    public setSaturationState(mode: number, drive: number, mix: number): void {
+        this.saturationMode = mode;
+        this.saturationDrive = drive;
+        this.saturationMix = mix;
+        this.sendSaturationToWorklet();
+    }
+
+    public setSaturation(state: SaturationState | undefined): void {
+        const s = state || { mode: 0, drive: 1.0, mix: 0.0 };
+        this.setSaturationState(s.mode, s.drive, s.mix);
+    }
+
+    public setFilterState(state: FilterState | undefined): void {
+        const nextState = state ? { ...state } : { ...defaultFilterState };
+        this.filterState = {
+            mode: nextState.mode,
+            order: nextState.order,
+            cutoff: this.clampFilterCutoff(nextState.cutoff, this.ctx.sampleRate),
+            resonance: this.clampFilterResonance(nextState.resonance)
+        };
+        this.reconnectLiveGraph();
+    }
+
+    public setFilterParams(cutoff: number, resonance: number, smoothingTime: number = 0.01): void {
+        this.filterState.cutoff = this.clampFilterCutoff(cutoff, this.ctx.sampleRate);
+        this.filterState.resonance = this.clampFilterResonance(resonance);
+        if (this.filterState.mode === 'none') return;
+        this.applyFilterStateToNodes(
+            this.ctx,
+            [this.filterStageA, this.filterStageB],
+            this.filterState,
+            this.ctx.currentTime,
+            Math.max(0.001, smoothingTime)
+        );
+    }
+
+    public getFilterState(): FilterState {
+        return { ...this.filterState };
+    }
+
     public setInterpSamples(samples: number): void {
         if (this.workletNode && this.isInitialized) {
             this.workletNode.port.postMessage({
@@ -401,6 +615,14 @@ export class AudioEngine {
             octaveDoubling: { low: number, high: number, multiplier: number },
             harmonicInjection: { count: number, falloff: number },
             spectralCopy: { shift: number, mix: number },
+            waveshape?: WaveshapeState,
+            saturation?: SaturationState,
+            filter?: FilterState,
+            filterAutomation?: {
+                cutoff?: Float32Array,
+                resonance?: Float32Array,
+                duration: number
+            },
             interpSamples: number,
             timeline?: { numFrames: number, frameSize: number },
             gainTimeline?: Float32Array,
@@ -413,11 +635,28 @@ export class AudioEngine {
 
         const offlineCtx = new OfflineAudioContext(2, lengthSamples, offlineSampleRate);
 
+        const addWorkletModule = async (url: string, label: string) => {
+            try {
+                await offlineCtx.audioWorklet.addModule(url);
+            } catch (err) {
+                // `addModule` errors are often opaque; try to fetch for status/CORS hints.
+                let extra = '';
+                try {
+                    const resp = await fetch(url);
+                    extra = ` fetch=${resp.status} ${resp.statusText}`;
+                } catch (fetchErr) {
+                    extra = ` fetchError=${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`;
+                }
+                const message = err instanceof Error ? err.message : String(err);
+                throw new Error(`Offline worklet load failed (${label}) url=${url} err=${message}${extra}`);
+            }
+        };
+
         // Load processors into offline context via URL imports
-        await offlineCtx.audioWorklet.addModule(spectralWorkletUrl);
-        await offlineCtx.audioWorklet.addModule(chirpSpectralWorkletUrl);
-        await offlineCtx.audioWorklet.addModule(wavetableWorkletUrl);
-        await offlineCtx.audioWorklet.addModule(whitenoiseWorkletUrl);
+        await addWorkletModule(spectralWorkletUrl, 'spectral');
+        await addWorkletModule(chirpSpectralWorkletUrl, 'chirp-spectral');
+        await addWorkletModule(wavetableWorkletUrl, 'wavetable');
+        await addWorkletModule(whitenoiseWorkletUrl, 'whitenoise');
 
         let processorName = 'wavetable-processor';
         if (params.mode === SynthMode.SPECTRAL) processorName = 'spectral-processor';
@@ -432,8 +671,27 @@ export class AudioEngine {
 
         const masterGain = offlineCtx.createGain();
         masterGain.gain.value = 0;
+        const offlineFilterA = offlineCtx.createBiquadFilter();
+        const offlineFilterB = offlineCtx.createBiquadFilter();
 
-        node.connect(masterGain);
+        const filterState = params.filter || this.filterState;
+        if (filterState.mode === 'none') {
+            node.connect(masterGain);
+        } else {
+            this.connectFilterChain(
+                node,
+                [offlineFilterA, offlineFilterB],
+                masterGain,
+                filterState.order
+            );
+            this.applyFilterStateToNodes(
+                offlineCtx,
+                [offlineFilterA, offlineFilterB],
+                filterState,
+                0,
+                0
+            );
+        }
         masterGain.connect(offlineCtx.destination);
 
         // Setup parameters
@@ -455,6 +713,17 @@ export class AudioEngine {
             shift: params.spectralCopy.shift,
             mix: params.spectralCopy.mix
         });
+
+        // Send waveshaping + saturation (offline)
+        const ws = params.waveshape || { curve: this.waveshapeCurve, drive: this.waveshapeDrive, mix: this.waveshapeMix, customCurve: this.waveshapeCustomCurve ? Array.from(this.waveshapeCustomCurve) : undefined };
+        node.port.postMessage({ type: 'waveshape', curve: ws.curve, drive: ws.drive, mix: ws.mix });
+        if (ws.curve === 4 && ws.customCurve && ws.customCurve.length > 1) {
+            const lut = new Float32Array(ws.customCurve);
+            node.port.postMessage({ type: 'waveshape-lut', lut }, [lut.buffer]);
+        }
+
+        const sat = params.saturation || { mode: this.saturationMode, drive: this.saturationDrive, mix: this.saturationMix };
+        node.port.postMessage({ type: 'saturation', mode: sat.mode, drive: sat.drive, mix: sat.mix });
 
         if (params.mode === SynthMode.WAVETABLE) {
             const freq = 440 * Math.pow(2, (note - 69) / 12);
@@ -487,6 +756,26 @@ export class AudioEngine {
                 if (e.data.type === 'ready') resolve();
             };
         });
+
+        if (filterState.mode !== 'none' && params.filterAutomation?.cutoff && params.filterAutomation.cutoff.length > 1) {
+            const curve = params.filterAutomation.cutoff;
+            offlineFilterA.frequency.setValueCurveAtTime(curve, 0, params.filterAutomation.duration);
+            offlineFilterB.frequency.setValueCurveAtTime(curve, 0, params.filterAutomation.duration);
+        } else if (filterState.mode !== 'none') {
+            const cutoff = this.clampFilterCutoff(filterState.cutoff, offlineSampleRate);
+            offlineFilterA.frequency.setValueAtTime(cutoff, 0);
+            offlineFilterB.frequency.setValueAtTime(cutoff, 0);
+        }
+
+        if (filterState.mode !== 'none' && params.filterAutomation?.resonance && params.filterAutomation.resonance.length > 1) {
+            const curve = params.filterAutomation.resonance;
+            offlineFilterA.Q.setValueCurveAtTime(curve, 0, params.filterAutomation.duration);
+            offlineFilterB.Q.setValueCurveAtTime(curve, 0, params.filterAutomation.duration);
+        } else if (filterState.mode !== 'none') {
+            const resonance = this.clampFilterResonance(filterState.resonance);
+            offlineFilterA.Q.setValueAtTime(resonance, 0);
+            offlineFilterB.Q.setValueAtTime(resonance, 0);
+        }
 
         if (params.gainTimeline && params.gainTimeline.length > 1) {
             masterGain.gain.setValueCurveAtTime(params.gainTimeline, 0, totalDuration);
