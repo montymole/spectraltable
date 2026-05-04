@@ -63,6 +63,10 @@ export class ModulatorPreviewWebGL {
         this.draw();
     }
 
+    public refresh(): void {
+        this.resize();
+    }
+
     public destroy(): void {
         window.removeEventListener('resize', this.resizeHandler);
         this.gl.deleteBuffer(this.vbo);

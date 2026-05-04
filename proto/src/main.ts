@@ -11,9 +11,10 @@ import { PianoKeyboard } from './ui/piano';
 import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType,
     VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT,
-    GeneratorParams, PresetControls, OctaveDoublingState
+    GeneratorParams, PresetControls, OctaveDoublingState,
+    FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX
 } from './types';
-import { createDefaultModulatorStates, Modulator, resolveModulatorStates } from './modulators/modulator';
+import { createDefaultModulatorStates, estimateModulatorRange, Modulator, resolveModulatorStates } from './modulators/modulator';
 import { noteToName } from './ui/ui-elements';
 
 // Main application entry point
@@ -52,6 +53,9 @@ class SpectralTableApp {
     private scanPhaseSource: string = 'none';
     private shapePhaseSource: string = 'none';
     private amplitudeSource: string = 'mod1';
+    private filterCutoffSource: string = 'none';
+    private filterResonanceSource: string = 'none';
+    private filterState: FilterState = { ...defaultFilterState };
     private currentBpm = 140;
 
     constructor() {
@@ -141,6 +145,16 @@ class SpectralTableApp {
         this.controls.setSpectralCopyChangeCallback((state) => {
             this.audioEngine.setSpectralCopy(state.shift, state.mix);
         });
+        this.controls.setWaveshapeChangeCallback((state) => {
+            this.audioEngine.setWaveshaping(state);
+        });
+        this.controls.setSaturationChangeCallback((state) => {
+            this.audioEngine.setSaturation(state);
+        });
+        this.controls.setFilterChangeCallback((state) => {
+            this.filterState = { ...state };
+            this.audioEngine.setFilterState(state);
+        });
         this.controls.setInterpSamplesChangeCallback((samples: number) => this.audioEngine.setInterpSamples(samples));
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
@@ -161,6 +175,14 @@ class SpectralTableApp {
             if (target === 'scanPhase') this.scanPhaseSource = source;
             if (target === 'shapePhase') this.shapePhaseSource = source;
             if (target === 'amplitude') this.amplitudeSource = source;
+            if (target === 'filterCutoff') {
+                this.filterCutoffSource = source;
+                this.audioEngine.setFilterState(this.filterState);
+            }
+            if (target === 'filterResonance') {
+                this.filterResonanceSource = source;
+                this.audioEngine.setFilterState(this.filterState);
+            }
         });
 
         // Handle window resize
@@ -208,8 +230,8 @@ class SpectralTableApp {
         console.log('✓ Application initialized');
     }
 
-    private restoreSavedState(): void {
-        const savedState = this.controls.loadSavedState();
+    private async restoreSavedState(): Promise<void> {
+        const savedState = await this.controls.loadSavedState();
         if (savedState) {
             console.log('Restoring saved state...');
             this.applyPresetState(savedState);
@@ -243,6 +265,8 @@ class SpectralTableApp {
         this.scanPhaseSource = state.modRouting.scanPhase;
         this.shapePhaseSource = state.modRouting.shapePhase;
         this.amplitudeSource = state.modRouting.amplitude || 'mod1';
+        this.filterCutoffSource = state.modRouting.filterCutoff || 'none';
+        this.filterResonanceSource = state.modRouting.filterResonance || 'none';
 
         // Apply audio settings
         this.audioEngine.setMode(state.synthMode as SynthMode);
@@ -251,6 +275,10 @@ class SpectralTableApp {
         this.audioEngine.setCarrier(state.carrier);
         this.audioEngine.setFeedback(state.feedback);
         this.audioEngine.setInterpSamples(state.interpSamples || 64);
+        this.audioEngine.setWaveshaping(state.waveshape);
+        this.audioEngine.setSaturation(state.saturation);
+        this.filterState = state.filter ? { ...state.filter } : { ...defaultFilterState };
+        this.audioEngine.setFilterState(this.filterState);
         this.audioEngine.setMasterGainTarget(0, 0.001);
 
         // Apply piano octave
@@ -414,6 +442,53 @@ class SpectralTableApp {
         return index >= 0 && index < outputs.length ? outputs[index] : 0;
     }
 
+    private getNormalizedModulatorValue(source: string, outputs: number[]): number {
+        const index = this.getModulatorIndex(source);
+        if (index < 0 || index >= outputs.length) return 0;
+
+        const modulator = this.modulators[index];
+        if (!modulator) return 0;
+
+        const [min, max] = estimateModulatorRange(modulator.getState());
+        if (Math.abs(max - min) < 1e-6) {
+            return Math.max(0, Math.min(1, outputs[index]));
+        }
+
+        return Math.max(0, Math.min(1, (outputs[index] - min) / (max - min)));
+    }
+
+    private interpolateLog(min: number, max: number, normalized: number): number {
+        const clamped = Math.max(0, Math.min(1, normalized));
+        return min * Math.pow(max / min, clamped);
+    }
+
+    private getFilterCutoffValue(outputs: number[]): number {
+        if (this.filterCutoffSource === 'none') {
+            return this.filterState.cutoff;
+        }
+        return this.interpolateLog(
+            FILTER_CUTOFF_MIN,
+            FILTER_CUTOFF_MAX,
+            this.getNormalizedModulatorValue(this.filterCutoffSource, outputs)
+        );
+    }
+
+    private getFilterResonanceValue(outputs: number[]): number {
+        if (this.filterResonanceSource === 'none') {
+            return this.filterState.resonance;
+        }
+        const normalized = this.getNormalizedModulatorValue(this.filterResonanceSource, outputs);
+        return FILTER_RESONANCE_MIN + (FILTER_RESONANCE_MAX - FILTER_RESONANCE_MIN) * normalized;
+    }
+
+    private getFilterRuntimeState(outputs: number[]): FilterState {
+        return {
+            ...this.filterState,
+            cutoff: this.getFilterCutoffValue(outputs),
+            resonance: this.getFilterResonanceValue(outputs)
+        };
+    }
+
     private applyModulatedPathState(state: ReadingPathState, outputs: number[]): boolean {
         let changed = false;
 
@@ -505,14 +580,22 @@ class SpectralTableApp {
         const hasPathModulation = this.pathYSource !== 'none' ||
             this.scanPhaseSource !== 'none' ||
             this.shapePhaseSource !== 'none';
+        const hasFilterModulation = this.filterCutoffSource !== 'none' ||
+            this.filterResonanceSource !== 'none';
 
         let spectralData: Float32Array;
         let timelineInfo: { numFrames: number, frameSize: number } | undefined;
         let gainTimeline: Float32Array | undefined;
+        let filterCutoffTimeline: Float32Array | undefined;
+        let filterResonanceTimeline: Float32Array | undefined;
 
         const fps = 60;
         const numFrames = Math.max(1, Math.ceil(totalDuration * fps));
         const deltaTime = 1 / fps;
+        if (hasFilterModulation) {
+            if (this.filterCutoffSource !== 'none') filterCutoffTimeline = new Float32Array(numFrames);
+            if (this.filterResonanceSource !== 'none') filterResonanceTimeline = new Float32Array(numFrames);
+        }
         const simModulators = this.modulators.map((modulator) => {
             const clone = modulator.clone();
             clone.setBPM(bpm);
@@ -542,6 +625,8 @@ class SpectralTableApp {
                 const outputs = simModulators.map((modulator) => modulator.update(f === 0 ? 0 : deltaTime));
                 this.applyModulatedPathState(pathState, outputs);
                 gainTimeline[f] = this.getAmplitudeValue(outputs, currentTime < actualDuration || !released);
+                if (filterCutoffTimeline) filterCutoffTimeline[f] = this.getFilterCutoffValue(outputs);
+                if (filterResonanceTimeline) filterResonanceTimeline[f] = this.getFilterResonanceValue(outputs);
 
                 this.renderer.updateReadingPath(pathState);
                 const frame = this.renderer.getReadingLineSpectralData();
@@ -562,6 +647,8 @@ class SpectralTableApp {
                 }
                 const outputs = simModulators.map((modulator) => modulator.update(f === 0 ? 0 : deltaTime));
                 gainTimeline[f] = this.getAmplitudeValue(outputs, currentTime < actualDuration || !released);
+                if (filterCutoffTimeline) filterCutoffTimeline[f] = this.getFilterCutoffValue(outputs);
+                if (filterResonanceTimeline) filterResonanceTimeline[f] = this.getFilterResonanceValue(outputs);
             }
             spectralData = this.renderer.getReadingLineSpectralData();
         }
@@ -589,6 +676,14 @@ class SpectralTableApp {
                 },
                 harmonicInjection: this.audioEngine.getHarmonicInjection(),
                 spectralCopy: this.audioEngine.getSpectralCopy(),
+                waveshape: state.waveshape,
+                saturation: state.saturation,
+                filter: this.filterState,
+                filterAutomation: (filterCutoffTimeline || filterResonanceTimeline) ? {
+                    cutoff: filterCutoffTimeline,
+                    resonance: filterResonanceTimeline,
+                    duration: totalDuration
+                } : undefined,
                 interpSamples: state.interpSamples,
                 timeline: timelineInfo,
                 gainTimeline,
@@ -742,6 +837,10 @@ class SpectralTableApp {
                 this.renderer.updateReadingPath(state);
             }
             this.audioEngine.setMasterGainTarget(this.getAmplitudeValue(modOutputs));
+            if (this.filterCutoffSource !== 'none' || this.filterResonanceSource !== 'none') {
+                const filterRuntimeState = this.getFilterRuntimeState(modOutputs);
+                this.audioEngine.setFilterParams(filterRuntimeState.cutoff, filterRuntimeState.resonance);
+            }
 
             this.renderer.render(deltaTime);
 

@@ -7,7 +7,7 @@ export const WAVEFORM_ICONS: Record<string, string> = {
 };
 
 export const SECTION_ICONS: Record<string, string> = {
-    'Wave/Spectral Volume': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+    'Wave / Spectral': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M 32 10 L 58 24 L 58 52 L 32 64 L 6 52 L 6 24 Z" />
         <path d="M 32 10 L 32 38 L 58 24" />
         <path d="M 32 38 L 6 24" />
@@ -23,7 +23,7 @@ export const SECTION_ICONS: Record<string, string> = {
         <path d="M 8 40 C 20 40, 30 10, 55 15" stroke-width="2" />
         <circle cx="55" cy="15" r="3" fill="currentColor" />
     </svg>`,
-    'Modulators': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+    'Mod Slots': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
         <circle cx="32" cy="32" r="28" stroke-dasharray="4 4" stroke-opacity="0.3" />
         <path d="M 12 32 C 12 10, 32 10, 32 32 C 32 54, 52 54, 52 32" />
         <path d="M 50 32 L 54 32" />
@@ -34,7 +34,67 @@ export const SECTION_ICONS: Record<string, string> = {
         <rect x="32" y="35" width="8" height="21" />
         <rect x="44" y="15" width="8" height="41" />
         <path d="M 5 56 L 59 56" />
-    </svg>`
+    </svg>`,
+    'Render / Export': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 14 18 H 50 V 46 H 14 Z" />
+        <path d="M 24 26 L 32 34 L 40 26" />
+        <path d="M 32 34 V 14" />
+        <path d="M 22 50 H 42" />
+    </svg>`,
+    'Octave & Harmonics': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 8 38 Q 16 18 24 38 T 40 38 T 56 38" />
+        <path d="M 8 48 Q 16 28 24 48 T 40 48 T 56 48" stroke-opacity="0.45" />
+    </svg>`,
+    'Spectral Shaping': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 8 48 C 18 18, 30 18, 38 40 S 54 54, 56 18" />
+        <path d="M 8 56 H 56" stroke-opacity="0.35" />
+    </svg>`,
+    'Synth Voice': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="20" cy="30" r="8" />
+        <circle cx="44" cy="24" r="8" stroke-opacity="0.45" />
+        <circle cx="44" cy="40" r="8" stroke-opacity="0.75" />
+    </svg>`,
+    'Master': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="32" cy="32" r="20" />
+        <path d="M 32 32 L 44 18" />
+        <path d="M 32 12 V 18 M 52 32 H 46 M 32 52 V 46 M 12 32 H 18" stroke-opacity="0.45" />
+    </svg>`,
+    'Mod Matrix': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 14 14 H 50 V 50 H 14 Z" />
+        <path d="M 14 26 H 50 M 14 38 H 50 M 26 14 V 50 M 38 14 V 50" stroke-opacity="0.5" />
+        <circle cx="26" cy="38" r="3" fill="currentColor" />
+        <circle cx="38" cy="26" r="3" fill="currentColor" />
+    </svg>`,
+    'Macros': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="16" cy="32" r="8" />
+        <circle cx="32" cy="22" r="8" />
+        <circle cx="48" cy="32" r="8" />
+        <circle cx="32" cy="42" r="8" />
+    </svg>`,
+    'XY Pad': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 12 12 H 52 V 52 H 12 Z" />
+        <path d="M 12 32 H 52 M 32 12 V 52" stroke-opacity="0.35" />
+        <circle cx="38" cy="26" r="5" fill="currentColor" />
+    </svg>`,
+    'Effects Chain': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="8" y="18" width="16" height="28" rx="3" />
+        <rect x="24" y="12" width="16" height="40" rx="3" stroke-opacity="0.7" />
+        <rect x="40" y="20" width="16" height="24" rx="3" stroke-opacity="0.45" />
+    </svg>`,
+    'Effect Details': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 8 44 C 16 30, 24 32, 32 24 S 48 16, 56 28" />
+        <path d="M 8 56 H 56" stroke-opacity="0.35" />
+    </svg>`,
+    'Global Settings': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="32" cy="32" r="10" />
+        <path d="M 32 8 V 16 M 32 48 V 56 M 8 32 H 16 M 48 32 H 56 M 15 15 L 20 20 M 44 44 L 49 49 M 15 49 L 20 44 M 44 20 L 49 15" />
+    </svg>`,
+    'Visual Controls': `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M 10 46 L 24 24 L 36 34 L 54 14" />
+        <path d="M 10 54 H 54" stroke-opacity="0.35" />
+        <circle cx="24" cy="24" r="3" fill="currentColor" />
+        <circle cx="36" cy="34" r="3" fill="currentColor" />
+    </svg>`,
 };
 
 /**
@@ -46,15 +106,46 @@ export const CONTROL_STYLE: 'slider' | 'knob' = 'knob';
  * Creates a section card with a title.
  * Returns the card element which acts as the container for controls.
  */
-export function createSection(parent: HTMLElement, title: string, mode: 'slider' | 'knob' = CONTROL_STYLE): HTMLElement {
-    const card = document.createElement('div');
+export function createSection(parent: HTMLElement, title: string, mode: 'slider' | 'knob' = CONTROL_STYLE, sectionKey?: string): HTMLElement {
+    const card = document.createElement('section');
     card.className = 'control-card';
     if (mode === 'knob') card.classList.add('knob-layout');
-    const header = document.createElement('div');
-    header.className = 'control-section-title';
-    header.textContent = title;
+    if (sectionKey) card.dataset.sectionKey = sectionKey;
 
-    // Add background icon
+    const header = document.createElement('div');
+    header.className = 'control-card-header';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'control-section-title';
+    titleEl.textContent = title;
+
+    const actions = document.createElement('div');
+    actions.className = 'control-card-actions';
+
+    const collapseButton = document.createElement('button');
+    collapseButton.type = 'button';
+    collapseButton.className = 'section-toggle';
+    collapseButton.setAttribute('aria-label', `Toggle ${title}`);
+
+    const syncToggleState = () => {
+        const collapsed = card.classList.contains('is-user-collapsed') || card.classList.contains('is-tab-collapsed');
+        collapseButton.textContent = collapsed ? '+' : '−';
+        collapseButton.setAttribute('aria-expanded', String(!collapsed));
+    };
+
+    collapseButton.addEventListener('click', () => {
+        card.classList.toggle('is-user-collapsed');
+        syncToggleState();
+    });
+
+    const observer = new MutationObserver(syncToggleState);
+    observer.observe(card, { attributes: true, attributeFilter: ['class'] });
+    syncToggleState();
+
+    actions.appendChild(collapseButton);
+    header.appendChild(titleEl);
+    header.appendChild(actions);
+
     if (SECTION_ICONS[title]) {
         const iconContainer = document.createElement('div');
         iconContainer.className = 'section-icon';

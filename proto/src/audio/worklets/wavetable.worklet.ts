@@ -26,9 +26,15 @@ class WavetableProcessor extends AudioWorkletProcessor {
     private harmonicEnvPhases = new Float32Array(20);
 
     // Waveshaping
-    private waveshapeCurve = 0;  // 0=none, 1=tanh, 2=polynomial, 3=sine fold
+    private waveshapeCurve = 0;  // 0=none, 1=tanh, 2=polynomial, 3=sine fold, 4=custom LUT
     private waveshapeDrive = 1.0;
     private waveshapeMix = 0.0;
+    private waveshapeLUT: Float32Array | null = null;
+
+    // Saturation / soft clipping
+    private saturationMode = 0; // 0=none, 1=gentle, 2=transistor (sym), 3=tube (asym)
+    private saturationDrive = 1.0;
+    private saturationMix = 0.0;
 
     // Harmonic Injection (Integer harmonics)
     private harmonicCount = 0;
@@ -124,6 +130,14 @@ class WavetableProcessor extends AudioWorkletProcessor {
                     this.waveshapeCurve = e.data.curve;
                     this.waveshapeDrive = e.data.drive;
                     this.waveshapeMix = e.data.mix;
+                    break;
+                case 'waveshape-lut':
+                    this.waveshapeLUT = e.data.lut;
+                    break;
+                case 'saturation':
+                    this.saturationMode = e.data.mode;
+                    this.saturationDrive = e.data.drive;
+                    this.saturationMix = e.data.mix;
                     break;
             }
         };
@@ -313,11 +327,19 @@ class WavetableProcessor extends AudioWorkletProcessor {
                     case 3: // sine fold — wraps signal through sin()
                         shaped = Math.sin(driven);
                         break;
+                    case 4: // custom LUT in [-1..1]
+                        shaped = this.applyWaveshapeLUT(driven);
+                        break;
                     default:
                         shaped = driven;
                         break;
                 }
                 totalSample = dry * (1 - this.waveshapeMix) + shaped * this.waveshapeMix;
+            }
+
+            // Saturation / soft clip post-process
+            if (this.saturationMode > 0 && this.saturationMix > 0.001) {
+                totalSample = this.applySaturation(totalSample);
             }
 
             const gain = 0.5;
@@ -329,6 +351,42 @@ class WavetableProcessor extends AudioWorkletProcessor {
         }
 
         return true;
+    }
+
+    private applyWaveshapeLUT(x: number): number {
+        const lut = this.waveshapeLUT;
+        if (!lut || lut.length < 2) return Math.max(-1, Math.min(1, x));
+        const t = (Math.max(-1, Math.min(1, x)) + 1) * 0.5 * (lut.length - 1);
+        const i0 = Math.floor(t);
+        const i1 = Math.min(lut.length - 1, i0 + 1);
+        const frac = t - i0;
+        return lut[i0] * (1 - frac) + lut[i1] * frac;
+    }
+
+    private applySaturation(x: number): number {
+        const dry = x;
+        const driven = x * this.saturationDrive;
+        let shaped = driven;
+        switch (this.saturationMode) {
+            case 1: // gentle odd-harmonic addition
+                shaped = driven - driven * driven * driven * 0.333;
+                shaped = Math.max(-1, Math.min(1, shaped));
+                break;
+            case 2: // transistor: symmetric soft clip
+                shaped = Math.tanh(driven);
+                break;
+            case 3: { // tube: asymmetric soft clip (simple biased tanh)
+                const bias = 0.2;
+                const base = Math.tanh(bias);
+                const denom = Math.max(1e-6, 1 - base);
+                shaped = (Math.tanh(driven + bias) - base) / denom;
+                shaped = Math.max(-1, Math.min(1, shaped));
+                break;
+            }
+            default:
+                shaped = driven;
+        }
+        return dry * (1 - this.saturationMix) + shaped * this.saturationMix;
     }
 }
 
