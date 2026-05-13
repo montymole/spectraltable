@@ -135,6 +135,7 @@ class SpectralTableApp {
         this.controls.setVolumeResolutionChangeCallback(this.onVolumeResolutionChange.bind(this));
         this.controls.setSpectralDataChangeCallback(this.onSpectralDataChange.bind(this));
         this.controls.setWavUploadCallback(this.onWavUpload.bind(this));
+        this.controls.setImageUploadCallback(this.onImageUpload.bind(this));
         this.controls.setSynthModeChangeCallback(this.onSynthModeChange.bind(this));
         this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
         this.controls.setFeedbackChangeCallback(this.onFeedbackChange.bind(this));
@@ -761,6 +762,143 @@ class SpectralTableApp {
             // Hide progress
             setTimeout(() => this.controls.hideProgress('upload'), 500);
         }
+    }
+
+    private async onImageUpload(file: File): Promise<void> {
+        console.log('Processing image: ' + file.name);
+
+        try {
+            // Show progress
+            this.controls.showProgress('upload');
+            this.controls.updateProgress('upload', 0, 'Loading image. ..');
+
+            // Load image onto canvas
+            const img = await this.loadImageFromFile(file);
+
+            // Get current volume resolution
+            const resolution = this.renderer.getSpectralVolume().getResolution();
+            const x = resolution.x;
+            const y = resolution.y;
+            const z = resolution.z;
+
+            console.log('Tiling image ' + img.naturalWidth + 'x' + img.naturalHeight + ' into ' + x + 'x' + y + 'x' + z + ' volume');
+
+            // Create offscreen canvas at image size
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(img, 0, 0);
+
+            // Compute optimal tile grid (rows x cols >= z tiles) matching image aspect ratio
+            const tileGrid = this.computeTileGrid(img.naturalWidth, img.naturalHeight, z);
+            console.log('Tile grid: ' + tileGrid.rows + 'x' + tileGrid.cols + ' = ' + tileGrid.tiles + ' tiles');
+
+            // Tile the image into the volume
+            this.controls.updateProgress('upload', 10, 'Tiling volume. ..');
+
+            const volumeData = new Float32Array(x * y * z * 4);
+            const tileW = Math.ceil(img.naturalWidth / tileGrid.cols);
+            const tileH = Math.ceil(img.naturalHeight / tileGrid.rows);
+
+            // Temporary canvas for scaling tiles
+            const tileCanvas = document.createElement('canvas');
+            tileCanvas.width = x;
+            tileCanvas.height = y;
+            const tileCtx = tileCanvas.getContext('2d')!;
+
+            let tileIndex = 0;
+            for (let row = 0; row < tileGrid.rows; row++) {
+                for (let col = 0; col < tileGrid.cols; col++) {
+                    if (tileIndex >= z) break;
+
+                    // Source region in full image
+                    const srcX = col * tileW;
+                    const srcY = row * tileH;
+                    const srcW = Math.min(tileW, img.naturalWidth - srcX);
+                    const srcH = Math.min(tileH, img.naturalHeight - srcY);
+
+                    // Draw scaled tile to tile canvas
+                    tileCtx.clearRect(0, 0, x, y);
+                    tileCtx.drawImage(canvas, srcX, srcY, srcW, srcH, 0, 0, x, y);
+
+                    // Read scaled tile pixels
+                    const tileData = tileCtx.getImageData(0, 0, x, y).data;
+
+                    // Write to volume data (RGBA -> Float32Array, normalized 0-1)
+                    const baseIdx = tileIndex * x * y * 4;
+                    for (let i = 0; i < tileData.length; i++) {
+                        volumeData[baseIdx + i] = tileData[i] / 255.0;
+                    }
+
+                    // Update progress
+                    const pct = 10 + Math.floor((tileIndex / z) * 70);
+                    this.controls.updateProgress('upload', pct, 'Tiling ' + (tileIndex + 1) + '/' + z + '. ..');
+
+                    tileIndex++;
+                }
+            }
+
+            this.controls.updateProgress('upload', 90, 'Uploading to GPU. ..');
+
+            // Store the volume data
+            const volumeName = file.name.replace(/\.[^/.]+$/, '');
+            this.uploadedVolumes.set(volumeName, volumeData);
+
+            // Set volume data directly
+            this.renderer.getSpectralVolume().setData(volumeData);
+            this.renderer.markReadingLineDirty();
+
+            // Add to dropdown and select it
+            this.controls.addSpectralDataOption(volumeName);
+            this.controls.selectSpectralDataOption(volumeName);
+
+            this.controls.updateProgress('upload', 100, 'Done!');
+            console.log('Image ' + volumeName + ' tiled into ' + x + 'x' + y + 'x' + z + ' volume (' + tileIndex + ' tiles)');
+        } catch (error) {
+            console.error('Failed to process image:', error);
+            alert('Error processing image: ' + (error instanceof Error ? error.message : 'Unknown error'));
+        } finally {
+            setTimeout(() => this.controls.hideProgress('upload'), 1000);
+        }
+    }
+
+    private loadImageFromFile(file: File): Promise<HTMLImageElement> {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const objectUrl = URL.createObjectURL(file);
+            img.onload = () => {
+                URL.revokeObjectURL(objectUrl);
+                resolve(img);
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(objectUrl);
+                reject(new Error('Failed to load image'));
+            };
+            img.src = objectUrl;
+        });
+    }
+
+    private computeTileGrid(imgWidth: number, imgHeight: number, numTiles: number): { rows: number, cols: number, tiles: number } {
+        const imgAspect = imgWidth / imgHeight;
+
+        let bestRows = 1;
+        let bestCols = numTiles;
+        let bestScore = Infinity;
+
+        // Search for optimal grid that matches image aspect ratio and has >= numTiles tiles
+        for (let rows = 1; rows <= numTiles; rows++) {
+            const cols = Math.ceil(numTiles / rows);
+            const gridAspect = cols / rows;
+            const score = Math.abs(Math.log2(gridAspect / imgAspect));
+            if (score < bestScore) {
+                bestScore = score;
+                bestRows = rows;
+                bestCols = cols;
+            }
+        }
+
+        return { rows: bestRows, cols: bestCols, tiles: bestRows * bestCols };
     }
 
     private onResize(): void {

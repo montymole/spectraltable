@@ -143,6 +143,7 @@ export class ControlPanel {
     private onVolumeResolutionChange?: (resolution: VolumeResolution) => void;
     private onSpectralDataChange?: (dataSet: string) => void;
     private onWavUpload?: (files: FileList) => void;
+    private onImageUpload?: (file: File) => void;
     private onSynthModeChange: ((mode: SynthMode) => void) | null = null;
     private onCarrierChange: ((carrier: CarrierType) => void) | null = null;
     private onFeedbackChange: ((amount: number) => void) | null = null;
@@ -590,6 +591,9 @@ export class ControlPanel {
         container.appendChild(subGroup2);
         createFileInput(subGroup2, 'wav-upload', 'Upload WAV (Multi-select)', '.wav,.mp3,.ogg', true, (files) => {
             if (files && files.length > 0 && this.onWavUpload) this.onWavUpload(files);
+        });
+        createFileInput(subGroup2, 'image-upload', 'Upload Image', '.png,.jpg,.jpeg,.webp,.gif,.bmp', false, (files) => {
+            if (files && files.length > 0 && this.onImageUpload) this.onImageUpload(files[0]);
         });
         this.uploadProgressUI = createProgressUI(subGroup2);
     }
@@ -2198,6 +2202,10 @@ export class ControlPanel {
         this.onWavUpload = callback;
     }
 
+    public setImageUploadCallback(callback: (file: File) => void): void {
+        this.onImageUpload = callback;
+    }
+
     public setSynthModeChangeCallback(callback: (mode: SynthMode) => void): void {
         this.onSynthModeChange = callback;
     }
@@ -2291,6 +2299,12 @@ export class ControlPanel {
         opt.value = name;
         opt.textContent = name;
         this.spectralDataSelect.appendChild(opt);
+    }
+
+    public selectSpectralDataOption(name: string): void {
+        if (!this.spectralDataSelect) return;
+        this.spectralDataSelect.value = name;
+        if (this.onSpectralDataChange) this.onSpectralDataChange(name);
     }
 
     public updatePathY(val: number): void {
