@@ -12,10 +12,21 @@ import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType,
     VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, PresetControls, OctaveDoublingState,
-    FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX
+    FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
+    PolyphonyState, defaultPolyphonyState
 } from './types';
 import { createDefaultModulatorStates, estimateModulatorRange, Modulator, resolveModulatorStates } from './modulators/modulator';
 import { noteToName } from './ui/ui-elements';
+
+interface VoiceRuntime {
+    id: number;
+    note: number;
+    modulators: Modulator[];
+    isReleasing: boolean;
+    releaseElapsed: number;
+    releaseDuration: number;
+    lastOutputs: number[];
+}
 
 // Main application entry point
 // Initializes WebGL, UI, and wires up event handling
@@ -31,7 +42,7 @@ class SpectralTableApp {
     private midiHandler: MidiHandler;
     private piano: PianoKeyboard;
     private canvas: HTMLCanvasElement;
-    private currentNote: number | null = null;
+    private activeVoices: Map<number, VoiceRuntime> = new Map();
     private animationFrameId: number = 0;
     private lastAudioSpectralRevision = -1;
 
@@ -56,6 +67,7 @@ class SpectralTableApp {
     private filterCutoffSource: string = 'none';
     private filterResonanceSource: string = 'none';
     private filterState: FilterState = { ...defaultFilterState };
+    private polyphonyState: PolyphonyState = { ...defaultPolyphonyState };
     private currentBpm = 140;
 
     constructor() {
@@ -93,7 +105,10 @@ class SpectralTableApp {
 
         // Initialize MIDI Handler
         this.midiHandler = new MidiHandler();
-        this.midiHandler.setNoteChangeCallback(this.onMidiNote.bind(this));
+        this.midiHandler.setNoteEventCallback((note, velocity, isNoteOn) => {
+            if (isNoteOn) this.onMidiNoteOn(note, velocity);
+            else this.onMidiNoteOff(note);
+        });
         this.midiHandler.setConnectionChangeCallback((isConnected) => {
             if (isConnected) console.log('✓ MIDI Device Connected');
             this.controls.updateMidiInputs(this.midiHandler.getInputs());
@@ -156,6 +171,11 @@ class SpectralTableApp {
             this.filterState = { ...state };
             this.audioEngine.setFilterState(state);
         });
+        this.controls.setPolyphonyChangeCallback((state) => {
+            this.polyphonyState = { ...state };
+            this.audioEngine.setPolyphony(state);
+            this.trimVoiceRuntimes();
+        });
         this.controls.setInterpSamplesChangeCallback((samples: number) => this.audioEngine.setInterpSamples(samples));
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
@@ -163,12 +183,19 @@ class SpectralTableApp {
         this.controls.setBPMCallback((bpm) => {
             this.currentBpm = bpm;
             this.modulators.forEach(modulator => modulator.setBPM(bpm));
+            this.activeVoices.forEach((voice) => voice.modulators.forEach((modulator) => modulator.setBPM(bpm)));
         });
         this.controls.setModulatorChangeCallback((index, state) => {
             const modulator = this.modulators[index];
             if (!modulator) return;
             modulator.setState(state);
             modulator.setBPM(this.controls.getFullState().bpm);
+            this.activeVoices.forEach((voice) => {
+                const voiceModulator = voice.modulators[index];
+                if (!voiceModulator) return;
+                voiceModulator.setState(state);
+                voiceModulator.setBPM(this.currentBpm);
+            });
         });
 
         this.controls.setModulationRoutingChangeCallback((target: string, source: string) => {
@@ -280,7 +307,9 @@ class SpectralTableApp {
         this.audioEngine.setSaturation(state.saturation);
         this.filterState = state.filter ? { ...state.filter } : { ...defaultFilterState };
         this.audioEngine.setFilterState(this.filterState);
-        this.audioEngine.setMasterGainTarget(0, 0.001);
+        this.polyphonyState = state.polyphony ? { ...state.polyphony } : { ...defaultPolyphonyState };
+        this.audioEngine.setPolyphony(this.polyphonyState);
+        this.clearVoiceRuntimes();
 
         // Apply piano octave
         this.piano.setBaseOctave(state.octave);
@@ -511,48 +540,63 @@ class SpectralTableApp {
         return changed;
     }
 
-    private getAmplitudeValue(outputs: number[], noteActive: boolean = this.currentNote !== null): number {
+    private getAmplitudeValue(outputs: number[], noteActive: boolean = this.activeVoices.size > 0): number {
         if (this.amplitudeSource === 'none') {
             return noteActive ? 1 : 0;
         }
         return Math.max(0, Math.min(1, this.getModulatorValue(this.amplitudeSource, outputs)));
     }
 
-    private onMidiNote(note: number | null): void {
-        // Handle Note Off / All Keys Up
-        if (note === null) {
-            this.currentNote = null;
-            this.modulators.forEach((modulator) => modulator.noteOff());
-            return;
-        }
+    private onMidiNoteOn(note: number, velocity: number): void {
+        const voiceIds = this.audioEngine.noteOn(note, velocity);
+        voiceIds.forEach((id) => {
+            const modulators = this.modulators.map((modulator) => {
+                const clone = modulator.clone();
+                clone.setBPM(this.currentBpm);
+                clone.noteOn();
+                return clone;
+            });
+            const releaseDuration = this.getVoiceReleaseDuration(modulators);
+            this.activeVoices.set(id, {
+                id,
+                note,
+                modulators,
+                isReleasing: false,
+                releaseElapsed: 0,
+                releaseDuration,
+                lastOutputs: new Array(modulators.length).fill(0)
+            });
+        });
+        this.trimVoiceRuntimes();
+    }
 
-        // Avoid re-triggering if the highest note hasn't changed (e.g. releasing a lower key)
-        if (note === this.currentNote) {
-            return;
-        }
+    private onMidiNoteOff(note: number): void {
+        const releasedIds = this.audioEngine.noteOff(note);
+        releasedIds.forEach((id) => {
+            const voice = this.activeVoices.get(id);
+            if (!voice) return;
+            voice.isReleasing = true;
+            voice.releaseElapsed = 0;
+            voice.modulators.forEach((modulator) => modulator.noteOff());
+        });
+    }
 
-        this.currentNote = note;
+    private getVoiceReleaseDuration(modulators: Modulator[]): number {
+        if (this.amplitudeSource === 'none') return 0.05;
+        const index = Math.max(0, this.getModulatorIndex(this.amplitudeSource));
+        return modulators[index]?.getMaxReleaseTime() || 0.05;
+    }
 
-        // Convert MIDI note to frequency
-        // f = 440 * 2^((n - 69) / 12)
-        const freq = 440 * Math.pow(2, (note - 69) / 12);
+    private trimVoiceRuntimes(): void {
+        const activeIds = new Set(this.audioEngine.getActiveVoiceIds());
+        Array.from(this.activeVoices.keys()).forEach((id) => {
+            if (!activeIds.has(id)) this.activeVoices.delete(id);
+        });
+    }
 
-        const mode = this.audioEngine.getMode();
-
-        if (mode === SynthMode.WAVETABLE) {
-            // Set wavetable frequency directly from MIDI
-            this.audioEngine.setWavetableFrequency(freq);
-        } else if (mode === SynthMode.SPECTRAL) {
-            // Spectral Mode Pitch Strategy
-            // Root = 440Hz (A4)
-            // Multiplier = TargetFreq / Root
-            const rootFreq = 440;
-            const multiplier = freq / rootFreq;
-
-            this.audioEngine.setSpectralPitch(multiplier);
-        }
-
-        this.modulators.forEach((modulator) => modulator.noteOn());
+    private clearVoiceRuntimes(): void {
+        this.audioEngine.allNotesOff(0.001);
+        this.activeVoices.clear();
     }
 
     private async onRenderWav(note: number, duration: number): Promise<void> {
@@ -963,9 +1007,37 @@ class SpectralTableApp {
                 }
             }
 
-            // Modulator update
+            // Modulator update. Shared modulators drive global visual/path targets; each
+            // active audio voice advances its own cloned modulators for amp/filter.
             const state = this.controls.getState();
-            const modOutputs = this.modulators.map((modulator) => modulator.update(deltaTime));
+            let modOutputs = this.modulators.map((modulator) => modulator.update(deltaTime));
+
+            this.activeVoices.forEach((voice) => {
+                const voiceOutputs = voice.modulators.map((modulator) => modulator.update(deltaTime));
+                voice.lastOutputs = voiceOutputs;
+                this.audioEngine.setVoiceGainTarget(
+                    voice.id,
+                    this.getAmplitudeValue(voiceOutputs, true)
+                );
+
+                if (this.filterCutoffSource !== 'none' || this.filterResonanceSource !== 'none') {
+                    const filterRuntimeState = this.getFilterRuntimeState(voiceOutputs);
+                    this.audioEngine.setVoiceFilterParams(voice.id, filterRuntimeState.cutoff, filterRuntimeState.resonance);
+                }
+
+                if (voice.isReleasing) {
+                    voice.releaseElapsed += deltaTime;
+                    const amp = this.getAmplitudeValue(voiceOutputs, false);
+                    if (voice.releaseElapsed >= voice.releaseDuration + 0.05 || amp <= 0.0005) {
+                        this.audioEngine.stopVoice(voice.id);
+                        this.activeVoices.delete(voice.id);
+                    }
+                }
+            });
+
+            const firstVoice = this.activeVoices.values().next().value as VoiceRuntime | undefined;
+            if (firstVoice) modOutputs = firstVoice.lastOutputs;
+
             const beatDuration = 60 / Math.max(this.currentBpm, 1);
             this.controls.updateModulatorPreviewCurves(
                 this.modulators.map((modulator) => modulator.samplePreview(beatDuration, 256))
@@ -973,11 +1045,6 @@ class SpectralTableApp {
             const pathModulated = this.applyModulatedPathState(state, modOutputs);
             if (pathModulated) {
                 this.renderer.updateReadingPath(state);
-            }
-            this.audioEngine.setMasterGainTarget(this.getAmplitudeValue(modOutputs));
-            if (this.filterCutoffSource !== 'none' || this.filterResonanceSource !== 'none') {
-                const filterRuntimeState = this.getFilterRuntimeState(modOutputs);
-                this.audioEngine.setFilterParams(filterRuntimeState.cutoff, filterRuntimeState.resonance);
             }
 
             this.renderer.render(deltaTime);

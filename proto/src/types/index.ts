@@ -126,6 +126,23 @@ export const defaultFilterState: FilterState = {
     resonance: 0.707
 };
 
+export type VoiceMode = 'poly' | 'unison';
+
+export interface PolyphonyState {
+    voices: number;
+    mode: VoiceMode;
+    unisonDetuneCents: number;
+}
+
+export const POLYPHONY_MIN = 1;
+export const POLYPHONY_MAX = 12;
+
+export const defaultPolyphonyState: PolyphonyState = {
+    voices: 4,
+    mode: 'poly',
+    unisonDetuneCents: 8
+};
+
 export interface ModRoutingState {
     pathY: string;
     scanPhase: string;
@@ -262,6 +279,7 @@ export interface PresetControls {
     spectralCopy?: SpectralCopyState;
     waveshape?: WaveshapeState;
     saturation?: SaturationState;
+    polyphony?: PolyphonyState;
     interpSamples: number;
     bpm: number;
 }

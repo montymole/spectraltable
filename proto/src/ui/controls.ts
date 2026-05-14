@@ -10,7 +10,7 @@ import {
     SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState,
     WaveshapeState, defaultWaveshapeState, SaturationState, defaultSaturationState,
     FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
-    ModRoutingState
+    ModRoutingState, PolyphonyState, defaultPolyphonyState, POLYPHONY_MIN, POLYPHONY_MAX
 } from '../types';
 import { createDefaultModulatorStates, defaultEnvelopeState, defaultLFOState, estimateModulatorRange, normalizeModulatorState, resolveModulatorStates } from '../modulators/modulator';
 import { PresetManager } from './preset-manager';
@@ -156,6 +156,7 @@ export class ControlPanel {
     private onSaturationChange: ((state: SaturationState) => void) | null = null;
     private onInterpSamplesChange: ((samples: number) => void) | null = null;
     private onFilterChange: ((state: FilterState) => void) | null = null;
+    private onPolyphonyChange: ((state: PolyphonyState) => void) | null = null;
 
     // Modulator Callbacks
     private onModulatorChange: ((index: number, state: ModulatorState) => void) | null = null;
@@ -243,6 +244,10 @@ export class ControlPanel {
     private filterResonanceSlider!: HTMLInputElement;
     private filterCutoffSourceSelect: HTMLSelectElement | null = null;
     private filterResonanceSourceSelect: HTMLSelectElement | null = null;
+    private polyphonyState: PolyphonyState = { ...defaultPolyphonyState };
+    private polyphonyVoiceSlider!: HTMLInputElement;
+    private polyphonyModeSelect!: HTMLSelectElement;
+    private unisonDetuneSlider!: HTMLInputElement;
 
     // Debounce timer for auto-save
     private autoSaveTimer: number | null = null;
@@ -297,7 +302,7 @@ export class ControlPanel {
             { key: 'xy-pad', title: 'XY Pad', populate: (c) => this.populateMockSection(c, 'Live gesture surface for crossfading between modulation targets.', ['X Axis: LFO 1', 'Y Axis: Envelope 1', 'Touch mapping planned'], ['expressive', 'planned']) },
             { key: 'effects-chain', title: 'Effects Chain', populate: (c) => this.populateMockSection(c, 'Future insert rack for time and tone effects after synthesis.', ['Reverb', 'Delay', 'Chorus', 'Compressor'], ['fx', 'planned']) },
             { key: 'effect-details', title: 'Effect Details', populate: (c) => this.populateMockSection(c, 'Focused editor for the currently selected effect block.', ['Mix / Time / Feedback', 'Tone curve preview', 'Slot-specific modulation'], ['detail', 'planned']) },
-            { key: 'global-settings', title: 'Global Settings', populate: (c) => this.populateMockSection(c, 'System-level tuning, polyphony, and preset metadata live here.', ['Master Tune', 'Voice Count', 'Sample Rate / Buffer Size'], ['global', 'planned']) },
+            { key: 'global-settings', title: 'Global Settings', populate: (c) => this.populateGlobalSettingsSection(c) },
             { key: 'visual-controls', title: 'Visual Controls', populate: (c) => this.populateMockSection(c, 'Space for cube, spectrogram, and scope display preferences.', ['Rotate / Tilt', 'Grid + Axis overlays', 'Color mapping and contrast'], ['visual', 'planned']) }
         ];
 
@@ -675,6 +680,72 @@ export class ControlPanel {
             if (this.onInterpSamplesChange) this.onInterpSamplesChange(val);
             this.scheduleAutoSave();
         });
+    }
+
+    private populateGlobalSettingsSection(container: HTMLElement): void {
+        const subGroup = document.createElement('div');
+        subGroup.classList.add('sub-group');
+        container.appendChild(subGroup);
+
+        const emitPolyphonyChange = () => {
+            if (this.onPolyphonyChange) this.onPolyphonyChange({ ...this.polyphonyState });
+            this.scheduleAutoSave();
+            this.updatePolyphonyUI();
+        };
+
+        this.polyphonyVoiceSlider = createSlider(
+            subGroup,
+            'polyphony-voices',
+            'Voices',
+            POLYPHONY_MIN,
+            POLYPHONY_MAX,
+            this.polyphonyState.voices,
+            1,
+            (val) => {
+                this.polyphonyState.voices = Math.max(POLYPHONY_MIN, Math.min(POLYPHONY_MAX, Math.round(val)));
+                emitPolyphonyChange();
+            },
+            CONTROL_STYLE,
+            'linear',
+            0
+        );
+
+        this.polyphonyModeSelect = createSelect(subGroup, 'polyphony-mode', 'Mode', [
+            { value: 'poly', label: 'Poly' },
+            { value: 'unison', label: 'Unison' }
+        ], (val) => {
+            this.polyphonyState.mode = val === 'unison' ? 'unison' : 'poly';
+            emitPolyphonyChange();
+        });
+
+        this.unisonDetuneSlider = createSlider(
+            subGroup,
+            'unison-detune',
+            'Unison Detune',
+            0,
+            50,
+            this.polyphonyState.unisonDetuneCents,
+            0.1,
+            (val) => {
+                this.polyphonyState.unisonDetuneCents = val;
+                emitPolyphonyChange();
+            },
+            CONTROL_STYLE,
+            'linear',
+            1
+        );
+
+        this.updatePolyphonyUI();
+    }
+
+    private updatePolyphonyUI(): void {
+        if (this.polyphonyModeSelect) this.polyphonyModeSelect.value = this.polyphonyState.mode;
+        if (this.polyphonyVoiceSlider) this.polyphonyVoiceSlider.value = String(this.polyphonyState.voices);
+        if (this.unisonDetuneSlider) {
+            this.unisonDetuneSlider.value = String(this.polyphonyState.unisonDetuneCents);
+            const group = this.unisonDetuneSlider.closest('.control-group') as HTMLElement | null;
+            if (group) group.style.display = this.polyphonyState.mode === 'unison' ? '' : 'none';
+        }
     }
 
     private populateOctaveHarmonicsSection(container: HTMLElement): void {
@@ -1755,6 +1826,7 @@ export class ControlPanel {
             spectralCopy: { ...this.spectralCopyState },
             waveshape: JSON.parse(JSON.stringify(this.waveshapeState)),
             saturation: { ...this.saturationState },
+            polyphony: { ...this.polyphonyState },
             interpSamples: parseFloat(this.interpSamplesSlider.value)
         };
     }
@@ -1816,6 +1888,16 @@ export class ControlPanel {
                 this.bpmSlider.value = String(state.bpm);
             }
         }
+
+        this.polyphonyState = state.polyphony
+            ? {
+                voices: Math.max(POLYPHONY_MIN, Math.min(POLYPHONY_MAX, Math.round(state.polyphony.voices))),
+                mode: state.polyphony.mode === 'unison' ? 'unison' : 'poly',
+                unisonDetuneCents: Math.max(0, Math.min(50, state.polyphony.unisonDetuneCents))
+            }
+            : { ...defaultPolyphonyState };
+        this.updatePolyphonyUI();
+        if (this.onPolyphonyChange) this.onPolyphonyChange({ ...this.polyphonyState });
 
         this.modulatorStates = resolveModulatorStates(state, this.modulatorStates.length || 4);
         this.modRoutingState = {
@@ -2240,6 +2322,10 @@ export class ControlPanel {
 
     public setInterpSamplesChangeCallback(callback: (samples: number) => void): void {
         this.onInterpSamplesChange = callback;
+    }
+
+    public setPolyphonyChangeCallback(callback: (state: PolyphonyState) => void): void {
+        this.onPolyphonyChange = callback;
     }
 
     public setOctaveDoublingChangeCallback(callback: (state: OctaveDoublingState) => void): void {
