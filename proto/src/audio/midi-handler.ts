@@ -8,6 +8,7 @@ export class MidiHandler {
     private onNoteChangeCallback: ((note: number | null) => void) | null = null;
     private onConnectionChangeCallback: ((isConnected: boolean) => void) | null = null;
     private onRawNoteCallback: ((note: number, velocity: number) => void) | null = null;  // For visualization
+    private onNoteEventCallback: ((note: number, velocity: number, isNoteOn: boolean) => void) | null = null;
 
     constructor() {
         this.initialize();
@@ -71,12 +72,14 @@ export class MidiHandler {
             this.activeNotes.set(note, velocity);
             this.triggerHighestNote();
             if (this.onRawNoteCallback) this.onRawNoteCallback(note, velocity);
+            if (this.onNoteEventCallback) this.onNoteEventCallback(note, velocity, true);
         }
         // Note Off (or Note On with vel 0)
         else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
             this.activeNotes.delete(note);
             this.triggerHighestNote();
             if (this.onRawNoteCallback) this.onRawNoteCallback(note, 0);
+            if (this.onNoteEventCallback) this.onNoteEventCallback(note, 0, false);
         }
     }
 
@@ -102,6 +105,10 @@ export class MidiHandler {
 
     public setNoteChangeCallback(callback: (note: number | null) => void) {
         this.onNoteChangeCallback = callback;
+    }
+
+    public setNoteEventCallback(callback: (note: number, velocity: number, isNoteOn: boolean) => void) {
+        this.onNoteEventCallback = callback;
     }
 
     public setRawNoteCallback(callback: (note: number, velocity: number) => void) {
@@ -134,11 +141,13 @@ export class MidiHandler {
         this.triggerHighestNote();
         // Allow visualization update if needed (e.g. if driven by computer keyboard later)
         if (this.onRawNoteCallback) this.onRawNoteCallback(note, velocity);
+        if (this.onNoteEventCallback) this.onNoteEventCallback(note, velocity, true);
     }
 
     public simulateNoteOff(note: number) {
         this.activeNotes.delete(note);
         this.triggerHighestNote();
         if (this.onRawNoteCallback) this.onRawNoteCallback(note, 0);
+        if (this.onNoteEventCallback) this.onNoteEventCallback(note, 0, false);
     }
 }

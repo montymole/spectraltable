@@ -102,6 +102,61 @@ export interface ModulatorState {
     name: string;
     slots: ModulatorSlotState[];
     operators: ModulatorOperator[];
+    nameEdited?: boolean;
+}
+
+export type FilterMode = 'none' | 'lowpass' | 'bandpass' | 'highpass';
+export type FilterOrder = 2 | 4;
+
+export interface FilterState {
+    mode: FilterMode;
+    order: FilterOrder;
+    cutoff: number;
+    resonance: number;
+}
+
+export const FILTER_CUTOFF_MIN = 20;
+export const FILTER_CUTOFF_MAX = 20000;
+export const FILTER_RESONANCE_MIN = 0.1;
+export const FILTER_RESONANCE_MAX = 20;
+
+export const defaultFilterState: FilterState = {
+    mode: 'lowpass',
+    order: 2,
+    cutoff: FILTER_CUTOFF_MAX,
+    resonance: 0.707
+};
+
+export type VoiceMode = 'mono' | 'poly';
+
+export interface PolyphonyState {
+    voices: number;
+    mode: VoiceMode;
+    unisonVoices: number;
+    unisonDetuneCents: number;
+}
+
+export const POLYPHONY_MIN = 1;
+export const POLYPHONY_MAX = 8;
+export const UNISON_VOICES_MIN = 1;
+export const UNISON_VOICES_MAX = 4;
+export const UNISON_DETUNE_CENTS_MIN = 0;
+export const UNISON_DETUNE_CENTS_MAX = 50;
+
+export const defaultPolyphonyState: PolyphonyState = {
+    voices: 4,
+    mode: 'poly',
+    unisonVoices: 1,
+    unisonDetuneCents: 8
+};
+
+export interface ModRoutingState {
+    pathY: string;
+    scanPhase: string;
+    shapePhase: string;
+    amplitude: string;
+    filterCutoff: string;
+    filterResonance: string;
 }
 
 export type FilterMode = 'none' | 'lowpass' | 'bandpass' | 'highpass';
@@ -262,6 +317,7 @@ export interface PresetControls {
     spectralCopy?: SpectralCopyState;
     waveshape?: WaveshapeState;
     saturation?: SaturationState;
+    polyphony?: PolyphonyState;
     interpSamples: number;
     bpm: number;
 }

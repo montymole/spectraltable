@@ -11,14 +11,22 @@
 
 import {
     defaultFilterState,
+    defaultPolyphonyState,
     FILTER_CUTOFF_MAX,
     FILTER_CUTOFF_MIN,
     FILTER_RESONANCE_MAX,
     FILTER_RESONANCE_MIN,
     FilterOrder,
     FilterState,
+    POLYPHONY_MAX,
+    POLYPHONY_MIN,
+    PolyphonyState,
     SaturationState,
     SynthMode,
+    UNISON_DETUNE_CENTS_MAX,
+    UNISON_DETUNE_CENTS_MIN,
+    UNISON_VOICES_MAX,
+    UNISON_VOICES_MIN,
     WaveshapeState
 } from '../types';
 
@@ -28,9 +36,21 @@ import chirpSpectralWorkletUrl from './worklets/chirp-spectral.worklet.ts?worker
 import wavetableWorkletUrl from './worklets/wavetable.worklet.ts?worker&url';
 import whitenoiseWorkletUrl from './worklets/whitenoise.worklet.ts?worker&url';
 
+interface EngineVoice {
+    id: number;
+    note: number;
+    startedAt: number;
+    node: AudioWorkletNode;
+    gain: GainNode;
+    filterStageA: BiquadFilterNode;
+    filterStageB: BiquadFilterNode;
+    isReleasing: boolean;
+}
+
 export class AudioEngine {
     private ctx: AudioContext;
-    private workletNode: AudioWorkletNode | null = null;
+    private voices: EngineVoice[] = [];
+    private nextVoiceId = 1;
     private isInitialized = false;
     private currentMode: SynthMode = SynthMode.WAVETABLE;
 
@@ -59,6 +79,7 @@ export class AudioEngine {
     private wavetableFrequency = 220;
     private carrierType = 0;
     private feedback = 0;
+    private interpSamples = 64;
 
     // Octave doubling state
     private octaveLow = 0;
@@ -84,6 +105,8 @@ export class AudioEngine {
     private saturationDrive = 1.0;
     private saturationMix = 0.0;
     private filterState: FilterState = { ...defaultFilterState };
+    private polyphonyState: PolyphonyState = { ...defaultPolyphonyState };
+    private lastSpectralData: Float32Array | null = null;
 
     constructor() {
         this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -93,9 +116,7 @@ export class AudioEngine {
         this.analyserR = this.ctx.createAnalyser();
 
         this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.value = 0;
-        this.filterStageA = this.ctx.createBiquadFilter();
-        this.filterStageB = this.ctx.createBiquadFilter();
+        this.masterGain.gain.value = 1;
 
         this.analyserL.fftSize = 2048;
         this.analyserR.fftSize = 2048;
@@ -109,13 +130,6 @@ export class AudioEngine {
         this.splitNode.connect(this.analyserR, 1);
         this.masterGain.connect(this.ctx.destination);
         this.masterGain.connect(this.splitNode);
-        this.applyFilterStateToNodes(
-            this.ctx,
-            [this.filterStageA, this.filterStageB],
-            this.filterState,
-            this.ctx.currentTime,
-            0
-        );
     }
 
     public async initialize(): Promise<void> {
@@ -127,8 +141,6 @@ export class AudioEngine {
             await this.ctx.audioWorklet.addModule(chirpSpectralWorkletUrl);
             await this.ctx.audioWorklet.addModule(wavetableWorkletUrl);
             await this.ctx.audioWorklet.addModule(whitenoiseWorkletUrl);
-
-            this.createWorkletNode();
 
             this.isInitialized = true;
             console.log(`✓ Audio Engine initialized (mode: ${this.currentMode})`);
@@ -144,51 +156,73 @@ export class AudioEngine {
         [SynthMode.WHITENOISE_BAND_Q_FILTER]: 'whitenoise-processor',
     }
 
-    private createWorkletNode(): void {
-        if (this.workletNode) {
-            this.safeDisconnect(this.workletNode);
-            this.workletNode = null;
-        }
-
+    private createVoiceNode(note: number, frequency: number): EngineVoice {
         const processorName = this.modeMap[this.currentMode] || 'wavetable-processor';
 
-        this.workletNode = new AudioWorkletNode(this.ctx, processorName, {
+        const node = new AudioWorkletNode(this.ctx, processorName, {
             numberOfInputs: 0,
             numberOfOutputs: 1,
             outputChannelCount: [2]
         });
+        const gain = this.ctx.createGain();
+        gain.gain.value = 0;
+        const filterStageA = this.ctx.createBiquadFilter();
+        const filterStageB = this.ctx.createBiquadFilter();
 
-        this.reconnectLiveGraph();
+        const voice: EngineVoice = {
+            id: this.nextVoiceId++,
+            note,
+            startedAt: this.ctx.currentTime,
+            node,
+            gain,
+            filterStageA,
+            filterStageB,
+            isReleasing: false
+        };
+
+        this.connectVoiceGraph(voice);
 
         if (this.currentMode === SynthMode.WAVETABLE) {
-            this.workletNode.port.postMessage({
+            node.port.postMessage({
                 type: 'frequency',
-                value: this.wavetableFrequency
+                value: frequency
+            });
+        } else {
+            node.port.postMessage({
+                type: 'frequency-multiplier',
+                value: frequency / 440
             });
         }
 
-        this.workletNode.port.postMessage({
+        node.port.postMessage({
             type: 'octave-doubling',
             low: this.octaveLow,
             high: this.octaveHigh,
             multiplier: this.octaveMult
         });
 
-        this.workletNode.port.postMessage({
+        node.port.postMessage({
             type: 'harmonic-injection',
             count: this.harmonicCount,
             falloff: this.harmonicFalloff
         });
 
-        this.workletNode.port.postMessage({
+        node.port.postMessage({
             type: 'spectral-copy',
             shift: this.spectralCopyShift,
             mix: this.spectralCopyMix
         });
 
-        // Send waveshaping state
-        this.sendWaveshapingToWorklet();
-        this.sendSaturationToWorklet();
+        this.sendWaveshapingToNode(node);
+        this.sendSaturationToNode(node);
+        node.port.postMessage({ type: 'interp-samples', value: this.interpSamples });
+
+        if (this.lastSpectralData) {
+            const transferData = this.lastSpectralData.slice();
+            node.port.postMessage({ type: 'spectral-data', data: transferData }, [transferData.buffer]);
+        }
+
+        return voice;
     }
 
     private safeDisconnect(node: AudioNode | null): void {
@@ -254,30 +288,36 @@ export class AudioEngine {
         }
     }
 
-    private reconnectLiveGraph(): void {
-        if (!this.workletNode) return;
-        this.safeDisconnect(this.workletNode);
-        this.safeDisconnect(this.filterStageA);
-        this.safeDisconnect(this.filterStageB);
+    private connectVoiceGraph(voice: EngineVoice): void {
+        this.safeDisconnect(voice.node);
+        this.safeDisconnect(voice.filterStageA);
+        this.safeDisconnect(voice.filterStageB);
+        this.safeDisconnect(voice.gain);
 
         if (this.filterState.mode === 'none') {
-            this.workletNode.connect(this.masterGain);
+            voice.node.connect(voice.gain);
+            voice.gain.connect(this.masterGain);
             return;
         }
 
         this.connectFilterChain(
-            this.workletNode,
-            [this.filterStageA, this.filterStageB],
-            this.masterGain,
+            voice.node,
+            [voice.filterStageA, voice.filterStageB],
+            voice.gain,
             this.filterState.order
         );
+        voice.gain.connect(this.masterGain);
         this.applyFilterStateToNodes(
             this.ctx,
-            [this.filterStageA, this.filterStageB],
+            [voice.filterStageA, voice.filterStageB],
             this.filterState,
             this.ctx.currentTime,
             0
         );
+    }
+
+    private reconnectLiveGraph(): void {
+        this.voices.forEach((voice) => this.connectVoiceGraph(voice));
     }
 
     public setMode(mode: SynthMode): void {
@@ -286,7 +326,7 @@ export class AudioEngine {
         this.currentMode = mode;
 
         if (this.isInitialized) {
-            this.createWorkletNode();
+            this.allNotesOff(0.001);
             console.log(`✓ Synth mode changed to: ${mode}`);
         }
     }
@@ -298,12 +338,13 @@ export class AudioEngine {
     public setWavetableFrequency(freq: number): void {
         this.wavetableFrequency = freq;
 
-        if (this.workletNode && this.currentMode === SynthMode.WAVETABLE) {
-            this.workletNode.port.postMessage({
+        this.voices.forEach((voice) => {
+            if (this.currentMode !== SynthMode.WAVETABLE) return;
+            voice.node.port.postMessage({
                 type: 'frequency',
                 value: freq
             });
-        }
+        });
     }
 
     public getWavetableFrequency(): number {
@@ -313,12 +354,13 @@ export class AudioEngine {
     public setCarrier(type: number): void {
         this.carrierType = type;
 
-        if (this.workletNode && this.currentMode === SynthMode.WAVETABLE) {
-            this.workletNode.port.postMessage({
+        this.voices.forEach((voice) => {
+            if (this.currentMode !== SynthMode.WAVETABLE) return;
+            voice.node.port.postMessage({
                 type: 'carrier',
                 value: type
             });
-        }
+        });
     }
 
     public getCarrier(): number {
@@ -328,12 +370,13 @@ export class AudioEngine {
     public setFeedback(amount: number): void {
         this.feedback = amount;
 
-        if (this.workletNode && this.currentMode === SynthMode.WAVETABLE) {
-            this.workletNode.port.postMessage({
+        this.voices.forEach((voice) => {
+            if (this.currentMode !== SynthMode.WAVETABLE) return;
+            voice.node.port.postMessage({
                 type: 'feedback',
                 value: amount
             });
-        }
+        });
     }
 
     public getFeedback(): number {
@@ -341,14 +384,16 @@ export class AudioEngine {
     }
 
     public updateSpectralData(data: Float32Array): void {
-        if (!this.workletNode || !this.isInitialized) return;
+        this.lastSpectralData = data.slice();
+        if (!this.isInitialized) return;
 
-        const transferData = data.slice();
-
-        this.workletNode.port.postMessage({
-            type: 'spectral-data',
-            data: transferData
-        }, [transferData.buffer]);
+        this.voices.forEach((voice) => {
+            const transferData = data.slice();
+            voice.node.port.postMessage({
+                type: 'spectral-data',
+                data: transferData
+            }, [transferData.buffer]);
+        });
     }
 
     public setOctaveDoubling(low: number, high: number, multiplier: number): void {
@@ -356,13 +401,13 @@ export class AudioEngine {
         this.octaveHigh = high;
         this.octaveMult = multiplier;
 
-        if (this.workletNode && this.isInitialized) {
-            this.workletNode.port.postMessage({
+        if (this.isInitialized) {
+            this.voices.forEach((voice) => voice.node.port.postMessage({
                 type: 'octave-doubling',
                 low: low,
                 high: high,
                 multiplier: multiplier
-            });
+            }));
         }
     }
 
@@ -378,12 +423,12 @@ export class AudioEngine {
         this.harmonicCount = count;
         this.harmonicFalloff = falloff;
 
-        if (this.workletNode && this.isInitialized) {
-            this.workletNode.port.postMessage({
+        if (this.isInitialized) {
+            this.voices.forEach((voice) => voice.node.port.postMessage({
                 type: 'harmonic-injection',
                 count: count,
                 falloff: falloff
-            });
+            }));
         }
     }
 
@@ -398,12 +443,12 @@ export class AudioEngine {
         this.spectralCopyShift = shift;
         this.spectralCopyMix = mix;
 
-        if (this.workletNode && this.isInitialized) {
-            this.workletNode.port.postMessage({
+        if (this.isInitialized) {
+            this.voices.forEach((voice) => voice.node.port.postMessage({
                 type: 'spectral-copy',
                 shift: shift,
                 mix: mix
-            });
+            }));
         }
     }
 
@@ -414,9 +459,23 @@ export class AudioEngine {
         };
     }
 
+    private sendWaveshapingToNode(node: AudioWorkletNode): void {
+        node.port.postMessage({
+            type: 'waveshape',
+            curve: this.waveshapeCurve,
+            drive: this.waveshapeDrive,
+            mix: this.waveshapeMix
+        });
+
+        if (this.waveshapeCurve === 4 && this.waveshapeCustomCurve) {
+            const lut = this.waveshapeCustomCurve.slice();
+            node.port.postMessage({ type: 'waveshape-lut', lut }, [lut.buffer]);
+        }
+    }
+
     private sendWaveshapingToWorklet(): void {
-        if (this.workletNode) {
-            this.workletNode.port.postMessage({
+        this.voices.forEach((voice) => {
+            voice.node.port.postMessage({
                 type: 'waveshape',
                 curve: this.waveshapeCurve,
                 drive: this.waveshapeDrive,
@@ -425,9 +484,9 @@ export class AudioEngine {
 
             if (this.waveshapeCurve === 4 && this.waveshapeCustomCurve) {
                 const lut = this.waveshapeCustomCurve.slice();
-                this.workletNode.port.postMessage({ type: 'waveshape-lut', lut }, [lut.buffer]);
+                voice.node.port.postMessage({ type: 'waveshape-lut', lut }, [lut.buffer]);
             }
-        }
+        });
     }
 
     public setWaveshapingState(curve: number, drive: number, mix: number): void {
@@ -450,15 +509,24 @@ export class AudioEngine {
         }
     }
 
+    private sendSaturationToNode(node: AudioWorkletNode): void {
+        node.port.postMessage({
+            type: 'saturation',
+            mode: this.saturationMode,
+            drive: this.saturationDrive,
+            mix: this.saturationMix
+        });
+    }
+
     private sendSaturationToWorklet(): void {
-        if (this.workletNode) {
-            this.workletNode.port.postMessage({
+        this.voices.forEach((voice) => {
+            voice.node.port.postMessage({
                 type: 'saturation',
                 mode: this.saturationMode,
                 drive: this.saturationDrive,
                 mix: this.saturationMix
             });
-        }
+        });
     }
 
     public setSaturationState(mode: number, drive: number, mix: number): void {
@@ -488,10 +556,21 @@ export class AudioEngine {
         this.filterState.cutoff = this.clampFilterCutoff(cutoff, this.ctx.sampleRate);
         this.filterState.resonance = this.clampFilterResonance(resonance);
         if (this.filterState.mode === 'none') return;
+        this.voices.forEach((voice) => this.setVoiceFilterParams(voice.id, cutoff, resonance, smoothingTime));
+    }
+
+    public setVoiceFilterParams(voiceId: number, cutoff: number, resonance: number, smoothingTime: number = 0.01): void {
+        const voice = this.voices.find((candidate) => candidate.id === voiceId);
+        if (!voice || this.filterState.mode === 'none') return;
+        const state = {
+            ...this.filterState,
+            cutoff: this.clampFilterCutoff(cutoff, this.ctx.sampleRate),
+            resonance: this.clampFilterResonance(resonance)
+        };
         this.applyFilterStateToNodes(
             this.ctx,
-            [this.filterStageA, this.filterStageB],
-            this.filterState,
+            [voice.filterStageA, voice.filterStageB],
+            state,
             this.ctx.currentTime,
             Math.max(0.001, smoothingTime)
         );
@@ -502,11 +581,12 @@ export class AudioEngine {
     }
 
     public setInterpSamples(samples: number): void {
-        if (this.workletNode && this.isInitialized) {
-            this.workletNode.port.postMessage({
+        this.interpSamples = samples;
+        if (this.isInitialized) {
+            this.voices.forEach((voice) => voice.node.port.postMessage({
                 type: 'interp-samples',
                 value: samples
-            });
+            }));
         }
     }
 
@@ -532,12 +612,163 @@ export class AudioEngine {
         const supported = this.currentMode === SynthMode.SPECTRAL ||
             this.currentMode === SynthMode.SPECTRAL_CHIRP ||
             this.currentMode === SynthMode.WHITENOISE_BAND_Q_FILTER;
-        if (this.workletNode && supported) {
-            this.workletNode.port.postMessage({
+        if (supported) {
+            this.voices.forEach((voice) => voice.node.port.postMessage({
                 type: 'frequency-multiplier',
                 value: multiplier
-            });
+            }));
         }
+    }
+
+    public setPolyphony(state: Partial<PolyphonyState>): void {
+        const voices = Math.max(POLYPHONY_MIN, Math.min(POLYPHONY_MAX, Math.round(state.voices ?? this.polyphonyState.voices)));
+        const unisonVoices = Math.max(
+            UNISON_VOICES_MIN,
+            Math.min(UNISON_VOICES_MAX, Math.round(state.unisonVoices ?? this.polyphonyState.unisonVoices))
+        );
+        const mode = state.mode ?? this.polyphonyState.mode;
+        this.polyphonyState = {
+            voices,
+            mode: mode === 'mono' ? 'mono' : 'poly',
+            unisonVoices,
+            unisonDetuneCents: Math.max(
+                UNISON_DETUNE_CENTS_MIN,
+                Math.min(UNISON_DETUNE_CENTS_MAX, state.unisonDetuneCents ?? this.polyphonyState.unisonDetuneCents)
+            )
+        };
+
+        this.enforceActiveNoteLimit();
+        this.enforceUnisonVoiceLimit();
+    }
+
+    public getPolyphony(): PolyphonyState {
+        return { ...this.polyphonyState };
+    }
+
+    public noteOn(note: number, velocity: number = 127): number[] {
+        if (!this.isInitialized) return [];
+        this.resume();
+
+        this.stopActiveNote(note);
+
+        if (this.polyphonyState.mode === 'mono') {
+            this.getActiveNotes()
+                .filter((activeNote) => activeNote !== note)
+                .forEach((activeNote) => this.stopActiveNote(activeNote));
+        } else if (!this.getActiveNotes().includes(note)) {
+            this.ensureFreePolyNote();
+        }
+
+        const count = this.polyphonyState.unisonVoices;
+        const ids: number[] = [];
+        for (let i = 0; i < count; i++) {
+            const detune = this.getUnisonDetune(i, count);
+            const baseFreq = 440 * Math.pow(2, (note - 69) / 12);
+            const freq = baseFreq * Math.pow(2, detune / 1200);
+            const voice = this.createVoiceNode(note, freq);
+            const gainScale = (velocity / 127) / Math.sqrt(Math.max(1, count));
+            voice.gain.gain.setValueAtTime(0, this.ctx.currentTime);
+            (voice.gain as any).voiceGainScale = gainScale;
+            this.voices.push(voice);
+            ids.push(voice.id);
+        }
+        return ids;
+    }
+
+    public noteOff(note: number): number[] {
+        const released: number[] = [];
+        this.voices.forEach((voice) => {
+            if (voice.note !== note || voice.isReleasing) return;
+            voice.isReleasing = true;
+            released.push(voice.id);
+        });
+        return released;
+    }
+
+    public setVoiceGainTarget(voiceId: number, value: number, smoothingTime: number = 0.01): void {
+        const voice = this.voices.find((candidate) => candidate.id === voiceId);
+        if (!voice) return;
+        const now = this.ctx.currentTime;
+        const scale = (voice.gain as any).voiceGainScale ?? 1;
+        const clamped = Math.max(0, Math.min(1, value)) * scale;
+        voice.gain.gain.cancelScheduledValues(now);
+        voice.gain.gain.setTargetAtTime(clamped, now, Math.max(0.001, smoothingTime));
+    }
+
+    public stopVoice(voiceId: number): void {
+        const index = this.voices.findIndex((voice) => voice.id === voiceId);
+        if (index < 0) return;
+        const [voice] = this.voices.splice(index, 1);
+        this.safeDisconnect(voice.node);
+        this.safeDisconnect(voice.filterStageA);
+        this.safeDisconnect(voice.filterStageB);
+        this.safeDisconnect(voice.gain);
+    }
+
+    public getActiveVoiceIds(): number[] {
+        return this.voices.map((voice) => voice.id);
+    }
+
+    public allNotesOff(smoothingTime: number = 0.02): void {
+        const ids = this.voices.map((voice) => voice.id);
+        ids.forEach((id) => {
+            this.setVoiceGainTarget(id, 0, smoothingTime);
+            this.stopVoice(id);
+        });
+    }
+
+    private stopActiveNote(note: number): void {
+        this.voices
+            .filter((voice) => voice.note === note && !voice.isReleasing)
+            .forEach((voice) => this.stopVoice(voice.id));
+    }
+
+    private getActiveNotes(): number[] {
+        const notes: number[] = [];
+        this.voices.forEach((voice) => {
+            if (voice.isReleasing || notes.includes(voice.note)) return;
+            notes.push(voice.note);
+        });
+        return notes;
+    }
+
+    private enforceActiveNoteLimit(): void {
+        const limit = this.polyphonyState.mode === 'mono' ? 1 : this.polyphonyState.voices;
+        while (this.getActiveNotes().length > limit) {
+            const oldest = this.voices
+                .filter((voice) => !voice.isReleasing)
+                .sort((a, b) => a.startedAt - b.startedAt)[0];
+            if (!oldest) break;
+            this.stopActiveNote(oldest.note);
+        }
+    }
+
+    private enforceUnisonVoiceLimit(): void {
+        this.getActiveNotes().forEach((note) => {
+            const noteVoices = this.voices
+                .filter((voice) => voice.note === note && !voice.isReleasing)
+                .sort((a, b) => a.startedAt - b.startedAt);
+
+            while (noteVoices.length > this.polyphonyState.unisonVoices) {
+                const voice = noteVoices.shift();
+                if (!voice) break;
+                this.stopVoice(voice.id);
+            }
+        });
+    }
+
+    private ensureFreePolyNote(): void {
+        if (this.getActiveNotes().length < this.polyphonyState.voices) return;
+        const oldest = this.voices
+            .filter((voice) => !voice.isReleasing)
+            .sort((a, b) => a.startedAt - b.startedAt)[0];
+        if (oldest) this.stopActiveNote(oldest.note);
+    }
+
+    private getUnisonDetune(index: number, count: number): number {
+        if (count <= 1) return 0;
+        const spread = this.polyphonyState.unisonDetuneCents;
+        return -spread + (spread * 2 * index) / (count - 1);
     }
 
     public resume(): void {

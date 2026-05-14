@@ -27,7 +27,8 @@ export function cloneModulatorState(state: ModulatorState): ModulatorState {
             lfo: slot.lfo ? cloneLFOState(slot.lfo) : undefined,
             envelope: slot.envelope ? cloneEnvelopeState(slot.envelope) : undefined
         })),
-        operators: [...state.operators]
+        operators: [...state.operators],
+        nameEdited: state.nameEdited
     });
 }
 
@@ -52,20 +53,49 @@ export function defaultEnvelopeState(): EnvelopeState {
 }
 
 export function createDefaultModulatorStates(count: number = 4): ModulatorState[] {
-    const states: ModulatorState[] = [];
+    const defaults: ModulatorState[] = [
+        {
+            name: 'Amp env',
+            slots: [
+                { type: 'envelope', envelope: defaultEnvelopeState() },
+                { type: 'slider', value: 1 }
+            ],
+            operators: ['*'],
+            nameEdited: false
+        },
+        {
+            name: 'Filter env',
+            slots: [
+                { type: 'envelope', envelope: { attack: 0.08, decay: 0.35, sustain: 0.35, release: 0.45 } }
+            ],
+            operators: [],
+            nameEdited: false
+        },
+        {
+            name: 'Pos Y',
+            slots: [
+                { type: 'lfo', lfo: { ...defaultLFOState(), waveform: 'sine', frequency: 0.05, amplitude: 1, offset: 0 } }
+            ],
+            operators: [],
+            nameEdited: false
+        },
+        {
+            name: 'Phase',
+            slots: [
+                { type: 'lfo', lfo: { ...defaultLFOState(), waveform: 'sine', frequency: 0.08, amplitude: 1, offset: 0 } }
+            ],
+            operators: [],
+            nameEdited: false
+        }
+    ];
 
+    const states: ModulatorState[] = [];
     for (let i = 0; i < count; i++) {
-        states.push(normalizeModulatorState({
+        states.push(normalizeModulatorState(defaults[i] || {
             name: `Mod ${i + 1}`,
-            slots: i === 0
-                ? [
-                    { type: 'envelope', envelope: defaultEnvelopeState() },
-                    { type: 'slider', value: 1 }
-                ]
-                : [
-                    { type: 'lfo', lfo: defaultLFOState() }
-                ],
-            operators: i === 0 ? ['*'] : []
+            slots: [{ type: 'lfo', lfo: defaultLFOState() }],
+            operators: [],
+            nameEdited: false
         }));
     }
 
@@ -125,7 +155,8 @@ export function normalizeModulatorState(state: ModulatorState): ModulatorState {
     return {
         name: state.name,
         slots,
-        operators
+        operators,
+        nameEdited: state.nameEdited
     };
 }
 

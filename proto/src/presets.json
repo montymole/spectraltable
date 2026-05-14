@@ -1,0 +1,2446 @@
+[
+  {
+    "name": "Wavetable - Glass Unison Tide",
+    "timestamp": 1710000001000,
+    "controls": {
+      "bpm": 68,
+      "pathY": -0.2,
+      "scanPosition": 0.1,
+      "planeType": "PLOT 2",
+      "synthMode": "Wavetable",
+      "frequency": 220,
+      "carrier": 3,
+      "feedback": 0.22,
+      "densityX": 96,
+      "densityY": 3,
+      "densityZ": 192,
+      "spectralData": "3d-julia",
+      "generatorParams": {
+        "scale": 1.1,
+        "cReal": -0.32,
+        "cImag": 0.58
+      },
+      "modulators": [
+        {
+          "name": "Amp env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.35,
+                "decay": 0.65,
+                "sustain": 0.72,
+                "release": 1.4
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.78
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.6,
+                "decay": 1.1,
+                "sustain": 0.42,
+                "release": 1.3
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Pos Y",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.018,
+                "amplitude": 0.9,
+                "offset": 0.05,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Phase",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "triangle",
+                "frequency": 0.032,
+                "amplitude": 0.55,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/2"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 4,
+        "cutoff": 9000,
+        "resonance": 1.3
+      },
+      "envelopes": [
+        {
+          "attack": 0.35,
+          "decay": 0.65,
+          "sustain": 0.72,
+          "release": 1.4
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 1,
+        "multiplier": 0.32
+      },
+      "harmonicInjection": {
+        "count": 1,
+        "falloff": 2.2
+      },
+      "spectralCopy": {
+        "shift": 7,
+        "mix": 0.16
+      },
+      "waveshape": {
+        "curve": 1,
+        "drive": 1.5,
+        "mix": 0.06
+      },
+      "saturation": {
+        "mode": 3,
+        "drive": 1.25,
+        "mix": 0.1
+      },
+      "polyphony": {
+        "voices": 5,
+        "mode": "poly",
+        "unisonVoices": 2,
+        "unisonDetuneCents": 11
+      },
+      "interpSamples": 160
+    }
+  },
+  {
+    "name": "Wavetable - Honeycomb Pluck",
+    "timestamp": 1710000014000,
+    "controls": {
+      "bpm": 130,
+      "pathY": -0.3,
+      "scanPosition": 0.15,
+      "planeType": "PLOT 2",
+      "synthMode": "Wavetable",
+      "frequency": 220,
+      "carrier": 2,
+      "feedback": 0.12,
+      "densityX": 64,
+      "densityY": 2,
+      "densityZ": 128,
+      "spectralData": "menger-sponge",
+      "generatorParams": {
+        "iterations": 4,
+        "scale": 1.0,
+        "holeSize": 0.33
+      },
+      "modulators": [
+        {
+          "name": "Pluck",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.001,
+                "decay": 0.35,
+                "sustain": 0.0,
+                "release": 0.2
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Buzz Filter",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.001,
+                "decay": 0.18,
+                "sustain": 0.05,
+                "release": 0.15
+              }
+            },
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "saw",
+                "frequency": 8,
+                "amplitude": 0.08,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": [
+            "+"
+          ]
+        },
+        {
+          "name": "Hex Morph",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "triangle",
+                "frequency": 0.06,
+                "amplitude": 0.6,
+                "offset": -0.15,
+                "isSynced": false,
+                "division": "1/2"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Scan Step",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "saw",
+                "frequency": 0.5,
+                "amplitude": 0.4,
+                "offset": 0.1,
+                "isSynced": true,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 2,
+        "cutoff": 14000,
+        "resonance": 1.2
+      },
+      "envelopes": [
+        {
+          "attack": 0.001,
+          "decay": 0.35,
+          "sustain": 0.0,
+          "release": 0.2
+        }
+      ],
+      "octave": 4,
+      "octaveDoubling": {
+        "lowCount": 0,
+        "highCount": 1,
+        "multiplier": 0.25
+      },
+      "harmonicInjection": {
+        "count": 4,
+        "falloff": 1.8
+      },
+      "spectralCopy": {
+        "shift": 12,
+        "mix": 0.1
+      },
+      "waveshape": {
+        "curve": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "saturation": {
+        "mode": 1,
+        "drive": 1.2,
+        "mix": 0.06
+      },
+      "polyphony": {
+        "voices": 8,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 3
+      },
+      "interpSamples": 48
+    }
+  },
+  {
+    "name": "Wavetable - Moth Wing Tremolo",
+    "timestamp": 1710000008000,
+    "controls": {
+      "bpm": 105,
+      "pathY": 0.12,
+      "scanPosition": -0.08,
+      "planeType": "PLOT 1",
+      "synthMode": "Wavetable",
+      "frequency": 220,
+      "carrier": 1,
+      "feedback": 0.35,
+      "densityX": 80,
+      "densityY": 4,
+      "densityZ": 160,
+      "spectralData": "3d-julia",
+      "generatorParams": {
+        "scale": 0.85,
+        "cReal": -0.55,
+        "cImag": 0.42
+      },
+      "modulators": [
+        {
+          "name": "Flicker Amp",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.02,
+                "decay": 0.15,
+                "sustain": 0.8,
+                "release": 0.7
+              }
+            },
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "triangle",
+                "frequency": 6.5,
+                "amplitude": 0.15,
+                "offset": 0.85,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Sweep+Wobble",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.15,
+                "decay": 0.6,
+                "sustain": 0.2,
+                "release": 0.5
+              }
+            },
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.8,
+                "amplitude": 0.3,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": [
+            "+"
+          ]
+        },
+        {
+          "name": "Morph Drift",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.022,
+                "amplitude": 0.95,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "none",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 4,
+        "cutoff": 8500,
+        "resonance": 1.5
+      },
+      "envelopes": [
+        {
+          "attack": 0.02,
+          "decay": 0.15,
+          "sustain": 0.8,
+          "release": 0.7
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 0,
+        "highCount": 0,
+        "multiplier": 0.5
+      },
+      "harmonicInjection": {
+        "count": 3,
+        "falloff": 1.4
+      },
+      "spectralCopy": {
+        "shift": 12,
+        "mix": 0.12
+      },
+      "waveshape": {
+        "curve": 1,
+        "drive": 1.8,
+        "mix": 0.04
+      },
+      "saturation": {
+        "mode": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "polyphony": {
+        "voices": 8,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 5
+      },
+      "interpSamples": 80
+    }
+  },
+  {
+    "name": "Wavetable - Supersaw Cathedral",
+    "timestamp": 1710000009000,
+    "controls": {
+      "bpm": 138,
+      "pathY": 0,
+      "scanPosition": 0,
+      "planeType": "PLANE",
+      "synthMode": "Wavetable",
+      "frequency": 220,
+      "carrier": 1,
+      "feedback": 0.05,
+      "densityX": 64,
+      "densityY": 2,
+      "densityZ": 128,
+      "spectralData": "sine-plasma",
+      "generatorParams": {
+        "frequency": 4,
+        "complexity": 5,
+        "contrast": 2.2
+      },
+      "modulators": [
+        {
+          "name": "Swell",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.8,
+                "decay": 0.3,
+                "sustain": 0.9,
+                "release": 2.5
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.85
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter Open",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 1.2,
+                "decay": 0.8,
+                "sustain": 0.6,
+                "release": 2.0
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "none",
+        "scanPhase": "none",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 4,
+        "cutoff": 6000,
+        "resonance": 0.5
+      },
+      "envelopes": [
+        {
+          "attack": 0.8,
+          "decay": 0.3,
+          "sustain": 0.9,
+          "release": 2.5
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 1,
+        "multiplier": 0.4
+      },
+      "harmonicInjection": {
+        "count": 0,
+        "falloff": 1
+      },
+      "spectralCopy": {
+        "shift": 7,
+        "mix": 0.22
+      },
+      "waveshape": {
+        "curve": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "saturation": {
+        "mode": 1,
+        "drive": 1.6,
+        "mix": 0.12
+      },
+      "polyphony": {
+        "voices": 4,
+        "mode": "mono",
+        "unisonVoices": 4,
+        "unisonDetuneCents": 18
+      },
+      "interpSamples": 96
+    }
+  },
+  {
+    "name": "Wavetable - Verdant Amp Drift",
+    "timestamp": 1710000000000,
+    "controls": {
+      "bpm": 92,
+      "pathY": 0,
+      "scanPosition": 0,
+      "planeType": "PLANE",
+      "synthMode": "Wavetable",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0.08,
+      "densityX": 64,
+      "densityY": 2,
+      "densityZ": 128,
+      "spectralData": "sine-plasma",
+      "generatorParams": {
+        "frequency": 3,
+        "complexity": 4,
+        "contrast": 2
+      },
+      "modulators": [
+        {
+          "name": "Amp env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.04,
+                "decay": 0.28,
+                "sustain": 0.68,
+                "release": 0.55
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.92
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.09,
+                "decay": 0.42,
+                "sustain": 0.28,
+                "release": 0.5
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Pos Y",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.045,
+                "amplitude": 0.75,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Phase",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.075,
+                "amplitude": 0.65,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 2,
+        "cutoff": 12000,
+        "resonance": 0.9
+      },
+      "envelopes": [
+        {
+          "attack": 0.04,
+          "decay": 0.28,
+          "sustain": 0.68,
+          "release": 0.55
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 0,
+        "highCount": 1,
+        "multiplier": 0.28
+      },
+      "harmonicInjection": {
+        "count": 2,
+        "falloff": 1.7
+      },
+      "spectralCopy": {
+        "shift": 12,
+        "mix": 0.08
+      },
+      "waveshape": {
+        "curve": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "saturation": {
+        "mode": 1,
+        "drive": 1.35,
+        "mix": 0.08
+      },
+      "polyphony": {
+        "voices": 6,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 8
+      },
+      "interpSamples": 96
+    }
+  },
+  {
+    "name": "iFFT Spectral - Acid Fractal Stab",
+    "timestamp": 1710000011000,
+    "controls": {
+      "bpm": 145,
+      "pathY": 0.3,
+      "scanPosition": 0.5,
+      "planeType": "PLOT 3",
+      "synthMode": "iFFT Spectral",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 128,
+      "densityY": 2,
+      "densityZ": 128,
+      "spectralData": "3d-julia",
+      "generatorParams": {
+        "scale": 1.3,
+        "cReal": -0.7,
+        "cImag": 0.27
+      },
+      "modulators": [
+        {
+          "name": "Snap",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.001,
+                "decay": 0.08,
+                "sustain": 0.0,
+                "release": 0.1
+              }
+            },
+            {
+              "type": "slider",
+              "value": 1.0
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Acid Sweep",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.001,
+                "decay": 0.22,
+                "sustain": 0.0,
+                "release": 0.15
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Reso Pulse",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.001,
+                "decay": 0.12,
+                "sustain": 0.0,
+                "release": 0.08
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.3
+            }
+          ],
+          "operators": [
+            "+"
+          ]
+        }
+      ],
+      "modRouting": {
+        "pathY": "none",
+        "scanPhase": "none",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "mod3"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 4,
+        "cutoff": 800,
+        "resonance": 6.0
+      },
+      "envelopes": [
+        {
+          "attack": 0.001,
+          "decay": 0.08,
+          "sustain": 0.0,
+          "release": 0.1
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 0,
+        "multiplier": 0.5
+      },
+      "harmonicInjection": {
+        "count": 8,
+        "falloff": 1.2
+      },
+      "spectralCopy": {
+        "shift": -12,
+        "mix": 0.3
+      },
+      "waveshape": {
+        "curve": 2,
+        "drive": 3.5,
+        "mix": 0.2
+      },
+      "saturation": {
+        "mode": 2,
+        "drive": 2.8,
+        "mix": 0.22
+      },
+      "polyphony": {
+        "voices": 4,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 3
+      },
+      "interpSamples": 32
+    }
+  },
+  {
+    "name": "iFFT Spectral - Aurora Bin Choir",
+    "timestamp": 1710000002000,
+    "controls": {
+      "bpm": 110,
+      "pathY": 0.15,
+      "scanPosition": -0.15,
+      "planeType": "Tube",
+      "synthMode": "iFFT Spectral",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 128,
+      "densityY": 2,
+      "densityZ": 256,
+      "spectralData": "mandelbulb",
+      "generatorParams": {
+        "power": 8,
+        "scale": 1.1,
+        "iterations": 12
+      },
+      "modulators": [
+        {
+          "name": "Amp env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.18,
+                "decay": 0.5,
+                "sustain": 0.64,
+                "release": 1.05
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.72
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.22,
+                "decay": 0.8,
+                "sustain": 0.45,
+                "release": 0.85
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Pos Y",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.03,
+                "amplitude": 0.85,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/2"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Scan Halo",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.055,
+                "amplitude": 0.75,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 2,
+        "cutoff": 15000,
+        "resonance": 0.7
+      },
+      "envelopes": [
+        {
+          "attack": 0.18,
+          "decay": 0.5,
+          "sustain": 0.64,
+          "release": 1.05
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 0,
+        "multiplier": 0.22
+      },
+      "harmonicInjection": {
+        "count": 4,
+        "falloff": 2.4
+      },
+      "spectralCopy": {
+        "shift": 12,
+        "mix": 0.2
+      },
+      "waveshape": {
+        "curve": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "saturation": {
+        "mode": 2,
+        "drive": 1.12,
+        "mix": 0.05
+      },
+      "polyphony": {
+        "voices": 6,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 6
+      },
+      "interpSamples": 128
+    }
+  },
+  {
+    "name": "iFFT Spectral - Copper Phase Rain",
+    "timestamp": 1710000003000,
+    "controls": {
+      "bpm": 126,
+      "pathY": -0.05,
+      "scanPosition": 0.4,
+      "planeType": "Spiral",
+      "synthMode": "iFFT Spectral",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 192,
+      "densityY": 4,
+      "densityZ": 256,
+      "spectralData": "sine-plasma",
+      "generatorParams": {
+        "frequency": 5,
+        "complexity": 5,
+        "contrast": 2.5
+      },
+      "modulators": [
+        {
+          "name": "Amp env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.01,
+                "decay": 0.18,
+                "sustain": 0.35,
+                "release": 0.45
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.62
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.015,
+                "decay": 0.28,
+                "sustain": 0.12,
+                "release": 0.32
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Pos Y",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "saw",
+                "frequency": 0.12,
+                "amplitude": 0.5,
+                "offset": -0.05,
+                "isSynced": false,
+                "division": "1/8"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Phase",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "square",
+                "frequency": 0.25,
+                "amplitude": 0.35,
+                "offset": 0.1,
+                "isSynced": true,
+                "division": "1/8"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "bandpass",
+        "order": 2,
+        "cutoff": 6400,
+        "resonance": 2.1
+      },
+      "envelopes": [
+        {
+          "attack": 0.01,
+          "decay": 0.18,
+          "sustain": 0.35,
+          "release": 0.45
+        }
+      ],
+      "octave": 4,
+      "octaveDoubling": {
+        "lowCount": 0,
+        "highCount": 2,
+        "multiplier": 0.18
+      },
+      "harmonicInjection": {
+        "count": 6,
+        "falloff": 2.8
+      },
+      "spectralCopy": {
+        "shift": -12,
+        "mix": 0.18
+      },
+      "waveshape": {
+        "curve": 3,
+        "drive": 1.8,
+        "mix": 0.08
+      },
+      "saturation": {
+        "mode": 1,
+        "drive": 1.4,
+        "mix": 0.12
+      },
+      "polyphony": {
+        "voices": 4,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 5
+      },
+      "interpSamples": 48
+    }
+  },
+  {
+    "name": "iFFT Spectral - Frozen Nebula Pad",
+    "timestamp": 1710000010000,
+    "controls": {
+      "bpm": 60,
+      "pathY": 0,
+      "scanPosition": 0,
+      "planeType": "Bell",
+      "synthMode": "iFFT Spectral",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 256,
+      "densityY": 2,
+      "densityZ": 512,
+      "spectralData": "mandelbulb",
+      "generatorParams": {
+        "power": 6,
+        "scale": 1.4,
+        "iterations": 16
+      },
+      "modulators": [
+        {
+          "name": "Glacier Amp",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 2.5,
+                "decay": 1.0,
+                "sustain": 0.85,
+                "release": 4.0
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.7
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Ice Filter",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 3.0,
+                "decay": 2.0,
+                "sustain": 0.55,
+                "release": 3.5
+              }
+            },
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.08,
+                "amplitude": 0.2,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": [
+            "+"
+          ]
+        },
+        {
+          "name": "Morph Glacier",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.008,
+                "amplitude": 0.95,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Shape Breath",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.015,
+                "amplitude": 0.6,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "none",
+        "shapePhase": "mod4",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 2,
+        "cutoff": 18000,
+        "resonance": 0.5
+      },
+      "envelopes": [
+        {
+          "attack": 2.5,
+          "decay": 1.0,
+          "sustain": 0.85,
+          "release": 4.0
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 1,
+        "multiplier": 0.3
+      },
+      "harmonicInjection": {
+        "count": 2,
+        "falloff": 2.5
+      },
+      "spectralCopy": {
+        "shift": 12,
+        "mix": 0.15
+      },
+      "waveshape": {
+        "curve": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "saturation": {
+        "mode": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "polyphony": {
+        "voices": 6,
+        "mode": "poly",
+        "unisonVoices": 2,
+        "unisonDetuneCents": 6
+      },
+      "interpSamples": 256
+    }
+  },
+  {
+    "name": "Chirp ICZT - Midnight Clockwork",
+    "timestamp": 1710000012000,
+    "controls": {
+      "bpm": 120,
+      "pathY": -0.15,
+      "scanPosition": 0.3,
+      "planeType": "Spring",
+      "synthMode": "Chirp ICZT",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 96,
+      "densityY": 3,
+      "densityZ": 192,
+      "spectralData": "menger-sponge",
+      "generatorParams": {
+        "iterations": 5,
+        "scale": 0.9,
+        "holeSize": 0.28
+      },
+      "modulators": [
+        {
+          "name": "Clock Amp",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.005,
+                "decay": 0.25,
+                "sustain": 0.45,
+                "release": 0.5
+              }
+            },
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "square",
+                "frequency": 4,
+                "amplitude": 0.12,
+                "offset": 0.88,
+                "isSynced": true,
+                "division": "1/16"
+              }
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Gear Sweep",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.02,
+                "decay": 0.4,
+                "sustain": 0.15,
+                "release": 0.35
+              }
+            },
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "saw",
+                "frequency": 0.5,
+                "amplitude": 0.25,
+                "offset": 0,
+                "isSynced": true,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": [
+            "+"
+          ]
+        },
+        {
+          "name": "Pendulum",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.5,
+                "amplitude": 0.7,
+                "offset": 0,
+                "isSynced": true,
+                "division": "1/2"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Tick Phase",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "square",
+                "frequency": 1,
+                "amplitude": 0.55,
+                "offset": 0,
+                "isSynced": true,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "bandpass",
+        "order": 4,
+        "cutoff": 4800,
+        "resonance": 2.5
+      },
+      "envelopes": [
+        {
+          "attack": 0.005,
+          "decay": 0.25,
+          "sustain": 0.45,
+          "release": 0.5
+        }
+      ],
+      "octave": 4,
+      "octaveDoubling": {
+        "lowCount": 0,
+        "highCount": 1,
+        "multiplier": 0.22
+      },
+      "harmonicInjection": {
+        "count": 5,
+        "falloff": 2.0
+      },
+      "spectralCopy": {
+        "shift": 7,
+        "mix": 0.18
+      },
+      "waveshape": {
+        "curve": 3,
+        "drive": 2.0,
+        "mix": 0.1
+      },
+      "saturation": {
+        "mode": 1,
+        "drive": 1.5,
+        "mix": 0.08
+      },
+      "polyphony": {
+        "voices": 6,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 4
+      },
+      "interpSamples": 64
+    }
+  },
+  {
+    "name": "Chirp ICZT - Monolith Unison Lead",
+    "timestamp": 1710000015000,
+    "controls": {
+      "bpm": 128,
+      "pathY": 0.08,
+      "scanPosition": -0.2,
+      "planeType": "Spiral",
+      "synthMode": "Chirp ICZT",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 128,
+      "densityY": 2,
+      "densityZ": 192,
+      "spectralData": "mandelbulb",
+      "generatorParams": {
+        "power": 10,
+        "scale": 1.0,
+        "iterations": 10
+      },
+      "modulators": [
+        {
+          "name": "Attack Bite",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.01,
+                "decay": 0.1,
+                "sustain": 0.75,
+                "release": 0.35
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.9
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Growl",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.02,
+                "decay": 0.3,
+                "sustain": 0.3,
+                "release": 0.25
+              }
+            },
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 5.5,
+                "amplitude": 0.2,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": [
+            "+"
+          ]
+        },
+        {
+          "name": "Vibrato",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 5.0,
+                "amplitude": 0.08,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Slow Shape",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.035,
+                "amplitude": 0.7,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "none",
+        "scanPhase": "mod3",
+        "shapePhase": "mod4",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 4,
+        "cutoff": 5500,
+        "resonance": 2.0
+      },
+      "envelopes": [
+        {
+          "attack": 0.01,
+          "decay": 0.1,
+          "sustain": 0.75,
+          "release": 0.35
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 1,
+        "multiplier": 0.45
+      },
+      "harmonicInjection": {
+        "count": 6,
+        "falloff": 1.5
+      },
+      "spectralCopy": {
+        "shift": -5,
+        "mix": 0.2
+      },
+      "waveshape": {
+        "curve": 1,
+        "drive": 2.2,
+        "mix": 0.14
+      },
+      "saturation": {
+        "mode": 2,
+        "drive": 2.0,
+        "mix": 0.16
+      },
+      "polyphony": {
+        "voices": 1,
+        "mode": "mono",
+        "unisonVoices": 3,
+        "unisonDetuneCents": 15
+      },
+      "interpSamples": 80
+    }
+  },
+  {
+    "name": "Chirp ICZT - Quartz Spring Swarm",
+    "timestamp": 1710000005000,
+    "controls": {
+      "bpm": 140,
+      "pathY": 0,
+      "scanPosition": 0,
+      "planeType": "Bell",
+      "synthMode": "Chirp ICZT",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 96,
+      "densityY": 2,
+      "densityZ": 128,
+      "spectralData": "game-of-life",
+      "generatorParams": {
+        "density": 0.28,
+        "birthMin": 5,
+        "surviveMin": 4
+      },
+      "modulators": [
+        {
+          "name": "Amp env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.005,
+                "decay": 0.12,
+                "sustain": 0.18,
+                "release": 0.24
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.58
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.01,
+                "decay": 0.16,
+                "sustain": 0.08,
+                "release": 0.22
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Pos Y",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "square",
+                "frequency": 0.5,
+                "amplitude": 0.4,
+                "offset": 0,
+                "isSynced": true,
+                "division": "1/16"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Phase",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "saw",
+                "frequency": 0.7,
+                "amplitude": 0.5,
+                "offset": 0,
+                "isSynced": true,
+                "division": "1/8T"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "highpass",
+        "order": 2,
+        "cutoff": 2400,
+        "resonance": 1.5
+      },
+      "envelopes": [
+        {
+          "attack": 0.005,
+          "decay": 0.12,
+          "sustain": 0.18,
+          "release": 0.24
+        }
+      ],
+      "octave": 4,
+      "octaveDoubling": {
+        "lowCount": 0,
+        "highCount": 2,
+        "multiplier": 0.16
+      },
+      "harmonicInjection": {
+        "count": 8,
+        "falloff": 3.2
+      },
+      "spectralCopy": {
+        "shift": 19,
+        "mix": 0.28
+      },
+      "waveshape": {
+        "curve": 2,
+        "drive": 2.2,
+        "mix": 0.1
+      },
+      "saturation": {
+        "mode": 2,
+        "drive": 1.7,
+        "mix": 0.13
+      },
+      "polyphony": {
+        "voices": 3,
+        "mode": "poly",
+        "unisonVoices": 2,
+        "unisonDetuneCents": 9
+      },
+      "interpSamples": 32
+    }
+  },
+  {
+    "name": "Chirp ICZT - Spiral Comet Organ",
+    "timestamp": 1710000004000,
+    "controls": {
+      "bpm": 84,
+      "pathY": 0.25,
+      "scanPosition": -0.35,
+      "planeType": "Spring",
+      "synthMode": "Chirp ICZT",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 128,
+      "densityY": 3,
+      "densityZ": 192,
+      "spectralData": "menger-sponge",
+      "generatorParams": {
+        "iterations": 4,
+        "scale": 1,
+        "holeSize": 0.33
+      },
+      "modulators": [
+        {
+          "name": "Amp env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.08,
+                "decay": 0.38,
+                "sustain": 0.7,
+                "release": 0.9
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.7
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.12,
+                "decay": 0.65,
+                "sustain": 0.35,
+                "release": 0.8
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Pos Y",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.04,
+                "amplitude": 0.8,
+                "offset": 0.1,
+                "isSynced": false,
+                "division": "1/2"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Phase",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "triangle",
+                "frequency": 0.09,
+                "amplitude": 0.7,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 4,
+        "cutoff": 11000,
+        "resonance": 1.1
+      },
+      "envelopes": [
+        {
+          "attack": 0.08,
+          "decay": 0.38,
+          "sustain": 0.7,
+          "release": 0.9
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 1,
+        "multiplier": 0.24
+      },
+      "harmonicInjection": {
+        "count": 3,
+        "falloff": 1.9
+      },
+      "spectralCopy": {
+        "shift": 5,
+        "mix": 0.24
+      },
+      "waveshape": {
+        "curve": 1,
+        "drive": 1.35,
+        "mix": 0.05
+      },
+      "saturation": {
+        "mode": 3,
+        "drive": 1.18,
+        "mix": 0.07
+      },
+      "polyphony": {
+        "voices": 5,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 7
+      },
+      "interpSamples": 112
+    }
+  },
+  {
+    "name": "Noise Band Filter - Misty Harbour Drone",
+    "timestamp": 1710000013000,
+    "controls": {
+      "bpm": 55,
+      "pathY": 0,
+      "scanPosition": 0,
+      "planeType": "Tube",
+      "synthMode": "Noise band filter",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 192,
+      "densityY": 2,
+      "densityZ": 384,
+      "spectralData": "sine-plasma",
+      "generatorParams": {
+        "frequency": 1.5,
+        "complexity": 2,
+        "contrast": 1.2
+      },
+      "modulators": [
+        {
+          "name": "Fog Gate",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 4.0,
+                "decay": 2.0,
+                "sustain": 0.95,
+                "release": 6.0
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Tide",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.012,
+                "amplitude": 0.85,
+                "offset": 0.5,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            },
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 5.0,
+                "decay": 3.0,
+                "sustain": 0.4,
+                "release": 5.0
+              }
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Morph Sea",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.005,
+                "amplitude": 1.0,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Shape Waves",
+          "nameEdited": true,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "triangle",
+                "frequency": 0.01,
+                "amplitude": 0.8,
+                "offset": 0,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "none",
+        "shapePhase": "mod4",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "bandpass",
+        "order": 4,
+        "cutoff": 3200,
+        "resonance": 3.5
+      },
+      "envelopes": [
+        {
+          "attack": 4.0,
+          "decay": 2.0,
+          "sustain": 0.95,
+          "release": 6.0
+        }
+      ],
+      "octave": 2,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 1,
+        "multiplier": 0.35
+      },
+      "harmonicInjection": {
+        "count": 0,
+        "falloff": 1
+      },
+      "spectralCopy": {
+        "shift": 12,
+        "mix": 0.0
+      },
+      "waveshape": {
+        "curve": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "saturation": {
+        "mode": 3,
+        "drive": 1.3,
+        "mix": 0.15
+      },
+      "polyphony": {
+        "voices": 3,
+        "mode": "poly",
+        "unisonVoices": 2,
+        "unisonDetuneCents": 12
+      },
+      "interpSamples": 192
+    }
+  },
+  {
+    "name": "Noise Band Filter - Static Lantern Bass",
+    "timestamp": 1710000007000,
+    "controls": {
+      "bpm": 118,
+      "pathY": 0.35,
+      "scanPosition": -0.25,
+      "planeType": "PLOT 3",
+      "synthMode": "Noise band filter",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 96,
+      "densityY": 2,
+      "densityZ": 128,
+      "spectralData": "menger-sponge",
+      "generatorParams": {
+        "iterations": 3,
+        "scale": 1.15,
+        "holeSize": 0.42
+      },
+      "modulators": [
+        {
+          "name": "Amp env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.015,
+                "decay": 0.34,
+                "sustain": 0.42,
+                "release": 0.38
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.75
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.02,
+                "decay": 0.5,
+                "sustain": 0.18,
+                "release": 0.45
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Pos Y",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "triangle",
+                "frequency": 0.11,
+                "amplitude": 0.5,
+                "offset": 0.2,
+                "isSynced": true,
+                "division": "1/4"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Phase",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "saw",
+                "frequency": 0.22,
+                "amplitude": 0.4,
+                "offset": -0.1,
+                "isSynced": true,
+                "division": "1/8"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "lowpass",
+        "order": 2,
+        "cutoff": 3800,
+        "resonance": 2.8
+      },
+      "envelopes": [
+        {
+          "attack": 0.015,
+          "decay": 0.34,
+          "sustain": 0.42,
+          "release": 0.38
+        }
+      ],
+      "octave": 2,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 0,
+        "multiplier": 0.35
+      },
+      "harmonicInjection": {
+        "count": 0,
+        "falloff": 1
+      },
+      "spectralCopy": {
+        "shift": -12,
+        "mix": 0.06
+      },
+      "waveshape": {
+        "curve": 1,
+        "drive": 2.6,
+        "mix": 0.16
+      },
+      "saturation": {
+        "mode": 2,
+        "drive": 2.1,
+        "mix": 0.18
+      },
+      "polyphony": {
+        "voices": 2,
+        "mode": "mono",
+        "unisonVoices": 2,
+        "unisonDetuneCents": 7
+      },
+      "interpSamples": 64
+    }
+  },
+  {
+    "name": "Noise Band Filter - Velvet Weather Keys",
+    "timestamp": 1710000006000,
+    "controls": {
+      "bpm": 76,
+      "pathY": -0.1,
+      "scanPosition": 0.2,
+      "planeType": "PLOT 1",
+      "synthMode": "Noise band filter",
+      "frequency": 220,
+      "carrier": 0,
+      "feedback": 0,
+      "densityX": 128,
+      "densityY": 3,
+      "densityZ": 256,
+      "spectralData": "sine-plasma",
+      "generatorParams": {
+        "frequency": 2,
+        "complexity": 3,
+        "contrast": 1.6
+      },
+      "modulators": [
+        {
+          "name": "Amp env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.25,
+                "decay": 0.9,
+                "sustain": 0.5,
+                "release": 1.2
+              }
+            },
+            {
+              "type": "slider",
+              "value": 0.65
+            }
+          ],
+          "operators": [
+            "*"
+          ]
+        },
+        {
+          "name": "Filter env",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "envelope",
+              "envelope": {
+                "attack": 0.35,
+                "decay": 1.2,
+                "sustain": 0.25,
+                "release": 1.1
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Pos Y",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.025,
+                "amplitude": 0.9,
+                "offset": -0.05,
+                "isSynced": false,
+                "division": "1/1"
+              }
+            }
+          ],
+          "operators": []
+        },
+        {
+          "name": "Phase",
+          "nameEdited": false,
+          "slots": [
+            {
+              "type": "lfo",
+              "lfo": {
+                "waveform": "sine",
+                "frequency": 0.04,
+                "amplitude": 0.6,
+                "offset": 0.15,
+                "isSynced": false,
+                "division": "1/2"
+              }
+            }
+          ],
+          "operators": []
+        }
+      ],
+      "modRouting": {
+        "pathY": "mod3",
+        "scanPhase": "mod4",
+        "shapePhase": "none",
+        "amplitude": "mod1",
+        "filterCutoff": "mod2",
+        "filterResonance": "none"
+      },
+      "filter": {
+        "mode": "bandpass",
+        "order": 4,
+        "cutoff": 5200,
+        "resonance": 1.8
+      },
+      "envelopes": [
+        {
+          "attack": 0.25,
+          "decay": 0.9,
+          "sustain": 0.5,
+          "release": 1.2
+        }
+      ],
+      "octave": 3,
+      "octaveDoubling": {
+        "lowCount": 1,
+        "highCount": 0,
+        "multiplier": 0.2
+      },
+      "harmonicInjection": {
+        "count": 0,
+        "falloff": 1
+      },
+      "spectralCopy": {
+        "shift": 12,
+        "mix": 0
+      },
+      "waveshape": {
+        "curve": 0,
+        "drive": 1,
+        "mix": 0
+      },
+      "saturation": {
+        "mode": 1,
+        "drive": 1.2,
+        "mix": 0.08
+      },
+      "polyphony": {
+        "voices": 6,
+        "mode": "poly",
+        "unisonVoices": 1,
+        "unisonDetuneCents": 6
+      },
+      "interpSamples": 144
+    }
+  }
+]

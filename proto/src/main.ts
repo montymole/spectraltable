@@ -8,14 +8,30 @@ import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
 import { MidiHandler } from './audio/midi-handler';
 import { PianoKeyboard } from './ui/piano';
+import bundledPresetsJson from './presets.json';
 import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType,
     VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, PresetControls, OctaveDoublingState,
-    FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX
+    FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
+    PolyphonyState, defaultPolyphonyState, POLYPHONY_MIN, POLYPHONY_MAX,
+    UNISON_DETUNE_CENTS_MIN, UNISON_DETUNE_CENTS_MAX, UNISON_VOICES_MIN, UNISON_VOICES_MAX
 } from './types';
 import { createDefaultModulatorStates, estimateModulatorRange, Modulator, resolveModulatorStates } from './modulators/modulator';
 import { noteToName } from './ui/ui-elements';
+import type { PresetData } from './types';
+
+const BUNDLED_PRESETS = bundledPresetsJson as PresetData[];
+
+interface VoiceRuntime {
+    id: number;
+    note: number;
+    modulators: Modulator[];
+    isReleasing: boolean;
+    releaseElapsed: number;
+    releaseDuration: number;
+    lastOutputs: number[];
+}
 
 // Main application entry point
 // Initializes WebGL, UI, and wires up event handling
@@ -31,7 +47,7 @@ class SpectralTableApp {
     private midiHandler: MidiHandler;
     private piano: PianoKeyboard;
     private canvas: HTMLCanvasElement;
-    private currentNote: number | null = null;
+    private activeVoices: Map<number, VoiceRuntime> = new Map();
     private animationFrameId: number = 0;
     private lastAudioSpectralRevision = -1;
 
@@ -49,13 +65,14 @@ class SpectralTableApp {
 
     // Modulation Logic
     private modulators: Modulator[];
-    private pathYSource: string = 'none';
-    private scanPhaseSource: string = 'none';
+    private pathYSource: string = 'mod3';
+    private scanPhaseSource: string = 'mod4';
     private shapePhaseSource: string = 'none';
     private amplitudeSource: string = 'mod1';
-    private filterCutoffSource: string = 'none';
+    private filterCutoffSource: string = 'mod2';
     private filterResonanceSource: string = 'none';
     private filterState: FilterState = { ...defaultFilterState };
+    private polyphonyState: PolyphonyState = { ...defaultPolyphonyState };
     private currentBpm = 140;
 
     constructor() {
@@ -79,6 +96,7 @@ class SpectralTableApp {
         // Initialize UI controls
         this.controls = new ControlPanel('controls', {
             modulators: this.modulators.map((modulator) => modulator.getState()),
+            bundledPresets: BUNDLED_PRESETS
         });
 
         // Create Spectrogram and Scope
@@ -93,7 +111,10 @@ class SpectralTableApp {
 
         // Initialize MIDI Handler
         this.midiHandler = new MidiHandler();
-        this.midiHandler.setNoteChangeCallback(this.onMidiNote.bind(this));
+        this.midiHandler.setNoteEventCallback((note, velocity, isNoteOn) => {
+            if (isNoteOn) this.onMidiNoteOn(note, velocity);
+            else this.onMidiNoteOff(note);
+        });
         this.midiHandler.setConnectionChangeCallback((isConnected) => {
             if (isConnected) console.log('✓ MIDI Device Connected');
             this.controls.updateMidiInputs(this.midiHandler.getInputs());
@@ -135,6 +156,7 @@ class SpectralTableApp {
         this.controls.setVolumeResolutionChangeCallback(this.onVolumeResolutionChange.bind(this));
         this.controls.setSpectralDataChangeCallback(this.onSpectralDataChange.bind(this));
         this.controls.setWavUploadCallback(this.onWavUpload.bind(this));
+        this.controls.setImageUploadCallback(this.onImageUpload.bind(this));
         this.controls.setSynthModeChangeCallback(this.onSynthModeChange.bind(this));
         this.controls.setCarrierChangeCallback(this.onCarrierChange.bind(this));
         this.controls.setFeedbackChangeCallback(this.onFeedbackChange.bind(this));
@@ -155,6 +177,11 @@ class SpectralTableApp {
             this.filterState = { ...state };
             this.audioEngine.setFilterState(state);
         });
+        this.controls.setPolyphonyChangeCallback((state) => {
+            this.polyphonyState = { ...state };
+            this.audioEngine.setPolyphony(state);
+            this.trimVoiceRuntimes();
+        });
         this.controls.setInterpSamplesChangeCallback((samples: number) => this.audioEngine.setInterpSamples(samples));
         this.controls.setGeneratorParamsChangeCallback(this.onGeneratorParamsChange.bind(this));
         this.controls.setPresetLoadCallback(this.onPresetLoad.bind(this));
@@ -162,12 +189,19 @@ class SpectralTableApp {
         this.controls.setBPMCallback((bpm) => {
             this.currentBpm = bpm;
             this.modulators.forEach(modulator => modulator.setBPM(bpm));
+            this.activeVoices.forEach((voice) => voice.modulators.forEach((modulator) => modulator.setBPM(bpm)));
         });
         this.controls.setModulatorChangeCallback((index, state) => {
             const modulator = this.modulators[index];
             if (!modulator) return;
             modulator.setState(state);
             modulator.setBPM(this.controls.getFullState().bpm);
+            this.activeVoices.forEach((voice) => {
+                const voiceModulator = voice.modulators[index];
+                if (!voiceModulator) return;
+                voiceModulator.setState(state);
+                voiceModulator.setBPM(this.currentBpm);
+            });
         });
 
         this.controls.setModulationRoutingChangeCallback((target: string, source: string) => {
@@ -223,19 +257,17 @@ class SpectralTableApp {
 
         // Start render loop
         this.startRenderLoop();
-
-        // Try to restore saved state
-        this.restoreSavedState();
+        void this.applyInitialPreset();
 
         console.log('✓ Application initialized');
     }
 
-    private restoreSavedState(): void {
-        const savedState = this.controls.loadSavedState();
-        if (savedState) {
-            console.log('Restoring saved state...');
-            this.applyPresetState(savedState);
-        }
+    private async applyInitialPreset(): Promise<void> {
+        const initialPreset = await this.controls.getInitialPreset();
+        if (!initialPreset) return;
+        console.log(`Loading initial preset: ${initialPreset.name}`);
+        this.applyPresetState(initialPreset.controls);
+        this.controls.selectPreset(initialPreset.name);
     }
 
     private onPresetLoad(controls: PresetControls): void {
@@ -279,7 +311,9 @@ class SpectralTableApp {
         this.audioEngine.setSaturation(state.saturation);
         this.filterState = state.filter ? { ...state.filter } : { ...defaultFilterState };
         this.audioEngine.setFilterState(this.filterState);
-        this.audioEngine.setMasterGainTarget(0, 0.001);
+        this.polyphonyState = this.normalizePolyphonyState(state.polyphony);
+        this.audioEngine.setPolyphony(this.polyphonyState);
+        this.clearVoiceRuntimes();
 
         // Apply piano octave
         this.piano.setBaseOctave(state.octave);
@@ -510,48 +544,79 @@ class SpectralTableApp {
         return changed;
     }
 
-    private getAmplitudeValue(outputs: number[], noteActive: boolean = this.currentNote !== null): number {
+    private getAmplitudeValue(outputs: number[], noteActive: boolean = this.activeVoices.size > 0): number {
         if (this.amplitudeSource === 'none') {
             return noteActive ? 1 : 0;
         }
         return Math.max(0, Math.min(1, this.getModulatorValue(this.amplitudeSource, outputs)));
     }
 
-    private onMidiNote(note: number | null): void {
-        // Handle Note Off / All Keys Up
-        if (note === null) {
-            this.currentNote = null;
-            this.modulators.forEach((modulator) => modulator.noteOff());
-            return;
-        }
+    private normalizePolyphonyState(state?: Partial<PolyphonyState>): PolyphonyState {
+        if (!state) return { ...defaultPolyphonyState };
+        const rawMode = (state as any).mode;
+        const voices = Math.round(state.voices ?? defaultPolyphonyState.voices);
+        const unisonVoices = Math.round((state as any).unisonVoices ?? (rawMode === 'unison' ? voices : defaultPolyphonyState.unisonVoices));
+        return {
+            voices: Math.max(POLYPHONY_MIN, Math.min(POLYPHONY_MAX, voices)),
+            mode: rawMode === 'mono' || rawMode === 'unison' ? 'mono' : 'poly',
+            unisonVoices: Math.max(UNISON_VOICES_MIN, Math.min(UNISON_VOICES_MAX, unisonVoices)),
+            unisonDetuneCents: Math.max(
+                UNISON_DETUNE_CENTS_MIN,
+                Math.min(UNISON_DETUNE_CENTS_MAX, state.unisonDetuneCents ?? defaultPolyphonyState.unisonDetuneCents)
+            )
+        };
+    }
 
-        // Avoid re-triggering if the highest note hasn't changed (e.g. releasing a lower key)
-        if (note === this.currentNote) {
-            return;
-        }
+    private onMidiNoteOn(note: number, velocity: number): void {
+        const voiceIds = this.audioEngine.noteOn(note, velocity);
+        voiceIds.forEach((id) => {
+            const modulators = this.modulators.map((modulator) => {
+                const clone = modulator.clone();
+                clone.setBPM(this.currentBpm);
+                clone.noteOn();
+                return clone;
+            });
+            const releaseDuration = this.getVoiceReleaseDuration(modulators);
+            this.activeVoices.set(id, {
+                id,
+                note,
+                modulators,
+                isReleasing: false,
+                releaseElapsed: 0,
+                releaseDuration,
+                lastOutputs: new Array(modulators.length).fill(0)
+            });
+        });
+        this.trimVoiceRuntimes();
+    }
 
-        this.currentNote = note;
+    private onMidiNoteOff(note: number): void {
+        const releasedIds = this.audioEngine.noteOff(note);
+        releasedIds.forEach((id) => {
+            const voice = this.activeVoices.get(id);
+            if (!voice) return;
+            voice.isReleasing = true;
+            voice.releaseElapsed = 0;
+            voice.modulators.forEach((modulator) => modulator.noteOff());
+        });
+    }
 
-        // Convert MIDI note to frequency
-        // f = 440 * 2^((n - 69) / 12)
-        const freq = 440 * Math.pow(2, (note - 69) / 12);
+    private getVoiceReleaseDuration(modulators: Modulator[]): number {
+        if (this.amplitudeSource === 'none') return 0.05;
+        const index = Math.max(0, this.getModulatorIndex(this.amplitudeSource));
+        return modulators[index]?.getMaxReleaseTime() || 0.05;
+    }
 
-        const mode = this.audioEngine.getMode();
+    private trimVoiceRuntimes(): void {
+        const activeIds = new Set(this.audioEngine.getActiveVoiceIds());
+        Array.from(this.activeVoices.keys()).forEach((id) => {
+            if (!activeIds.has(id)) this.activeVoices.delete(id);
+        });
+    }
 
-        if (mode === SynthMode.WAVETABLE) {
-            // Set wavetable frequency directly from MIDI
-            this.audioEngine.setWavetableFrequency(freq);
-        } else if (mode === SynthMode.SPECTRAL) {
-            // Spectral Mode Pitch Strategy
-            // Root = 440Hz (A4)
-            // Multiplier = TargetFreq / Root
-            const rootFreq = 440;
-            const multiplier = freq / rootFreq;
-
-            this.audioEngine.setSpectralPitch(multiplier);
-        }
-
-        this.modulators.forEach((modulator) => modulator.noteOn());
+    private clearVoiceRuntimes(): void {
+        this.audioEngine.allNotesOff(0.001);
+        this.activeVoices.clear();
     }
 
     private async onRenderWav(note: number, duration: number): Promise<void> {
@@ -763,6 +828,143 @@ class SpectralTableApp {
         }
     }
 
+    private async onImageUpload(file: File): Promise<void> {
+        console.log('Processing image: ' + file.name);
+
+        try {
+            // Show progress
+            this.controls.showProgress('upload');
+            this.controls.updateProgress('upload', 0, 'Loading image. ..');
+
+            // Load image onto canvas
+            const img = await this.loadImageFromFile(file);
+
+            // Get current volume resolution
+            const resolution = this.renderer.getSpectralVolume().getResolution();
+            const x = resolution.x;
+            const y = resolution.y;
+            const z = resolution.z;
+
+            console.log('Tiling image ' + img.naturalWidth + 'x' + img.naturalHeight + ' into ' + x + 'x' + y + 'x' + z + ' volume');
+
+            // Create offscreen canvas at image size
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(img, 0, 0);
+
+            // Compute optimal tile grid (rows x cols >= z tiles) matching image aspect ratio
+            const tileGrid = this.computeTileGrid(img.naturalWidth, img.naturalHeight, z);
+            console.log('Tile grid: ' + tileGrid.rows + 'x' + tileGrid.cols + ' = ' + tileGrid.tiles + ' tiles');
+
+            // Tile the image into the volume
+            this.controls.updateProgress('upload', 10, 'Tiling volume. ..');
+
+            const volumeData = new Float32Array(x * y * z * 4);
+            const tileW = Math.ceil(img.naturalWidth / tileGrid.cols);
+            const tileH = Math.ceil(img.naturalHeight / tileGrid.rows);
+
+            // Temporary canvas for scaling tiles
+            const tileCanvas = document.createElement('canvas');
+            tileCanvas.width = x;
+            tileCanvas.height = y;
+            const tileCtx = tileCanvas.getContext('2d')!;
+
+            let tileIndex = 0;
+            for (let row = 0; row < tileGrid.rows; row++) {
+                for (let col = 0; col < tileGrid.cols; col++) {
+                    if (tileIndex >= z) break;
+
+                    // Source region in full image
+                    const srcX = col * tileW;
+                    const srcY = row * tileH;
+                    const srcW = Math.min(tileW, img.naturalWidth - srcX);
+                    const srcH = Math.min(tileH, img.naturalHeight - srcY);
+
+                    // Draw scaled tile to tile canvas
+                    tileCtx.clearRect(0, 0, x, y);
+                    tileCtx.drawImage(canvas, srcX, srcY, srcW, srcH, 0, 0, x, y);
+
+                    // Read scaled tile pixels
+                    const tileData = tileCtx.getImageData(0, 0, x, y).data;
+
+                    // Write to volume data (RGBA -> Float32Array, normalized 0-1)
+                    const baseIdx = tileIndex * x * y * 4;
+                    for (let i = 0; i < tileData.length; i++) {
+                        volumeData[baseIdx + i] = tileData[i] / 255.0;
+                    }
+
+                    // Update progress
+                    const pct = 10 + Math.floor((tileIndex / z) * 70);
+                    this.controls.updateProgress('upload', pct, 'Tiling ' + (tileIndex + 1) + '/' + z + '. ..');
+
+                    tileIndex++;
+                }
+            }
+
+            this.controls.updateProgress('upload', 90, 'Uploading to GPU. ..');
+
+            // Store the volume data
+            const volumeName = file.name.replace(/\.[^/.]+$/, '');
+            this.uploadedVolumes.set(volumeName, volumeData);
+
+            // Set volume data directly
+            this.renderer.getSpectralVolume().setData(volumeData);
+            this.renderer.markReadingLineDirty();
+
+            // Add to dropdown and select it
+            this.controls.addSpectralDataOption(volumeName);
+            this.controls.selectSpectralDataOption(volumeName);
+
+            this.controls.updateProgress('upload', 100, 'Done!');
+            console.log('Image ' + volumeName + ' tiled into ' + x + 'x' + y + 'x' + z + ' volume (' + tileIndex + ' tiles)');
+        } catch (error) {
+            console.error('Failed to process image:', error);
+            alert('Error processing image: ' + (error instanceof Error ? error.message : 'Unknown error'));
+        } finally {
+            setTimeout(() => this.controls.hideProgress('upload'), 1000);
+        }
+    }
+
+    private loadImageFromFile(file: File): Promise<HTMLImageElement> {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const objectUrl = URL.createObjectURL(file);
+            img.onload = () => {
+                URL.revokeObjectURL(objectUrl);
+                resolve(img);
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(objectUrl);
+                reject(new Error('Failed to load image'));
+            };
+            img.src = objectUrl;
+        });
+    }
+
+    private computeTileGrid(imgWidth: number, imgHeight: number, numTiles: number): { rows: number, cols: number, tiles: number } {
+        const imgAspect = imgWidth / imgHeight;
+
+        let bestRows = 1;
+        let bestCols = numTiles;
+        let bestScore = Infinity;
+
+        // Search for optimal grid that matches image aspect ratio and has >= numTiles tiles
+        for (let rows = 1; rows <= numTiles; rows++) {
+            const cols = Math.ceil(numTiles / rows);
+            const gridAspect = cols / rows;
+            const score = Math.abs(Math.log2(gridAspect / imgAspect));
+            if (score < bestScore) {
+                bestScore = score;
+                bestRows = rows;
+                bestCols = cols;
+            }
+        }
+
+        return { rows: bestRows, cols: bestCols, tiles: bestRows * bestCols };
+    }
+
     private onResize(): void {
         const rect = this.canvas.getBoundingClientRect();
         this.renderer.resize(rect.width, rect.width);
@@ -825,9 +1027,37 @@ class SpectralTableApp {
                 }
             }
 
-            // Modulator update
+            // Modulator update. Shared modulators drive global visual/path targets; each
+            // active audio voice advances its own cloned modulators for amp/filter.
             const state = this.controls.getState();
-            const modOutputs = this.modulators.map((modulator) => modulator.update(deltaTime));
+            let modOutputs = this.modulators.map((modulator) => modulator.update(deltaTime));
+
+            this.activeVoices.forEach((voice) => {
+                const voiceOutputs = voice.modulators.map((modulator) => modulator.update(deltaTime));
+                voice.lastOutputs = voiceOutputs;
+                this.audioEngine.setVoiceGainTarget(
+                    voice.id,
+                    this.getAmplitudeValue(voiceOutputs, true)
+                );
+
+                if (this.filterCutoffSource !== 'none' || this.filterResonanceSource !== 'none') {
+                    const filterRuntimeState = this.getFilterRuntimeState(voiceOutputs);
+                    this.audioEngine.setVoiceFilterParams(voice.id, filterRuntimeState.cutoff, filterRuntimeState.resonance);
+                }
+
+                if (voice.isReleasing) {
+                    voice.releaseElapsed += deltaTime;
+                    const amp = this.getAmplitudeValue(voiceOutputs, false);
+                    if (voice.releaseElapsed >= voice.releaseDuration + 0.05 || amp <= 0.0005) {
+                        this.audioEngine.stopVoice(voice.id);
+                        this.activeVoices.delete(voice.id);
+                    }
+                }
+            });
+
+            const firstVoice = this.activeVoices.values().next().value as VoiceRuntime | undefined;
+            if (firstVoice) modOutputs = firstVoice.lastOutputs;
+
             const beatDuration = 60 / Math.max(this.currentBpm, 1);
             this.controls.updateModulatorPreviewCurves(
                 this.modulators.map((modulator) => modulator.samplePreview(beatDuration, 256))
@@ -835,11 +1065,6 @@ class SpectralTableApp {
             const pathModulated = this.applyModulatedPathState(state, modOutputs);
             if (pathModulated) {
                 this.renderer.updateReadingPath(state);
-            }
-            this.audioEngine.setMasterGainTarget(this.getAmplitudeValue(modOutputs));
-            if (this.filterCutoffSource !== 'none' || this.filterResonanceSource !== 'none') {
-                const filterRuntimeState = this.getFilterRuntimeState(modOutputs);
-                this.audioEngine.setFilterParams(filterRuntimeState.cutoff, filterRuntimeState.resonance);
             }
 
             this.renderer.render(deltaTime);
