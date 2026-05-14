@@ -63,6 +63,8 @@ export class AudioEngine {
     private analyserL: AnalyserNode;
     private analyserR: AnalyserNode;
     private masterGain: GainNode;
+    private filterStageA: BiquadFilterNode;
+    private filterStageB: BiquadFilterNode;
 
     // ADSR Envelope
     public attack = 0.1;

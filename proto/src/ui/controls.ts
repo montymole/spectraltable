@@ -1187,6 +1187,24 @@ export class ControlPanel {
         return curve;
     }
 
+    private updateFilterUIState(): void {
+        const filterDisabled = this.filterState.mode === 'none';
+        if (this.filterOrderSelect) this.filterOrderSelect.disabled = filterDisabled;
+        if (this.filterCutoffSlider) this.filterCutoffSlider.disabled = filterDisabled || this.modRoutingState.filterCutoff !== 'none';
+        if (this.filterResonanceSlider) this.filterResonanceSlider.disabled = filterDisabled || this.modRoutingState.filterResonance !== 'none';
+        if (this.filterCutoffSourceSelect) this.filterCutoffSourceSelect.disabled = filterDisabled;
+        if (this.filterResonanceSourceSelect) this.filterResonanceSourceSelect.disabled = filterDisabled;
+    }
+
+    private createIdentityWaveshapeCurve(size: number): number[] {
+        const n = Math.max(2, size);
+        const curve = new Array<number>(n);
+        for (let i = 0; i < n; i++) {
+            curve[i] = (i / (n - 1)) * 2 - 1;
+        }
+        return curve;
+    }
+
     private updateSynthModeUI(mode: SynthMode): void {
         if (!this.synthParamsContainer) return;
         this.synthParamsContainer.innerHTML = '';

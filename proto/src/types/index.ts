@@ -159,6 +159,37 @@ export interface ModRoutingState {
     filterResonance: string;
 }
 
+export type FilterMode = 'none' | 'lowpass' | 'bandpass' | 'highpass';
+export type FilterOrder = 2 | 4;
+
+export interface FilterState {
+    mode: FilterMode;
+    order: FilterOrder;
+    cutoff: number;
+    resonance: number;
+}
+
+export const FILTER_CUTOFF_MIN = 20;
+export const FILTER_CUTOFF_MAX = 20000;
+export const FILTER_RESONANCE_MIN = 0.1;
+export const FILTER_RESONANCE_MAX = 20;
+
+export const defaultFilterState: FilterState = {
+    mode: 'none',
+    order: 2,
+    cutoff: FILTER_CUTOFF_MAX,
+    resonance: 0.707
+};
+
+export interface ModRoutingState {
+    pathY: string;
+    scanPhase: string;
+    shapePhase: string;
+    amplitude: string;
+    filterCutoff: string;
+    filterResonance: string;
+}
+
 // Octave doubling state for octave layering
 export interface OctaveDoublingState {
     lowCount: number;      // 0-10, number of octaves below base frequency
