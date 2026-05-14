@@ -18,9 +18,15 @@ import {
     FILTER_RESONANCE_MIN,
     FilterOrder,
     FilterState,
+    POLYPHONY_MAX,
+    POLYPHONY_MIN,
     PolyphonyState,
     SaturationState,
     SynthMode,
+    UNISON_DETUNE_CENTS_MAX,
+    UNISON_DETUNE_CENTS_MIN,
+    UNISON_VOICES_MAX,
+    UNISON_VOICES_MIN,
     WaveshapeState
 } from '../types';
 
@@ -613,22 +619,24 @@ export class AudioEngine {
     }
 
     public setPolyphony(state: Partial<PolyphonyState>): void {
-        const voices = Math.max(1, Math.min(12, Math.round(state.voices ?? this.polyphonyState.voices)));
+        const voices = Math.max(POLYPHONY_MIN, Math.min(POLYPHONY_MAX, Math.round(state.voices ?? this.polyphonyState.voices)));
+        const unisonVoices = Math.max(
+            UNISON_VOICES_MIN,
+            Math.min(UNISON_VOICES_MAX, Math.round(state.unisonVoices ?? this.polyphonyState.unisonVoices))
+        );
+        const mode = state.mode ?? this.polyphonyState.mode;
         this.polyphonyState = {
             voices,
-            mode: state.mode || this.polyphonyState.mode,
-            unisonDetuneCents: Math.max(0, Math.min(50, state.unisonDetuneCents ?? this.polyphonyState.unisonDetuneCents))
+            mode: mode === 'mono' ? 'mono' : 'poly',
+            unisonVoices,
+            unisonDetuneCents: Math.max(
+                UNISON_DETUNE_CENTS_MIN,
+                Math.min(UNISON_DETUNE_CENTS_MAX, state.unisonDetuneCents ?? this.polyphonyState.unisonDetuneCents)
+            )
         };
 
-        if (this.polyphonyState.mode === 'poly') {
-            while (this.voices.filter((voice) => !voice.isReleasing).length > voices) {
-                const oldest = this.voices
-                    .filter((voice) => !voice.isReleasing)
-                    .sort((a, b) => a.startedAt - b.startedAt)[0];
-                if (!oldest) break;
-                this.stopVoice(oldest.id);
-            }
-        }
+        this.enforceActiveNoteLimit();
+        this.enforceUnisonVoiceLimit();
     }
 
     public getPolyphony(): PolyphonyState {
@@ -639,23 +647,20 @@ export class AudioEngine {
         if (!this.isInitialized) return [];
         this.resume();
 
-        if (this.polyphonyState.mode === 'unison') {
-            this.voices
-                .filter((voice) => !voice.isReleasing)
-                .forEach((voice) => this.stopVoice(voice.id));
-        } else {
-            this.voices
-                .filter((voice) => voice.note === note && !voice.isReleasing)
-                .forEach((voice) => this.stopVoice(voice.id));
+        this.stopActiveNote(note);
+
+        if (this.polyphonyState.mode === 'mono') {
+            this.getActiveNotes()
+                .filter((activeNote) => activeNote !== note)
+                .forEach((activeNote) => this.stopActiveNote(activeNote));
+        } else if (!this.getActiveNotes().includes(note)) {
+            this.ensureFreePolyNote();
         }
 
-        const count = this.polyphonyState.mode === 'unison' ? this.polyphonyState.voices : 1;
+        const count = this.polyphonyState.unisonVoices;
         const ids: number[] = [];
         for (let i = 0; i < count; i++) {
-            if (this.polyphonyState.mode === 'poly') this.ensureFreePolyVoice();
-            const detune = this.polyphonyState.mode === 'unison'
-                ? this.getUnisonDetune(i, count)
-                : 0;
+            const detune = this.getUnisonDetune(i, count);
             const baseFreq = 440 * Math.pow(2, (note - 69) / 12);
             const freq = baseFreq * Math.pow(2, detune / 1200);
             const voice = this.createVoiceNode(note, freq);
@@ -710,11 +715,52 @@ export class AudioEngine {
         });
     }
 
-    private ensureFreePolyVoice(): void {
-        const active = this.voices.filter((voice) => !voice.isReleasing);
-        if (active.length < this.polyphonyState.voices) return;
-        const oldest = active.sort((a, b) => a.startedAt - b.startedAt)[0];
-        if (oldest) this.stopVoice(oldest.id);
+    private stopActiveNote(note: number): void {
+        this.voices
+            .filter((voice) => voice.note === note && !voice.isReleasing)
+            .forEach((voice) => this.stopVoice(voice.id));
+    }
+
+    private getActiveNotes(): number[] {
+        const notes: number[] = [];
+        this.voices.forEach((voice) => {
+            if (voice.isReleasing || notes.includes(voice.note)) return;
+            notes.push(voice.note);
+        });
+        return notes;
+    }
+
+    private enforceActiveNoteLimit(): void {
+        const limit = this.polyphonyState.mode === 'mono' ? 1 : this.polyphonyState.voices;
+        while (this.getActiveNotes().length > limit) {
+            const oldest = this.voices
+                .filter((voice) => !voice.isReleasing)
+                .sort((a, b) => a.startedAt - b.startedAt)[0];
+            if (!oldest) break;
+            this.stopActiveNote(oldest.note);
+        }
+    }
+
+    private enforceUnisonVoiceLimit(): void {
+        this.getActiveNotes().forEach((note) => {
+            const noteVoices = this.voices
+                .filter((voice) => voice.note === note && !voice.isReleasing)
+                .sort((a, b) => a.startedAt - b.startedAt);
+
+            while (noteVoices.length > this.polyphonyState.unisonVoices) {
+                const voice = noteVoices.shift();
+                if (!voice) break;
+                this.stopVoice(voice.id);
+            }
+        });
+    }
+
+    private ensureFreePolyNote(): void {
+        if (this.getActiveNotes().length < this.polyphonyState.voices) return;
+        const oldest = this.voices
+            .filter((voice) => !voice.isReleasing)
+            .sort((a, b) => a.startedAt - b.startedAt)[0];
+        if (oldest) this.stopActiveNote(oldest.note);
     }
 
     private getUnisonDetune(index: number, count: number): number {

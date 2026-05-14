@@ -8,15 +8,20 @@ import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
 import { MidiHandler } from './audio/midi-handler';
 import { PianoKeyboard } from './ui/piano';
+import bundledPresetsJson from './presets.json';
 import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType,
     VOLUME_DENSITY_X_DEFAULT, VOLUME_DENSITY_Y_DEFAULT, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, PresetControls, OctaveDoublingState,
     FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
-    PolyphonyState, defaultPolyphonyState
+    PolyphonyState, defaultPolyphonyState, POLYPHONY_MIN, POLYPHONY_MAX,
+    UNISON_DETUNE_CENTS_MIN, UNISON_DETUNE_CENTS_MAX, UNISON_VOICES_MIN, UNISON_VOICES_MAX
 } from './types';
 import { createDefaultModulatorStates, estimateModulatorRange, Modulator, resolveModulatorStates } from './modulators/modulator';
 import { noteToName } from './ui/ui-elements';
+import type { PresetData } from './types';
+
+const BUNDLED_PRESETS = bundledPresetsJson as PresetData[];
 
 interface VoiceRuntime {
     id: number;
@@ -60,11 +65,11 @@ class SpectralTableApp {
 
     // Modulation Logic
     private modulators: Modulator[];
-    private pathYSource: string = 'none';
-    private scanPhaseSource: string = 'none';
+    private pathYSource: string = 'mod3';
+    private scanPhaseSource: string = 'mod4';
     private shapePhaseSource: string = 'none';
     private amplitudeSource: string = 'mod1';
-    private filterCutoffSource: string = 'none';
+    private filterCutoffSource: string = 'mod2';
     private filterResonanceSource: string = 'none';
     private filterState: FilterState = { ...defaultFilterState };
     private polyphonyState: PolyphonyState = { ...defaultPolyphonyState };
@@ -91,6 +96,7 @@ class SpectralTableApp {
         // Initialize UI controls
         this.controls = new ControlPanel('controls', {
             modulators: this.modulators.map((modulator) => modulator.getState()),
+            bundledPresets: BUNDLED_PRESETS
         });
 
         // Create Spectrogram and Scope
@@ -251,19 +257,17 @@ class SpectralTableApp {
 
         // Start render loop
         this.startRenderLoop();
-
-        // Try to restore saved state
-        this.restoreSavedState();
+        void this.applyInitialPreset();
 
         console.log('✓ Application initialized');
     }
 
-    private async restoreSavedState(): Promise<void> {
-        const savedState = await this.controls.loadSavedState();
-        if (savedState) {
-            console.log('Restoring saved state...');
-            this.applyPresetState(savedState);
-        }
+    private async applyInitialPreset(): Promise<void> {
+        const initialPreset = await this.controls.getInitialPreset();
+        if (!initialPreset) return;
+        console.log(`Loading initial preset: ${initialPreset.name}`);
+        this.applyPresetState(initialPreset.controls);
+        this.controls.selectPreset(initialPreset.name);
     }
 
     private onPresetLoad(controls: PresetControls): void {
@@ -307,7 +311,7 @@ class SpectralTableApp {
         this.audioEngine.setSaturation(state.saturation);
         this.filterState = state.filter ? { ...state.filter } : { ...defaultFilterState };
         this.audioEngine.setFilterState(this.filterState);
-        this.polyphonyState = state.polyphony ? { ...state.polyphony } : { ...defaultPolyphonyState };
+        this.polyphonyState = this.normalizePolyphonyState(state.polyphony);
         this.audioEngine.setPolyphony(this.polyphonyState);
         this.clearVoiceRuntimes();
 
@@ -545,6 +549,22 @@ class SpectralTableApp {
             return noteActive ? 1 : 0;
         }
         return Math.max(0, Math.min(1, this.getModulatorValue(this.amplitudeSource, outputs)));
+    }
+
+    private normalizePolyphonyState(state?: Partial<PolyphonyState>): PolyphonyState {
+        if (!state) return { ...defaultPolyphonyState };
+        const rawMode = (state as any).mode;
+        const voices = Math.round(state.voices ?? defaultPolyphonyState.voices);
+        const unisonVoices = Math.round((state as any).unisonVoices ?? (rawMode === 'unison' ? voices : defaultPolyphonyState.unisonVoices));
+        return {
+            voices: Math.max(POLYPHONY_MIN, Math.min(POLYPHONY_MAX, voices)),
+            mode: rawMode === 'mono' || rawMode === 'unison' ? 'mono' : 'poly',
+            unisonVoices: Math.max(UNISON_VOICES_MIN, Math.min(UNISON_VOICES_MAX, unisonVoices)),
+            unisonDetuneCents: Math.max(
+                UNISON_DETUNE_CENTS_MIN,
+                Math.min(UNISON_DETUNE_CENTS_MAX, state.unisonDetuneCents ?? defaultPolyphonyState.unisonDetuneCents)
+            )
+        };
     }
 
     private onMidiNoteOn(note: number, velocity: number): void {

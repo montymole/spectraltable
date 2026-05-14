@@ -5,12 +5,13 @@ import {
     VOLUME_DENSITY_Z_MIN, VOLUME_DENSITY_Z_MAX, VOLUME_DENSITY_Z_DEFAULT,
     GeneratorParams, JuliaParams, MandelbulbParams, MengerParams, PlasmaParams, GameOfLifeParams,
     defaultJuliaParams, defaultMandelbulbParams, defaultMengerParams, defaultPlasmaParams, defaultGameOfLifeParams,
-    PresetControls, OctaveDoublingState, defaultOctaveDoublingState,
+    PresetControls, PresetData, OctaveDoublingState, defaultOctaveDoublingState,
     HarmonicInjectionState, defaultHarmonicInjectionState,
     SpectralCopyState, defaultSpectralCopyState, ModulatorOperator, ModulatorSlotState, ModulatorSlotType, ModulatorState,
     WaveshapeState, defaultWaveshapeState, SaturationState, defaultSaturationState,
     FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
-    ModRoutingState, PolyphonyState, defaultPolyphonyState, POLYPHONY_MIN, POLYPHONY_MAX
+    ModRoutingState, PolyphonyState, defaultPolyphonyState, POLYPHONY_MIN, POLYPHONY_MAX,
+    UNISON_DETUNE_CENTS_MIN, UNISON_DETUNE_CENTS_MAX, UNISON_VOICES_MIN, UNISON_VOICES_MAX
 } from '../types';
 import { createDefaultModulatorStates, defaultEnvelopeState, defaultLFOState, estimateModulatorRange, normalizeModulatorState, resolveModulatorStates } from '../modulators/modulator';
 import { PresetManager } from './preset-manager';
@@ -205,11 +206,11 @@ export class ControlPanel {
     private modMatrixContainer: HTMLElement | null = null;
     private modMatrixSourceSelects: Partial<Record<keyof ModRoutingState, HTMLSelectElement>> = {};
     private modRoutingState: ModRoutingState = {
-        pathY: 'none',
-        scanPhase: 'none',
+        pathY: 'mod3',
+        scanPhase: 'mod4',
         shapePhase: 'none',
         amplitude: 'mod1',
-        filterCutoff: 'none',
+        filterCutoff: 'mod2',
         filterResonance: 'none'
     };
     private octaveValue = 3;
@@ -246,13 +247,9 @@ export class ControlPanel {
     private filterResonanceSourceSelect: HTMLSelectElement | null = null;
     private polyphonyState: PolyphonyState = { ...defaultPolyphonyState };
     private polyphonyVoiceSlider!: HTMLInputElement;
-    private polyphonyModeSelect!: HTMLSelectElement;
+    private polyphonyModeButton!: HTMLButtonElement;
+    private unisonVoiceSlider!: HTMLInputElement;
     private unisonDetuneSlider!: HTMLInputElement;
-
-    // Debounce timer for auto-save
-    private autoSaveTimer: number | null = null;
-    private lastAutoPresetTimestamp = 0;
-    private readonly autoPresetIntervalMs = 15000;
 
     private bpmSlider!: HTMLInputElement;
     private bpmValue: number = 140;
@@ -269,7 +266,7 @@ export class ControlPanel {
     private shapePhaseSourceSelect: HTMLSelectElement | null = null;
     private amplitudeSourceSelect: HTMLSelectElement | null = null;
 
-    constructor(containerId: string, options: { modulators?: ModulatorState[] }) {
+    constructor(containerId: string, options: { modulators?: ModulatorState[], bundledPresets?: PresetData[] }) {
         const el = document.getElementById(containerId);
         if (!el) throw new Error(`Container not found: ${containerId}`);
         this.container = el;
@@ -281,7 +278,7 @@ export class ControlPanel {
 
         this.modulatorStates = resolveModulatorStates({ modulators: options.modulators || createDefaultModulatorStates() });
         // Initialize preset manager
-        this.presetManager = new PresetManager();
+        this.presetManager = new PresetManager(options.bundledPresets || []);
         this.presetManager.setPresetsChangeCallback(() => this.updatePresetDropdown());
         this.presetManager.ready().then(() => this.updatePresetDropdown());
         this.setupToolbar();
@@ -357,6 +354,13 @@ export class ControlPanel {
                 this.presetManager.savePreset(this.generateAutoPresetName(state, Date.now()), state);
             });
             presetToolbar.appendChild(saveButton);
+
+            const exportButton = document.createElement('button');
+            exportButton.type = 'button';
+            exportButton.className = 'toolbar-action-button';
+            exportButton.textContent = 'Export JSON';
+            exportButton.addEventListener('click', () => this.exportCurrentPresetJson());
+            presetToolbar.appendChild(exportButton);
 
             const deleteButton = document.createElement('button');
             deleteButton.type = 'button';
@@ -565,9 +569,31 @@ export class ControlPanel {
 
     private setModulationRoute(target: keyof ModRoutingState, source: string): void {
         this.modRoutingState[target] = source;
+        this.maybeAutoNameModulatorForTarget(target, source);
         if (this.onModulationRoutingChange) this.onModulationRoutingChange(target, source);
         this.scheduleAutoSave();
         this.updateModRoutingUI();
+    }
+
+    private maybeAutoNameModulatorForTarget(target: keyof ModRoutingState, source: string): void {
+        if (!source.startsWith('mod')) return;
+        const index = parseInt(source.replace('mod', ''), 10) - 1;
+        const modulator = this.modulatorStates[index];
+        if (!modulator || modulator.nameEdited || !/^Mod \d+$/.test(modulator.name)) return;
+
+        const targetLabel = this.getModMatrixTargets().find((candidate) => candidate.key === target)?.label;
+        if (!targetLabel) return;
+
+        this.modulatorStates[index] = normalizeModulatorState({
+            ...modulator,
+            name: targetLabel,
+            nameEdited: false
+        });
+        if (this.onModulatorChange) {
+            this.onModulatorChange(index, JSON.parse(JSON.stringify(this.modulatorStates[index])));
+        }
+        this.renderModulatorSection();
+        this.refreshModulatorSelectLabels();
     }
 
     private populateVolumeSection(container: HTMLElement): void {
@@ -696,7 +722,7 @@ export class ControlPanel {
         this.polyphonyVoiceSlider = createSlider(
             subGroup,
             'polyphony-voices',
-            'Voices',
+            'Polyphony',
             POLYPHONY_MIN,
             POLYPHONY_MAX,
             this.polyphonyState.voices,
@@ -710,24 +736,44 @@ export class ControlPanel {
             0
         );
 
-        this.polyphonyModeSelect = createSelect(subGroup, 'polyphony-mode', 'Mode', [
-            { value: 'poly', label: 'Poly' },
-            { value: 'unison', label: 'Unison' }
-        ], (val) => {
-            this.polyphonyState.mode = val === 'unison' ? 'unison' : 'poly';
+        this.polyphonyModeButton = createButton(subGroup, 'polyphony-mode-toggle', 'POLY', () => {
+            this.polyphonyState.mode = this.polyphonyState.mode === 'poly' ? 'mono' : 'poly';
             emitPolyphonyChange();
-        });
+        }, 'reset-button');
+
+        this.unisonVoiceSlider = createSlider(
+            subGroup,
+            'unison-voices',
+            'Unison Voices',
+            UNISON_VOICES_MIN,
+            UNISON_VOICES_MAX,
+            this.polyphonyState.unisonVoices,
+            1,
+            (val) => {
+                this.polyphonyState.unisonVoices = Math.max(
+                    UNISON_VOICES_MIN,
+                    Math.min(UNISON_VOICES_MAX, Math.round(val))
+                );
+                emitPolyphonyChange();
+            },
+            CONTROL_STYLE,
+            'linear',
+            0
+        );
 
         this.unisonDetuneSlider = createSlider(
             subGroup,
             'unison-detune',
             'Unison Detune',
-            0,
-            50,
+            UNISON_DETUNE_CENTS_MIN,
+            UNISON_DETUNE_CENTS_MAX,
             this.polyphonyState.unisonDetuneCents,
             0.1,
             (val) => {
-                this.polyphonyState.unisonDetuneCents = val;
+                this.polyphonyState.unisonDetuneCents = Math.max(
+                    UNISON_DETUNE_CENTS_MIN,
+                    Math.min(UNISON_DETUNE_CENTS_MAX, val)
+                );
                 emitPolyphonyChange();
             },
             CONTROL_STYLE,
@@ -739,12 +785,16 @@ export class ControlPanel {
     }
 
     private updatePolyphonyUI(): void {
-        if (this.polyphonyModeSelect) this.polyphonyModeSelect.value = this.polyphonyState.mode;
+        if (this.polyphonyModeButton) {
+            this.polyphonyModeButton.textContent = this.polyphonyState.mode === 'poly' ? 'POLY' : 'MONO';
+            this.polyphonyModeButton.title = this.polyphonyState.mode === 'poly'
+                ? 'Polyphonic note allocation'
+                : 'Monophonic note allocation';
+        }
         if (this.polyphonyVoiceSlider) this.polyphonyVoiceSlider.value = String(this.polyphonyState.voices);
+        if (this.unisonVoiceSlider) this.unisonVoiceSlider.value = String(this.polyphonyState.unisonVoices);
         if (this.unisonDetuneSlider) {
             this.unisonDetuneSlider.value = String(this.polyphonyState.unisonDetuneCents);
-            const group = this.unisonDetuneSlider.closest('.control-group') as HTMLElement | null;
-            if (group) group.style.display = this.polyphonyState.mode === 'unison' ? '' : 'none';
         }
     }
 
@@ -1231,6 +1281,8 @@ export class ControlPanel {
             : options[0]?.value || '';
     }
 
+    private suppressRoutingCallbacks = false;
+
     private sanitizeModRoutingSources(): void {
         const validSources = new Set(this.modulatorStates.map((_, index) => `mod${index + 1}`));
         const firstModulator = this.modulatorStates.length > 0 ? 'mod1' : '';
@@ -1240,12 +1292,16 @@ export class ControlPanel {
             const source = this.modRoutingState[target];
             if (source === 'none' || validSources.has(source)) return;
             this.modRoutingState[target] = 'none';
-            if (this.onModulationRoutingChange) this.onModulationRoutingChange(target, 'none');
+            if (!this.suppressRoutingCallbacks && this.onModulationRoutingChange) {
+                this.onModulationRoutingChange(target, 'none');
+            }
         });
 
         if (!validSources.has(this.modRoutingState.amplitude)) {
             this.modRoutingState.amplitude = firstModulator;
-            if (this.onModulationRoutingChange) this.onModulationRoutingChange('amplitude', firstModulator);
+            if (!this.suppressRoutingCallbacks && this.onModulationRoutingChange) {
+                this.onModulationRoutingChange('amplitude', firstModulator);
+            }
         }
     }
 
@@ -1373,6 +1429,7 @@ export class ControlPanel {
             input.value = nextName;
             if (!this.modulatorStates[index] || this.modulatorStates[index].name === nextName) return;
             this.modulatorStates[index].name = nextName;
+            this.modulatorStates[index].nameEdited = true;
             this.modulatorStates[index] = normalizeModulatorState(this.modulatorStates[index]);
             this.refreshModulatorSelectLabels();
             this.emitModulatorChange(index, true);
@@ -1394,9 +1451,12 @@ export class ControlPanel {
     }
 
     private addModulator(): void {
-        const newModulators = createDefaultModulatorStates(1);
-        const newModulator = newModulators[0];
-        newModulator.name = `Mod ${this.modulatorStates.length + 1}`;
+        const newModulator = normalizeModulatorState({
+            name: `Mod ${this.modulatorStates.length + 1}`,
+            slots: [{ type: 'lfo', lfo: defaultLFOState() }],
+            operators: [],
+            nameEdited: false
+        });
         this.modulatorStates.push(newModulator);
         this.renderModulatorSection();
         this.refreshModulatorSelectLabels();
@@ -1774,19 +1834,8 @@ export class ControlPanel {
     }
 
     private scheduleAutoSave(): void {
-        if (this.autoSaveTimer) {
-            clearTimeout(this.autoSaveTimer);
-        }
-        this.autoSaveTimer = window.setTimeout(() => {
-            const state = this.getFullState();
-            this.presetManager.saveCurrentState(state);
-
-            const now = Date.now();
-            if (now - this.lastAutoPresetTimestamp >= this.autoPresetIntervalMs) {
-                this.lastAutoPresetTimestamp = now;
-                this.presetManager.savePreset(this.generateAutoPresetName(state, now), state);
-            }
-        }, 500);
+        // Manual preset save/export only. This hook remains so control callbacks do
+        // not need noisy branching, but it intentionally does not persist state.
     }
 
     private generateAutoPresetName(state: PresetControls, timestamp: number): string {
@@ -1799,6 +1848,37 @@ export class ControlPanel {
             .map((part) => String(part).replace(/[^\w .:+-]+/g, '-').trim())
             .filter(Boolean)
             .join(' / ');
+    }
+
+    private exportCurrentPresetJson(): void {
+        const timestamp = Date.now();
+        const state = this.getFullState();
+        const name = this.presetSelect?.value || this.generateAutoPresetName(state, timestamp);
+        const preset: PresetData = {
+            name,
+            timestamp,
+            controls: state
+        };
+        const json = JSON.stringify(this.presetManager.getExportPresets(preset), null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'presets.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    public async getInitialPreset(): Promise<PresetData | null> {
+        await this.presetManager.ready();
+        return this.presetManager.getInitialPreset();
+    }
+
+    public selectPreset(name: string): void {
+        if (!this.presetSelect) return;
+        this.presetSelect.value = name;
     }
 
     public getFullState(): PresetControls {
@@ -1840,6 +1920,10 @@ export class ControlPanel {
     }
 
     public applyState(state: PresetControls): void {
+        // Suppress routing callbacks during bulk state application.
+        // main.ts sets routing sources directly from the preset after this returns.
+        this.suppressRoutingCallbacks = true;
+
         // Apply all control values from state
         this.pathYSlider.value = String(state.pathY);
         this.scanPositionSlider.value = String(state.scanPosition);
@@ -1889,23 +1973,32 @@ export class ControlPanel {
             }
         }
 
-        this.polyphonyState = state.polyphony
-            ? {
-                voices: Math.max(POLYPHONY_MIN, Math.min(POLYPHONY_MAX, Math.round(state.polyphony.voices))),
-                mode: state.polyphony.mode === 'unison' ? 'unison' : 'poly',
-                unisonDetuneCents: Math.max(0, Math.min(50, state.polyphony.unisonDetuneCents))
-            }
-            : { ...defaultPolyphonyState };
+        if (state.polyphony) {
+            const savedMode = (state.polyphony as any).mode;
+            const savedVoices = Math.round(state.polyphony.voices ?? defaultPolyphonyState.voices);
+            const savedUnisonVoices = Math.round((state.polyphony as any).unisonVoices ?? (savedMode === 'unison' ? savedVoices : defaultPolyphonyState.unisonVoices));
+            this.polyphonyState = {
+                voices: Math.max(POLYPHONY_MIN, Math.min(POLYPHONY_MAX, savedVoices)),
+                mode: savedMode === 'mono' || savedMode === 'unison' ? 'mono' : 'poly',
+                unisonVoices: Math.max(UNISON_VOICES_MIN, Math.min(UNISON_VOICES_MAX, savedUnisonVoices)),
+                unisonDetuneCents: Math.max(
+                    UNISON_DETUNE_CENTS_MIN,
+                    Math.min(UNISON_DETUNE_CENTS_MAX, state.polyphony.unisonDetuneCents ?? defaultPolyphonyState.unisonDetuneCents)
+                )
+            };
+        } else {
+            this.polyphonyState = { ...defaultPolyphonyState };
+        }
         this.updatePolyphonyUI();
         if (this.onPolyphonyChange) this.onPolyphonyChange({ ...this.polyphonyState });
 
         this.modulatorStates = resolveModulatorStates(state, this.modulatorStates.length || 4);
         this.modRoutingState = {
-            pathY: state.modRouting?.pathY || 'none',
-            scanPhase: state.modRouting?.scanPhase || 'none',
+            pathY: state.modRouting?.pathY || 'mod3',
+            scanPhase: state.modRouting?.scanPhase || 'mod4',
             shapePhase: state.modRouting?.shapePhase || 'none',
             amplitude: state.modRouting?.amplitude || 'mod1',
-            filterCutoff: state.modRouting?.filterCutoff || 'none',
+            filterCutoff: state.modRouting?.filterCutoff || 'mod2',
             filterResonance: state.modRouting?.filterResonance || 'none'
         };
         this.renderModulatorSection();
@@ -1977,6 +2070,8 @@ export class ControlPanel {
         this.updateAllDisplays();
         this.updateModulationRanges();
         this.updateSyncUI();
+
+        this.suppressRoutingCallbacks = false;
     }
 
     private updateSyncUI(): void {

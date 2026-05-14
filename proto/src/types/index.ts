@@ -102,6 +102,7 @@ export interface ModulatorState {
     name: string;
     slots: ModulatorSlotState[];
     operators: ModulatorOperator[];
+    nameEdited?: boolean;
 }
 
 export type FilterMode = 'none' | 'lowpass' | 'bandpass' | 'highpass';
@@ -120,26 +121,32 @@ export const FILTER_RESONANCE_MIN = 0.1;
 export const FILTER_RESONANCE_MAX = 20;
 
 export const defaultFilterState: FilterState = {
-    mode: 'none',
+    mode: 'lowpass',
     order: 2,
     cutoff: FILTER_CUTOFF_MAX,
     resonance: 0.707
 };
 
-export type VoiceMode = 'poly' | 'unison';
+export type VoiceMode = 'mono' | 'poly';
 
 export interface PolyphonyState {
     voices: number;
     mode: VoiceMode;
+    unisonVoices: number;
     unisonDetuneCents: number;
 }
 
 export const POLYPHONY_MIN = 1;
-export const POLYPHONY_MAX = 12;
+export const POLYPHONY_MAX = 8;
+export const UNISON_VOICES_MIN = 1;
+export const UNISON_VOICES_MAX = 4;
+export const UNISON_DETUNE_CENTS_MIN = 0;
+export const UNISON_DETUNE_CENTS_MAX = 50;
 
 export const defaultPolyphonyState: PolyphonyState = {
     voices: 4,
     mode: 'poly',
+    unisonVoices: 1,
     unisonDetuneCents: 8
 };
 

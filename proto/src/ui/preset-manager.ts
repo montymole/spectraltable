@@ -8,12 +8,16 @@ const CURRENT_STATE_ID = 'current';
 
 export class PresetManager {
     private db: IDBDatabase | null = null;
+    private bundledPresets: PresetData[] = [];
     private presets: PresetData[] = [];
     private currentState: PresetControls | null = null;
     private onPresetsChange: (() => void) | null = null;
     private readyPromise: Promise<void>;
 
-    constructor() {
+    constructor(bundledPresets: PresetData[] = []) {
+        this.bundledPresets = bundledPresets
+            .filter((preset) => this.isPresetControls(preset.controls))
+            .map((preset) => JSON.parse(JSON.stringify(preset)));
         this.readyPromise = this.init();
     }
 
@@ -74,26 +78,25 @@ export class PresetManager {
     }
 
     private async loadFromIndexedDB(): Promise<void> {
-        this.presets = (await this.getAllPresetsFromDB())
+        const storedPresets = (await this.getAllPresetsFromDB())
             .filter((preset) => this.isPresetControls(preset.controls));
+        this.presets = this.mergePresetBanks(storedPresets);
         const state = await this.getCurrentStateFromDB();
         this.currentState = state && this.isPresetControls(state) ? state : null;
-        this.sortPresets();
     }
 
     private loadLocalStorageFallback(): void {
         try {
             const storedPresets = localStorage.getItem(STORAGE_KEY_PRESETS);
             const presets = storedPresets ? JSON.parse(storedPresets) as PresetData[] : [];
-            this.presets = presets.filter((preset) => this.isPresetControls(preset.controls));
+            this.presets = this.mergePresetBanks(presets.filter((preset) => this.isPresetControls(preset.controls)));
             const storedState = localStorage.getItem(STORAGE_KEY_STATE);
             const state = storedState ? JSON.parse(storedState) as PresetControls : null;
             this.currentState = state && this.isPresetControls(state) ? state : null;
-            this.sortPresets();
             this.emitPresetsChange();
         } catch (e) {
             console.warn('Failed to load fallback presets:', e);
-            this.presets = [];
+            this.presets = this.mergePresetBanks([]);
             this.currentState = null;
         }
     }
@@ -137,8 +140,14 @@ export class PresetManager {
         }));
     }
 
-    private sortPresets(): void {
-        this.presets.sort((a, b) => b.timestamp - a.timestamp);
+    private mergePresetBanks(userPresets: PresetData[]): PresetData[] {
+        const userByName = new Map(userPresets.map((preset) => [preset.name, preset]));
+        const merged = this.bundledPresets.map((preset) => userByName.get(preset.name) || preset);
+        const bundledNames = new Set(this.bundledPresets.map((preset) => preset.name));
+        const additionalUserPresets = userPresets
+            .filter((preset) => !bundledNames.has(preset.name))
+            .sort((a, b) => b.timestamp - a.timestamp);
+        return [...merged, ...additionalUserPresets];
     }
 
     private isPresetControls(value: unknown): value is PresetControls {
@@ -166,6 +175,23 @@ export class PresetManager {
         return [...this.presets];
     }
 
+    public getInitialPreset(): PresetData | null {
+        return this.presets[0] || null;
+    }
+
+    public getExportPresets(currentPreset?: PresetData): PresetData[] {
+        const presets = this.presets.map((preset) => JSON.parse(JSON.stringify(preset)) as PresetData);
+        if (!currentPreset || !this.isPresetControls(currentPreset.controls)) return presets;
+
+        const index = presets.findIndex((preset) => preset.name === currentPreset.name);
+        if (index >= 0) {
+            presets[index] = currentPreset;
+        } else {
+            presets.unshift(currentPreset);
+        }
+        return presets;
+    }
+
     public async savePreset(name: string, controls: PresetControls): Promise<void> {
         await this.readyPromise;
         if (!this.isPresetControls(controls)) return;
@@ -182,13 +208,15 @@ export class PresetManager {
         } else {
             this.presets.push(preset);
         }
-        this.sortPresets();
 
         try {
             await this.putPresetInDB(preset);
+            this.presets = this.mergePresetBanks((await this.getAllPresetsFromDB())
+                .filter((storedPreset) => this.isPresetControls(storedPreset.controls)));
         } catch (e) {
             console.warn('Failed to save preset to IndexedDB:', e);
             localStorage.setItem(STORAGE_KEY_PRESETS, JSON.stringify(this.presets));
+            this.presets = this.mergePresetBanks(this.presets);
         }
 
         this.emitPresetsChange();
@@ -205,9 +233,12 @@ export class PresetManager {
 
         try {
             await this.deletePresetFromDB(name);
+            this.presets = this.mergePresetBanks((await this.getAllPresetsFromDB())
+                .filter((storedPreset) => this.isPresetControls(storedPreset.controls)));
         } catch (e) {
             console.warn('Failed to delete preset from IndexedDB:', e);
             localStorage.setItem(STORAGE_KEY_PRESETS, JSON.stringify(this.presets));
+            this.presets = this.mergePresetBanks(this.presets);
         }
 
         this.emitPresetsChange();
