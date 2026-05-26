@@ -45,6 +45,7 @@ interface EngineVoice {
     filterStageA: BiquadFilterNode;
     filterStageB: BiquadFilterNode;
     isReleasing: boolean;
+    gainTarget: number;
 }
 
 export class AudioEngine {
@@ -175,7 +176,8 @@ export class AudioEngine {
             gain,
             filterStageA,
             filterStageB,
-            isReleasing: false
+            isReleasing: false,
+            gainTarget: 0
         };
 
         this.connectVoiceGraph(voice);
@@ -229,6 +231,17 @@ export class AudioEngine {
             node.disconnect();
         } catch {
             // Ignore disconnect errors when nodes are already detached.
+        }
+    }
+
+    private holdAudioParam(param: AudioParam, time: number): void {
+        const holdable = param as AudioParam & { cancelAndHoldAtTime?: (cancelTime: number) => AudioParam };
+        if (typeof holdable.cancelAndHoldAtTime === 'function') {
+            holdable.cancelAndHoldAtTime(time);
+        } else {
+            const currentValue = param.value;
+            param.cancelScheduledValues(time);
+            param.setValueAtTime(currentValue, time);
         }
     }
 
@@ -689,7 +702,9 @@ export class AudioEngine {
         const now = this.ctx.currentTime;
         const scale = (voice.gain as any).voiceGainScale ?? 1;
         const clamped = Math.max(0, Math.min(1, value)) * scale;
-        voice.gain.gain.cancelScheduledValues(now);
+        if (Math.abs(clamped - voice.gainTarget) < 0.0005) return;
+        voice.gainTarget = clamped;
+        this.holdAudioParam(voice.gain.gain, now);
         voice.gain.gain.setTargetAtTime(clamped, now, Math.max(0.001, smoothingTime));
     }
 

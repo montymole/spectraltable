@@ -8,6 +8,7 @@ import { AudioEngine } from './audio/audio-engine';
 import { AudioAnalyzer } from './audio/audio-analyzer';
 import { MidiHandler } from './audio/midi-handler';
 import { PianoKeyboard } from './ui/piano';
+import { SequencerClock } from './sequencing/sequencers';
 import bundledPresetsJson from './presets.json';
 import {
     ReadingPathState, VolumeResolution, SynthMode, CarrierType,
@@ -15,7 +16,8 @@ import {
     GeneratorParams, PresetControls, OctaveDoublingState,
     FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
     PolyphonyState, defaultPolyphonyState, POLYPHONY_MIN, POLYPHONY_MAX,
-    UNISON_DETUNE_CENTS_MIN, UNISON_DETUNE_CENTS_MAX, UNISON_VOICES_MIN, UNISON_VOICES_MAX
+    UNISON_DETUNE_CENTS_MIN, UNISON_DETUNE_CENTS_MAX, UNISON_VOICES_MIN, UNISON_VOICES_MAX,
+    MidiNoteSource
 } from './types';
 import { createDefaultModulatorStates, estimateModulatorRange, Modulator, resolveModulatorStates } from './modulators/modulator';
 import { noteToName } from './ui/ui-elements';
@@ -46,6 +48,7 @@ class SpectralTableApp {
     private audioAnalyzer: AudioAnalyzer;
     private midiHandler: MidiHandler;
     private piano: PianoKeyboard;
+    private sequencerClock: SequencerClock;
     private canvas: HTMLCanvasElement;
     private activeVoices: Map<number, VoiceRuntime> = new Map();
     private animationFrameId: number = 0;
@@ -111,7 +114,16 @@ class SpectralTableApp {
 
         // Initialize MIDI Handler
         this.midiHandler = new MidiHandler();
-        this.midiHandler.setNoteEventCallback((note, velocity, isNoteOn) => {
+        this.sequencerClock = new SequencerClock((note, velocity, isNoteOn) => {
+            if (isNoteOn) this.midiHandler.simulateNoteOn(note, velocity, 'sequencer');
+            else this.midiHandler.simulateNoteOff(note, 'sequencer');
+        });
+        this.sequencerClock.setStepListener((_mode, stepIndex) => {
+            this.controls.markSequencerStep(stepIndex);
+        });
+
+        this.midiHandler.setNoteEventCallback((note, velocity, isNoteOn, source) => {
+            if (this.shouldRouteToSequencer(note, velocity, isNoteOn, source)) return;
             if (isNoteOn) this.onMidiNoteOn(note, velocity);
             else this.onMidiNoteOff(note);
         });
@@ -188,8 +200,18 @@ class SpectralTableApp {
         this.controls.setRenderWavCallback(this.onRenderWav.bind(this));
         this.controls.setBPMCallback((bpm) => {
             this.currentBpm = bpm;
+            this.sequencerClock.setBpm(bpm);
+            this.controls.setSequencerBpm(bpm);
             this.modulators.forEach(modulator => modulator.setBPM(bpm));
             this.activeVoices.forEach((voice) => voice.modulators.forEach((modulator) => modulator.setBPM(bpm)));
+        });
+        this.controls.setSequencerChangeCallback((state) => {
+            this.sequencerClock.setState({
+                ...state,
+                bpm: this.currentBpm,
+                steps: state.steps.map((step) => ({ ...step })),
+                arpeggiator: { ...state.arpeggiator }
+            });
         });
         this.controls.setModulatorChangeCallback((index, state) => {
             const modulator = this.modulators[index];
@@ -588,6 +610,11 @@ class SpectralTableApp {
             });
         });
         this.trimVoiceRuntimes();
+    }
+
+    private shouldRouteToSequencer(note: number, velocity: number, isNoteOn: boolean, source: MidiNoteSource): boolean {
+        if (source === 'sequencer') return false;
+        return this.sequencerClock.handleUserNote(note, velocity, isNoteOn);
     }
 
     private onMidiNoteOff(note: number): void {
@@ -996,6 +1023,7 @@ class SpectralTableApp {
         const render = (time: number) => {
             const deltaTime = (time - lastTime) / 1000; // Seconds
             lastTime = time;
+            this.sequencerClock.update(deltaTime);
 
             // Update Game of Life animation
             if (this.gameOfLifeActive && this.gameOfLifeSpeed > 0) {

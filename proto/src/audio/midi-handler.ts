@@ -1,4 +1,6 @@
 
+import type { MidiNoteSource } from '../types';
+
 export class MidiHandler {
     private midiAccess: any = null;
     private activeInput: any = null;
@@ -8,7 +10,7 @@ export class MidiHandler {
     private onNoteChangeCallback: ((note: number | null) => void) | null = null;
     private onConnectionChangeCallback: ((isConnected: boolean) => void) | null = null;
     private onRawNoteCallback: ((note: number, velocity: number) => void) | null = null;  // For visualization
-    private onNoteEventCallback: ((note: number, velocity: number, isNoteOn: boolean) => void) | null = null;
+    private onNoteEventCallback: ((note: number, velocity: number, isNoteOn: boolean, source: MidiNoteSource) => void) | null = null;
 
     constructor() {
         this.initialize();
@@ -72,14 +74,14 @@ export class MidiHandler {
             this.activeNotes.set(note, velocity);
             this.triggerHighestNote();
             if (this.onRawNoteCallback) this.onRawNoteCallback(note, velocity);
-            if (this.onNoteEventCallback) this.onNoteEventCallback(note, velocity, true);
+            if (this.onNoteEventCallback) this.onNoteEventCallback(note, velocity, true, 'user');
         }
         // Note Off (or Note On with vel 0)
         else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
             this.activeNotes.delete(note);
             this.triggerHighestNote();
             if (this.onRawNoteCallback) this.onRawNoteCallback(note, 0);
-            if (this.onNoteEventCallback) this.onNoteEventCallback(note, 0, false);
+            if (this.onNoteEventCallback) this.onNoteEventCallback(note, 0, false, 'user');
         }
     }
 
@@ -107,7 +109,7 @@ export class MidiHandler {
         this.onNoteChangeCallback = callback;
     }
 
-    public setNoteEventCallback(callback: (note: number, velocity: number, isNoteOn: boolean) => void) {
+    public setNoteEventCallback(callback: (note: number, velocity: number, isNoteOn: boolean, source: MidiNoteSource) => void) {
         this.onNoteEventCallback = callback;
     }
 
@@ -136,18 +138,18 @@ export class MidiHandler {
         }
     }
 
-    public simulateNoteOn(note: number, velocity: number) {
+    public simulateNoteOn(note: number, velocity: number, source: MidiNoteSource = 'user') {
         this.activeNotes.set(note, velocity);
         this.triggerHighestNote();
         // Allow visualization update if needed (e.g. if driven by computer keyboard later)
         if (this.onRawNoteCallback) this.onRawNoteCallback(note, velocity);
-        if (this.onNoteEventCallback) this.onNoteEventCallback(note, velocity, true);
+        if (this.onNoteEventCallback) this.onNoteEventCallback(note, velocity, true, source);
     }
 
-    public simulateNoteOff(note: number) {
+    public simulateNoteOff(note: number, source: MidiNoteSource = 'user') {
         this.activeNotes.delete(note);
         this.triggerHighestNote();
         if (this.onRawNoteCallback) this.onRawNoteCallback(note, 0);
-        if (this.onNoteEventCallback) this.onNoteEventCallback(note, 0, false);
+        if (this.onNoteEventCallback) this.onNoteEventCallback(note, 0, false, source);
     }
 }

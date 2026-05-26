@@ -297,5 +297,75 @@ export interface PresetData {
     controls: PresetControls;
 }
 
+export type MidiNoteSource = 'user' | 'sequencer';
+
+export type SequencerEngineMode = 'sequencer' | 'arpeggiator';
+export type ArpeggiatorMode = 'up' | 'down' | 'updown' | 'random';
+
+export interface Sequencer303Step {
+    note: number;
+    accent: boolean;
+    slide: boolean;
+    tie: boolean;
+    rest: boolean;
+    length: '1/16' | '1/8';
+    velocity: number;
+}
+
+export interface SequencerState {
+    mode: SequencerEngineMode;
+    isPlaying: boolean;
+    bpm: number;
+    swing: number;
+    gate: number;
+    patternIndex: number;
+    steps: Sequencer303Step[];
+    arpeggiator: {
+        mode: ArpeggiatorMode;
+        rate: '1/4' | '1/8' | '1/16' | '1/32';
+        octaveRange: number;
+        hold: boolean;
+        gate: number;
+        velocity: number;
+    };
+}
+
+export const defaultSequencerSteps: Sequencer303Step[] = [
+    { note: 60, accent: true, slide: false, tie: false, rest: false, length: '1/16', velocity: 100 },
+    { note: 62, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 84 },
+    { note: 64, accent: true, slide: false, tie: false, rest: false, length: '1/16', velocity: 112 },
+    { note: 67, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 88 },
+    { note: 70, accent: true, slide: false, tie: false, rest: true, length: '1/8', velocity: 74 },
+    { note: 69, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 118 },
+    { note: 67, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 82 },
+    { note: 64, accent: true, slide: true, tie: true, rest: false, length: '1/16', velocity: 96 },
+    { note: 62, accent: true, slide: false, tie: false, rest: false, length: '1/16', velocity: 90 },
+    { note: 60, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 106 },
+    { note: 60, accent: true, slide: false, tie: false, rest: true, length: '1/8', velocity: 70 },
+    { note: 72, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 86 },
+    { note: 70, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 114 },
+    { note: 67, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 84 },
+    { note: 64, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 104 },
+    { note: 60, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 92 }
+];
+
+export const defaultSequencerState: SequencerState = {
+    mode: 'sequencer',
+    isPlaying: false,
+    bpm: 140,
+    swing: 0.54,
+    gate: 0.8,
+    patternIndex: 23,
+    steps: defaultSequencerSteps.map((step) => ({ ...step })),
+    arpeggiator: {
+        mode: 'up',
+        rate: '1/16',
+        octaveRange: 1,
+        hold: false,
+        gate: 0.8,
+        velocity: 100
+    }
+};
+
 export const STORAGE_KEY_STATE = 'spectraltable_state';
 export const STORAGE_KEY_PRESETS = 'spectraltable_presets';
