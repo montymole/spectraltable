@@ -213,6 +213,9 @@ class SpectralTableApp {
                 arpeggiator: { ...state.arpeggiator }
             });
         });
+        this.controls.setSequencerResetCallback(() => {
+            this.sequencerClock.reset();
+        });
         this.controls.setModulatorChangeCallback((index, state) => {
             const modulator = this.modulators[index];
             if (!modulator) return;
@@ -304,7 +307,16 @@ class SpectralTableApp {
         // Apply BPM
         if (state.bpm !== undefined) {
             this.currentBpm = state.bpm;
+            this.sequencerClock.setBpm(state.bpm);
             this.modulators.forEach(modulator => modulator.setBPM(state.bpm));
+        }
+        if (state.sequencer) {
+            this.sequencerClock.setState({
+                ...state.sequencer,
+                bpm: state.bpm ?? state.sequencer.bpm ?? this.currentBpm,
+                steps: state.sequencer.steps.map((step) => ({ ...step })),
+                arpeggiator: { ...state.sequencer.arpeggiator }
+            });
         }
 
         const modulatorStates = resolveModulatorStates(state, this.modulators.length);

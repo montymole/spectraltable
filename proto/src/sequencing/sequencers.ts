@@ -2,6 +2,7 @@ import {
     defaultSequencerState,
     Sequencer303Step,
     SequencerEngineMode,
+    SequencerSlideMode,
     SequencerState
 } from '../types';
 
@@ -29,6 +30,25 @@ function stepDurationSeconds(bpm: number, division: string): number {
 
 function clampMidi(note: number): number {
     return Math.max(0, Math.min(127, Math.round(note)));
+}
+
+function normalizeStep(step: Partial<Sequencer303Step> | Record<string, unknown>): Sequencer303Step {
+    const raw = step as Record<string, unknown>;
+    const legacyLength = raw.length;
+    const legacyVelocity = raw.velocity;
+    let slide: SequencerSlideMode = 'off';
+    if (raw.slide === 'up' || raw.slide === 'down') slide = raw.slide;
+    else if (raw.slide === true) slide = 'up';
+
+    return {
+        note: clampMidi(Number(raw.note ?? 60)),
+        accent: Boolean(raw.accent),
+        slide,
+        tie: Boolean(raw.tie),
+        rest: Boolean(raw.rest),
+        length: Math.max(0.1, Math.min(1, legacyLength === '1/8' ? 1 : Number(legacyLength ?? 0.8))),
+        velocity: Math.max(0, Math.min(1, Number(legacyVelocity ?? 0.8) > 1 ? Number(legacyVelocity) / 127 : Number(legacyVelocity ?? 0.8)))
+    };
 }
 
 export class Arpeggiator {
@@ -118,7 +138,7 @@ export class Sequencer303 {
     private index = -1;
 
     public setSteps(steps: Sequencer303Step[]): void {
-        this.steps = steps.map((step) => ({ ...step }));
+        this.steps = steps.map((step) => normalizeStep(step));
         if (this.index >= this.steps.length) this.index = -1;
     }
 
@@ -140,6 +160,7 @@ export class SequencerClock {
     private sendNote: NoteSender;
     private onStep?: StepListener;
     private accumulator = 0;
+    private stepCounter = 0;
     private currentNote: number | null = null;
     private currentNoteElapsed = 0;
     private currentNoteDuration = 0;
@@ -159,15 +180,23 @@ export class SequencerClock {
     }
 
     public setState(next: Partial<SequencerState>): void {
+        const wasPlaying = this.state.isPlaying;
+        const previousMode = this.state.mode;
         this.state = cloneState({
             ...this.state,
             ...next,
-            steps: next.steps ? next.steps.map((step) => ({ ...step })) : this.state.steps,
+            steps: next.steps ? next.steps.map((step) => normalizeStep(step)) : this.state.steps,
             arpeggiator: next.arpeggiator ? { ...this.state.arpeggiator, ...next.arpeggiator } : this.state.arpeggiator
         });
         this.arpeggiator.setState(this.state.arpeggiator);
         this.sequencer.setSteps(this.state.steps);
+        if (previousMode !== this.state.mode) {
+            this.stopActiveNote();
+            this.accumulator = this.state.isPlaying ? this.getCurrentInterval() : 0;
+            this.stepCounter = 0;
+        }
         if (!this.state.isPlaying) this.stopActiveNote();
+        if (!wasPlaying && this.state.isPlaying) this.accumulator = this.getCurrentInterval();
     }
 
     public setBpm(bpm: number): void {
@@ -178,12 +207,13 @@ export class SequencerClock {
         if (this.state.mode === mode) return;
         this.stopActiveNote();
         this.accumulator = 0;
+        this.stepCounter = 0;
         this.state.mode = mode;
     }
 
     public play(): void {
         this.state.isPlaying = true;
-        this.accumulator = 0;
+        this.accumulator = this.getCurrentInterval();
     }
 
     public stop(): void {
@@ -201,6 +231,7 @@ export class SequencerClock {
     public reset(): void {
         this.stopActiveNote();
         this.accumulator = 0;
+        this.stepCounter = 0;
         this.currentNoteElapsed = 0;
         this.sequencer.reset();
         this.onStep?.(this.state.mode, -1);
@@ -232,15 +263,18 @@ export class SequencerClock {
 
     private getCurrentInterval(): number {
         if (this.state.mode === 'arpeggiator') return this.arpeggiator.getRateSeconds(this.state.bpm);
-        return stepDurationSeconds(this.state.bpm, '1/16');
+        const base = stepDurationSeconds(this.state.bpm, '1/16');
+        const swing = Math.max(0.5, Math.min(0.75, this.state.swing));
+        return this.stepCounter % 2 === 0 ? base * (swing * 2) : base * ((1 - swing) * 2);
     }
 
     private triggerNext(interval: number): void {
         if (this.state.mode === 'arpeggiator') {
             const note = this.arpeggiator.nextNote();
             if (!note) return;
-            this.startNote(note.note, note.velocity, interval * this.arpeggiator.getGate());
+            this.startNote(this.applyOutputTranspose(note.note), note.velocity, interval * this.arpeggiator.getGate());
             this.onStep?.('arpeggiator', note.stepIndex);
+            this.stepCounter += 1;
             return;
         }
 
@@ -248,24 +282,27 @@ export class SequencerClock {
         if (!next) return;
         const { step, stepIndex } = next;
         this.onStep?.('sequencer', stepIndex);
+        this.stepCounter += 1;
         if (step.rest) {
             this.stopActiveNote();
             return;
         }
 
-        const duration = stepDurationSeconds(this.state.bpm, step.length) * this.state.gate;
-        const velocity = Math.max(1, Math.min(127, Math.round(step.velocity * (step.accent ? 1.12 : 1))));
+        const duration = interval * Math.max(0.1, Math.min(1, step.length)) * this.state.gate;
+        const velocity = Math.max(1, Math.min(127, Math.round(127 * step.velocity * (step.accent ? 1.12 : 1))));
+        const note = this.applyOutputTranspose(step.note);
         if (!step.tie) this.stopActiveNote();
-        this.startNote(step.note, velocity, duration);
+        this.startNote(note, velocity, duration, !step.tie);
     }
 
-    private startNote(note: number, velocity: number, duration: number): void {
+    private startNote(note: number, velocity: number, duration: number, retrigger = true): void {
+        const hadActiveNote = this.currentNote !== null;
         if (this.currentNote !== null && this.currentNote !== note) this.stopActiveNote();
-        if (this.currentNote === note) this.sendNote(note, 0, false);
+        if (this.currentNote === note && retrigger) this.sendNote(note, 0, false);
         this.currentNote = clampMidi(note);
         this.currentNoteElapsed = 0;
         this.currentNoteDuration = Math.max(0.01, duration);
-        this.sendNote(this.currentNote, velocity, true);
+        if (retrigger || !hadActiveNote) this.sendNote(this.currentNote, velocity, true);
     }
 
     private stopActiveNote(): void {
@@ -273,5 +310,9 @@ export class SequencerClock {
         this.sendNote(this.currentNote, 0, false);
         this.currentNote = null;
         this.currentNoteElapsed = 0;
+    }
+
+    private applyOutputTranspose(note: number): number {
+        return clampMidi(note + this.state.transpose + this.state.octaveOffset * 12);
     }
 }

@@ -14,6 +14,8 @@ import {
     UNISON_DETUNE_CENTS_MIN, UNISON_DETUNE_CENTS_MAX, UNISON_VOICES_MIN, UNISON_VOICES_MAX,
     defaultSequencerState, SequencerEngineMode, SequencerState
 } from '../types';
+import type { Sequencer303Step } from '../types';
+import type { SequencerSlideMode } from '../types';
 import { createDefaultModulatorStates, defaultEnvelopeState, defaultLFOState, estimateModulatorRange, normalizeModulatorState, resolveModulatorStates } from '../modulators/modulator';
 import { PresetManager } from './preset-manager';
 import { ModulatorPreviewWebGL } from './modulator-preview-webgl';
@@ -167,6 +169,7 @@ export class ControlPanel {
     private onFilterChange: ((state: FilterState) => void) | null = null;
     private onPolyphonyChange: ((state: PolyphonyState) => void) | null = null;
     private onSequencerChange: ((state: SequencerState) => void) | null = null;
+    private onSequencerReset: (() => void) | null = null;
 
     // Modulator Callbacks
     private onModulatorChange: ((index: number, state: ModulatorState) => void) | null = null;
@@ -273,6 +276,14 @@ export class ControlPanel {
     private seqStopButton: HTMLButtonElement | null = null;
     private seqModeButtons: Partial<Record<SequencerEngineMode, HTMLButtonElement>> = {};
     private seqStepEls: HTMLElement[] = [];
+    private seqSwingValueEl: HTMLElement | null = null;
+    private seqGateValueEl: HTMLElement | null = null;
+    private seqPatternValueEl: HTMLElement | null = null;
+    private seqArpControls: Partial<Record<string, HTMLSelectElement | HTMLInputElement | HTMLButtonElement>> = {};
+    private seqOptionControls: Partial<Record<string, HTMLInputElement>> = {};
+    private seqTransposeInput: HTMLInputElement | null = null;
+    private seqOctaveInput: HTMLInputElement | null = null;
+    private seqClipboard: Sequencer303Step[] | null = null;
 
     private renderDurationLabel: HTMLElement | null = null;
 
@@ -549,15 +560,13 @@ export class ControlPanel {
         output.className = 'seq-output-card';
         output.innerHTML = `
             <span class="seq-output-label">Output</span>
-            <div class="seq-mini-control">
-                <span>Transpose</span>
-                <strong>0</strong>
-            </div>
-            <div class="seq-mini-control">
-                <span>Octave</span>
-                <strong>0</strong>
-            </div>
         `;
+        this.seqTransposeInput = this.createSeqNumber(output, 'Transpose', this.sequencerState.transpose, -24, 24, 1, (value) => {
+            this.updateSequencerState({ transpose: value });
+        });
+        this.seqOctaveInput = this.createSeqNumber(output, 'Octave', this.sequencerState.octaveOffset, -3, 3, 1, (value) => {
+            this.updateSequencerState({ octaveOffset: value });
+        });
         modeRail.appendChild(output);
 
         const main = document.createElement('div');
@@ -578,6 +587,8 @@ export class ControlPanel {
             <div class="seq-param"><span>Gate</span><b>${Math.round(this.sequencerState.gate * 100)}%</b></div>
         `;
         this.seqBpmValueEl = top.querySelector('.seq-bpm strong');
+        this.seqSwingValueEl = top.querySelector('.seq-param:nth-last-child(2) b');
+        this.seqGateValueEl = top.querySelector('.seq-param:nth-last-child(1) b');
         main.appendChild(top);
 
         const editor = document.createElement('section');
@@ -611,11 +622,28 @@ export class ControlPanel {
                 <button type="button">Reset</button>
             </div>
         `;
+        this.seqPatternValueEl = editorHeader.querySelector('.seq-pattern-line strong');
         this.seqPlayButton = editorHeader.querySelector('.seq-play');
         this.seqStopButton = editorHeader.querySelector('.seq-stop');
+        editorHeader.querySelector('.seq-pattern-line button:first-of-type')?.addEventListener('click', () => this.changeSequencerPattern(-1));
+        editorHeader.querySelector('.seq-pattern-line button:last-of-type')?.addEventListener('click', () => this.changeSequencerPattern(1));
+        editorHeader.querySelector('.seq-header-actions button:first-child')?.addEventListener('click', () => this.scheduleAutoSave());
+        editorHeader.querySelector('.seq-header-actions button:nth-child(2)')?.addEventListener('click', () => {
+            this.seqClipboard = this.sequencerState.steps.map((step) => ({ ...step }));
+        });
+        editorHeader.querySelector('.seq-header-actions button:nth-child(3)')?.addEventListener('click', () => {
+            if (!this.seqClipboard) return;
+            this.updateSequencerState({ steps: this.seqClipboard.map((step) => ({ ...step })) });
+        });
+        editorHeader.querySelector('.seq-header-actions button:nth-child(4)')?.addEventListener('click', () => this.clearSequencerSteps());
         this.seqPlayButton?.addEventListener('click', () => this.updateSequencerState({ isPlaying: !this.sequencerState.isPlaying }));
         this.seqStopButton?.addEventListener('click', () => this.updateSequencerState({ isPlaying: false }));
+        editorHeader.querySelector('.seq-transport button:nth-child(3)')?.addEventListener('click', () => {
+            this.randomizeSequencerSteps();
+        });
         editorHeader.querySelector('.seq-transport button:last-child')?.addEventListener('click', () => {
+            this.updateSequencerState({ isPlaying: false });
+            this.onSequencerReset?.();
             this.markSequencerStep(-1);
         });
         editor.appendChild(editorHeader);
@@ -645,20 +673,8 @@ export class ControlPanel {
             cell.className = `seq-step${active ? ' is-active' : ''}${rest ? ' has-rest' : ''}`;
             cell.innerHTML = `
                 <span class="seq-step-index">${index + 1}</span>
-                <strong>${rest ? '---' : noteToName(step.note)}</strong>
-                <span class="seq-accent-dot"></span>
-                <span class="seq-slide-mark">${step.slide ? '╱' : ''}</span>
-                <span class="seq-tie-mark">${step.tie ? '⌒' : ''}</span>
-                <span class="seq-rest-mark">${rest ? 'R' : '-'}</span>
-                <span class="seq-step-length">${step.length}</span>
-                <span class="seq-velocity" style="--velocity:${Math.round((step.velocity / 127) * 80)}%"></span>
             `;
-            cell.addEventListener('click', () => {
-                const steps = this.sequencerState.steps.map((candidate, stepIndex) => (
-                    stepIndex === index ? { ...candidate, rest: !candidate.rest } : { ...candidate }
-                ));
-                this.updateSequencerState({ steps });
-            });
+            this.populateSequencerStepControls(cell, step, index);
             steps.appendChild(cell);
             this.seqStepEls.push(cell);
         });
@@ -669,28 +685,14 @@ export class ControlPanel {
 
         const arp = document.createElement('section');
         arp.className = 'seq-arp-panel';
-        arp.innerHTML = `
-            <div class="seq-panel-title">Arpeggiator</div>
-            <div class="seq-arp-controls">
-                <label>Mode <strong>Up</strong></label>
-                <label>Rate <strong>1/16</strong></label>
-                <label>Hold <strong>0.62</strong></label>
-                <label>Gate <strong>80%</strong></label>
-                <label>Swing <strong>54%</strong></label>
-                <label>Velocity <strong>100%</strong></label>
-            </div>
-        `;
+        arp.innerHTML = `<div class="seq-panel-title">Arpeggiator</div>`;
+        this.populateArpeggiatorControls(arp);
         lower.appendChild(arp);
 
         const options = document.createElement('section');
         options.className = 'seq-options-panel';
-        options.innerHTML = `
-            <div class="seq-panel-title">Options</div>
-            <div class="seq-toggle-row"><span>Latch</span><i class="is-on"></i></div>
-            <div class="seq-toggle-row"><span>Retrigger</span><i></i></div>
-            <div class="seq-toggle-row"><span>First Note</span><i class="is-on"></i></div>
-            <div class="seq-toggle-row"><span>Invert</span><i></i></div>
-        `;
+        options.innerHTML = `<div class="seq-panel-title">Options</div>`;
+        this.populateSequencerOptions(options);
         lower.appendChild(options);
 
         const preview = document.createElement('section');
@@ -709,14 +711,306 @@ export class ControlPanel {
         this.updateSequencerUI();
     }
 
+    private populateArpeggiatorControls(container: HTMLElement): void {
+        const controls = document.createElement('div');
+        controls.className = 'seq-arp-controls';
+        container.appendChild(controls);
+
+        const mode = this.createSeqSelect(controls, 'Mode', [
+            { value: 'up', label: 'Up' },
+            { value: 'down', label: 'Down' },
+            { value: 'updown', label: 'Up/Down' },
+            { value: 'random', label: 'Random' }
+        ], this.sequencerState.arpeggiator.mode, (value) => {
+            this.updateSequencerState({ arpeggiator: { ...this.sequencerState.arpeggiator, mode: value as any } });
+        });
+        mode.dataset.seqArpControl = 'mode';
+        this.seqArpControls.mode = mode;
+
+        const rate = this.createSeqSelect(controls, 'Rate', ['1/4', '1/8', '1/16', '1/32'], this.sequencerState.arpeggiator.rate, (value) => {
+            this.updateSequencerState({ arpeggiator: { ...this.sequencerState.arpeggiator, rate: value as any } });
+        });
+        rate.dataset.seqArpControl = 'rate';
+        this.seqArpControls.rate = rate;
+
+        this.seqArpControls.octaveRange = this.createSeqNumber(controls, 'Octaves', this.sequencerState.arpeggiator.octaveRange, 1, 4, 1, (value) => {
+            this.updateSequencerState({ arpeggiator: { ...this.sequencerState.arpeggiator, octaveRange: value } });
+        });
+        this.seqArpControls.gate = this.createSeqNumber(controls, 'Gate', Math.round(this.sequencerState.arpeggiator.gate * 100), 10, 100, 1, (value) => {
+            this.updateSequencerState({ arpeggiator: { ...this.sequencerState.arpeggiator, gate: value / 100 } });
+        });
+        this.seqArpControls.velocity = this.createSeqNumber(controls, 'Velocity', this.sequencerState.arpeggiator.velocity, 1, 127, 1, (value) => {
+            this.updateSequencerState({ arpeggiator: { ...this.sequencerState.arpeggiator, velocity: value } });
+        });
+        this.seqArpControls.hold = this.createSeqToggle(controls, 'Hold', this.sequencerState.arpeggiator.hold, (checked) => {
+            this.updateSequencerState({ arpeggiator: { ...this.sequencerState.arpeggiator, hold: checked } });
+        });
+    }
+
+    private populateSequencerOptions(container: HTMLElement): void {
+        this.seqOptionControls.swing = this.createSeqNumber(container, 'Swing', Math.round(this.sequencerState.swing * 100), 50, 75, 1, (value) => {
+            this.updateSequencerState({ swing: value / 100 });
+        });
+        this.seqOptionControls.gate = this.createSeqNumber(container, 'Gate', Math.round(this.sequencerState.gate * 100), 10, 100, 1, (value) => {
+            this.updateSequencerState({ gate: value / 100 });
+        });
+        this.createSeqButton(container, 'Clear', () => {
+            this.clearSequencerSteps();
+        });
+        this.createSeqButton(container, 'Reset', () => {
+            this.updateSequencerState({
+                steps: defaultSequencerState.steps.map((step) => ({ ...step })),
+                swing: defaultSequencerState.swing,
+                gate: defaultSequencerState.gate
+            });
+        });
+    }
+
+    private createSeqSelect(
+        parent: HTMLElement,
+        label: string,
+        options: string[] | { value: string, label: string }[],
+        value: string,
+        onChange: (value: string) => void
+    ): HTMLSelectElement {
+        const wrapper = document.createElement('label');
+        wrapper.className = 'seq-inline-control';
+        const title = document.createElement('span');
+        title.textContent = label;
+        const select = document.createElement('select');
+        options.forEach((option) => {
+            const optionEl = document.createElement('option');
+            optionEl.value = typeof option === 'string' ? option : option.value;
+            optionEl.textContent = typeof option === 'string' ? option : option.label;
+            select.appendChild(optionEl);
+        });
+        select.value = value;
+        select.addEventListener('change', () => onChange(select.value));
+        wrapper.append(title, select);
+        parent.appendChild(wrapper);
+        return select;
+    }
+
+    private createSeqNumber(
+        parent: HTMLElement,
+        label: string,
+        value: number,
+        min: number,
+        max: number,
+        step: number,
+        onInput: (value: number) => void
+    ): HTMLInputElement {
+        const wrapper = document.createElement('label');
+        wrapper.className = 'seq-inline-control';
+        const title = document.createElement('span');
+        title.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = String(min);
+        input.max = String(max);
+        input.step = String(step);
+        input.value = String(value);
+        input.addEventListener('input', () => onInput(Math.max(min, Math.min(max, parseFloat(input.value) || min))));
+        wrapper.append(title, input);
+        parent.appendChild(wrapper);
+        return input;
+    }
+
+    private createSeqToggle(parent: HTMLElement, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLButtonElement {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `seq-toggle-row${checked ? ' is-on' : ''}`;
+        button.innerHTML = `<span>${label}</span><i${checked ? ' class="is-on"' : ''}></i>`;
+        button.addEventListener('click', () => {
+            const next = !button.classList.contains('is-on');
+            button.classList.toggle('is-on', next);
+            button.querySelector('i')?.classList.toggle('is-on', next);
+            onChange(next);
+        });
+        parent.appendChild(button);
+        return button;
+    }
+
+    private createSeqButton(parent: HTMLElement, label: string, onClick: () => void): HTMLButtonElement {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'seq-option-button';
+        button.textContent = label;
+        button.addEventListener('click', onClick);
+        parent.appendChild(button);
+        return button;
+    }
+
+    private populateSequencerStepControls(cell: HTMLElement, step: Sequencer303Step, index: number): void {
+        const noteSelect = document.createElement('select');
+        noteSelect.className = 'seq-note-select';
+        noteSelect.dataset.stepControl = 'note';
+        this.getSequencerNoteOptions().forEach((note) => {
+            const option = document.createElement('option');
+            option.value = String(note);
+            option.textContent = this.formatSequencerNote(note);
+            noteSelect.appendChild(option);
+        });
+        noteSelect.value = String(step.note);
+        noteSelect.addEventListener('change', () => {
+            this.patchSequencerStep(index, { note: parseInt(noteSelect.value, 10), rest: false });
+        });
+        cell.appendChild(noteSelect);
+
+        cell.appendChild(this.createStepToggle('accent', step.accent, (accent) => {
+            this.patchSequencerStep(index, { accent, rest: false });
+        }));
+
+        const slideSelect = document.createElement('select');
+        slideSelect.className = 'seq-slide-select';
+        slideSelect.dataset.stepControl = 'slide';
+        [
+            { value: 'off', label: 'Off' },
+            { value: 'up', label: 'Up' },
+            { value: 'down', label: 'Down' }
+        ].forEach((option) => {
+            const optionEl = document.createElement('option');
+            optionEl.value = option.value;
+            optionEl.textContent = option.label;
+            slideSelect.appendChild(optionEl);
+        });
+        slideSelect.value = step.slide;
+        slideSelect.addEventListener('change', () => {
+            this.patchSequencerStep(index, { slide: slideSelect.value as SequencerSlideMode, rest: false });
+        });
+        cell.appendChild(slideSelect);
+
+        cell.appendChild(this.createStepToggle('tie', step.tie, (tie) => {
+            this.patchSequencerStep(index, { tie, rest: false });
+        }));
+
+        cell.appendChild(this.createStepToggle('rest', step.rest, (rest) => {
+            this.patchSequencerStep(index, { rest });
+        }));
+
+        cell.appendChild(this.createStepRange('length', step.length, 0.1, 1, 0.01, (length) => {
+            this.patchSequencerStep(index, { length, rest: false });
+        }));
+
+        cell.appendChild(this.createStepRange('velocity', step.velocity, 0, 1, 0.01, (velocity) => {
+            this.patchSequencerStep(index, { velocity, rest: false });
+        }));
+    }
+
+    private createStepToggle(name: string, checked: boolean, onChange: (checked: boolean) => void): HTMLButtonElement {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `seq-step-toggle${checked ? ' is-on' : ''}`;
+        button.dataset.stepControl = name;
+        button.textContent = checked ? 'On' : 'Off';
+        button.addEventListener('click', () => {
+            const next = !button.classList.contains('is-on');
+            onChange(next);
+        });
+        return button;
+    }
+
+    private createStepRange(
+        name: string,
+        value: number,
+        min: number,
+        max: number,
+        step: number,
+        onInput: (value: number) => void
+    ): HTMLLabelElement {
+        const wrapper = document.createElement('label');
+        wrapper.className = 'seq-step-range';
+        wrapper.dataset.stepControl = name;
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.min = String(min);
+        input.max = String(max);
+        input.step = String(step);
+        input.value = String(value);
+        const valueEl = document.createElement('span');
+        valueEl.textContent = value.toFixed(2);
+        input.addEventListener('input', () => {
+            const next = Math.max(min, Math.min(max, parseFloat(input.value)));
+            valueEl.textContent = next.toFixed(2);
+            onInput(next);
+        });
+        wrapper.append(input, valueEl);
+        return wrapper;
+    }
+
+    private getSequencerNoteOptions(): number[] {
+        const notes: number[] = [];
+        for (let note = 0; note <= 96; note++) notes.push(note);
+        return notes;
+    }
+
+    private formatSequencerNote(note: number): string {
+        const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const octave = Math.floor(note / 12) - 1;
+        return `${names[note % 12]}${octave}`;
+    }
+
+    private normalizeSequencerStep(step: Partial<Sequencer303Step> | Record<string, unknown>): Sequencer303Step {
+        const raw = step as Record<string, unknown>;
+        const rawVelocity = Number(raw.velocity ?? 0.8);
+        let slide: SequencerSlideMode = 'off';
+        if (raw.slide === 'up' || raw.slide === 'down') slide = raw.slide;
+        else if (raw.slide === true) slide = 'up';
+        return {
+            note: Math.max(0, Math.min(96, Math.round(Number(raw.note ?? 60)))),
+            accent: Boolean(raw.accent),
+            slide,
+            tie: Boolean(raw.tie),
+            rest: Boolean(raw.rest),
+            length: Math.max(0.1, Math.min(1, raw.length === '1/8' ? 1 : Number(raw.length ?? 0.8))),
+            velocity: Math.max(0, Math.min(1, rawVelocity > 1 ? rawVelocity / 127 : rawVelocity))
+        };
+    }
+
+    private patchSequencerStep(index: number, patch: Partial<Sequencer303Step>): void {
+        const steps = this.sequencerState.steps.map((step, stepIndex) => (
+            stepIndex === index ? this.normalizeSequencerStep({ ...step, ...patch }) : { ...step }
+        ));
+        this.updateSequencerState({ steps });
+    }
+
+    private randomizeSequencerSteps(): void {
+        const scale = [0, 2, 3, 5, 7, 10, 12];
+        const steps = this.sequencerState.steps.map((_step, index) => {
+            const note = 48 + scale[Math.floor(Math.random() * scale.length)] + (Math.random() > 0.72 ? 12 : 0);
+            return {
+                note,
+                accent: Math.random() > 0.45,
+                slide: (Math.random() > 0.78 ? (Math.random() > 0.5 ? 'up' : 'down') : 'off') as SequencerSlideMode,
+                tie: index > 0 && Math.random() > 0.82,
+                rest: Math.random() > 0.82,
+                length: 0.35 + Math.random() * 0.65,
+                velocity: 0.55 + Math.random() * 0.4
+            };
+        });
+        this.updateSequencerState({ steps });
+    }
+
+    private clearSequencerSteps(): void {
+        this.updateSequencerState({
+            steps: this.sequencerState.steps.map((step) => ({ ...step, rest: true, accent: false, slide: 'off' as const, tie: false }))
+        });
+    }
+
+    private changeSequencerPattern(delta: number): void {
+        const next = ((this.sequencerState.patternIndex - 1 + delta + 256) % 256) + 1;
+        this.updateSequencerState({ patternIndex: next });
+    }
+
     private updateSequencerState(patch: Partial<SequencerState>): void {
         this.sequencerState = {
             ...this.sequencerState,
             ...patch,
-            steps: patch.steps ? patch.steps.map((step) => ({ ...step })) : this.sequencerState.steps,
+            steps: patch.steps ? patch.steps.map((step) => this.normalizeSequencerStep(step)) : this.sequencerState.steps.map((step) => ({ ...step })),
             arpeggiator: patch.arpeggiator ? { ...this.sequencerState.arpeggiator, ...patch.arpeggiator } : this.sequencerState.arpeggiator
         };
         this.updateSequencerUI();
+        this.scheduleAutoSave();
         if (this.onSequencerChange) {
             this.onSequencerChange({
                 ...this.sequencerState,
@@ -735,12 +1029,53 @@ export class ControlPanel {
             this.seqPlayButton.classList.toggle('is-playing', this.sequencerState.isPlaying);
         }
         if (this.seqBpmValueEl) this.seqBpmValueEl.textContent = this.bpmValue.toFixed(2);
+        if (this.seqSwingValueEl) this.seqSwingValueEl.textContent = `${Math.round(this.sequencerState.swing * 100)}%`;
+        if (this.seqGateValueEl) this.seqGateValueEl.textContent = `${Math.round(this.sequencerState.gate * 100)}%`;
+        if (this.seqPatternValueEl) this.seqPatternValueEl.textContent = String(this.sequencerState.patternIndex);
+        if (this.seqTransposeInput) this.seqTransposeInput.value = String(this.sequencerState.transpose);
+        if (this.seqOctaveInput) this.seqOctaveInput.value = String(this.sequencerState.octaveOffset);
+        if (this.seqOptionControls.swing) this.seqOptionControls.swing.value = String(Math.round(this.sequencerState.swing * 100));
+        if (this.seqOptionControls.gate) this.seqOptionControls.gate.value = String(Math.round(this.sequencerState.gate * 100));
+        if (this.seqArpControls.mode instanceof HTMLSelectElement) this.seqArpControls.mode.value = this.sequencerState.arpeggiator.mode;
+        if (this.seqArpControls.rate instanceof HTMLSelectElement) this.seqArpControls.rate.value = this.sequencerState.arpeggiator.rate;
+        if (this.seqArpControls.octaveRange instanceof HTMLInputElement) this.seqArpControls.octaveRange.value = String(this.sequencerState.arpeggiator.octaveRange);
+        if (this.seqArpControls.gate instanceof HTMLInputElement) this.seqArpControls.gate.value = String(Math.round(this.sequencerState.arpeggiator.gate * 100));
+        if (this.seqArpControls.velocity instanceof HTMLInputElement) this.seqArpControls.velocity.value = String(this.sequencerState.arpeggiator.velocity);
+        if (this.seqArpControls.hold instanceof HTMLButtonElement) {
+            this.seqArpControls.hold.classList.toggle('is-on', this.sequencerState.arpeggiator.hold);
+            this.seqArpControls.hold.querySelector('i')?.classList.toggle('is-on', this.sequencerState.arpeggiator.hold);
+        }
         this.seqStepEls.forEach((cell, index) => {
             const step = this.sequencerState.steps[index];
             cell.classList.toggle('has-rest', Boolean(step?.rest));
-            const note = cell.querySelector('strong');
-            if (note && step) note.textContent = step.rest ? '---' : noteToName(step.note);
+            if (!step) return;
+            const noteSelect = cell.querySelector('[data-step-control="note"]') as HTMLSelectElement | null;
+            if (noteSelect) noteSelect.value = String(step.note);
+            const accent = cell.querySelector('[data-step-control="accent"]') as HTMLButtonElement | null;
+            this.updateStepToggle(accent, step.accent);
+            const slide = cell.querySelector('[data-step-control="slide"]') as HTMLSelectElement | null;
+            if (slide) slide.value = step.slide;
+            const tie = cell.querySelector('[data-step-control="tie"]') as HTMLButtonElement | null;
+            this.updateStepToggle(tie, step.tie);
+            const rest = cell.querySelector('[data-step-control="rest"]') as HTMLButtonElement | null;
+            this.updateStepToggle(rest, step.rest);
+            this.updateStepRange(cell, 'length', step.length);
+            this.updateStepRange(cell, 'velocity', step.velocity);
         });
+    }
+
+    private updateStepToggle(button: HTMLButtonElement | null, checked: boolean): void {
+        if (!button) return;
+        button.classList.toggle('is-on', checked);
+        button.textContent = checked ? 'On' : 'Off';
+    }
+
+    private updateStepRange(cell: HTMLElement, control: string, value: number): void {
+        const wrapper = cell.querySelector(`[data-step-control="${control}"]`) as HTMLElement | null;
+        const input = wrapper?.querySelector('input') as HTMLInputElement | null;
+        const valueEl = wrapper?.querySelector('span') as HTMLElement | null;
+        if (input) input.value = String(value);
+        if (valueEl) valueEl.textContent = value.toFixed(2);
     }
 
     public setSequencerChangeCallback(callback: (state: SequencerState) => void): void {
@@ -750,6 +1085,10 @@ export class ControlPanel {
             steps: this.sequencerState.steps.map((step) => ({ ...step })),
             arpeggiator: { ...this.sequencerState.arpeggiator }
         });
+    }
+
+    public setSequencerResetCallback(callback: () => void): void {
+        this.onSequencerReset = callback;
     }
 
     public setSequencerBpm(bpm: number): void {
@@ -2174,6 +2513,11 @@ export class ControlPanel {
             waveshape: JSON.parse(JSON.stringify(this.waveshapeState)),
             saturation: { ...this.saturationState },
             polyphony: { ...this.polyphonyState },
+            sequencer: {
+                ...this.sequencerState,
+                steps: this.sequencerState.steps.map((step) => ({ ...step })),
+                arpeggiator: { ...this.sequencerState.arpeggiator }
+            },
             interpSamples: parseFloat(this.interpSamplesSlider.value)
         };
     }
@@ -2238,6 +2582,27 @@ export class ControlPanel {
             this.setSequencerBpm(state.bpm);
             if (this.bpmSlider) {
                 this.bpmSlider.value = String(state.bpm);
+            }
+        }
+
+        if (state.sequencer) {
+            this.sequencerState = {
+                ...defaultSequencerState,
+                ...state.sequencer,
+                bpm: state.bpm ?? state.sequencer.bpm ?? this.bpmValue,
+                steps: state.sequencer.steps?.map((step) => this.normalizeSequencerStep(step)) || defaultSequencerState.steps.map((step) => ({ ...step })),
+                arpeggiator: {
+                    ...defaultSequencerState.arpeggiator,
+                    ...state.sequencer.arpeggiator
+                }
+            };
+            this.updateSequencerUI();
+            if (this.onSequencerChange) {
+                this.onSequencerChange({
+                    ...this.sequencerState,
+                    steps: this.sequencerState.steps.map((step) => ({ ...step })),
+                    arpeggiator: { ...this.sequencerState.arpeggiator }
+                });
             }
         }
 

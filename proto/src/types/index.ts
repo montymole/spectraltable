@@ -287,6 +287,7 @@ export interface PresetControls {
     waveshape?: WaveshapeState;
     saturation?: SaturationState;
     polyphony?: PolyphonyState;
+    sequencer?: SequencerState;
     interpSamples: number;
     bpm: number;
 }
@@ -301,14 +302,15 @@ export type MidiNoteSource = 'user' | 'sequencer';
 
 export type SequencerEngineMode = 'sequencer' | 'arpeggiator';
 export type ArpeggiatorMode = 'up' | 'down' | 'updown' | 'random';
+export type SequencerSlideMode = 'off' | 'up' | 'down';
 
 export interface Sequencer303Step {
     note: number;
     accent: boolean;
-    slide: boolean;
+    slide: SequencerSlideMode;
     tie: boolean;
     rest: boolean;
-    length: '1/16' | '1/8';
+    length: number;
     velocity: number;
 }
 
@@ -318,6 +320,8 @@ export interface SequencerState {
     bpm: number;
     swing: number;
     gate: number;
+    transpose: number;
+    octaveOffset: number;
     patternIndex: number;
     steps: Sequencer303Step[];
     arpeggiator: {
@@ -331,22 +335,22 @@ export interface SequencerState {
 }
 
 export const defaultSequencerSteps: Sequencer303Step[] = [
-    { note: 60, accent: true, slide: false, tie: false, rest: false, length: '1/16', velocity: 100 },
-    { note: 62, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 84 },
-    { note: 64, accent: true, slide: false, tie: false, rest: false, length: '1/16', velocity: 112 },
-    { note: 67, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 88 },
-    { note: 70, accent: true, slide: false, tie: false, rest: true, length: '1/8', velocity: 74 },
-    { note: 69, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 118 },
-    { note: 67, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 82 },
-    { note: 64, accent: true, slide: true, tie: true, rest: false, length: '1/16', velocity: 96 },
-    { note: 62, accent: true, slide: false, tie: false, rest: false, length: '1/16', velocity: 90 },
-    { note: 60, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 106 },
-    { note: 60, accent: true, slide: false, tie: false, rest: true, length: '1/8', velocity: 70 },
-    { note: 72, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 86 },
-    { note: 70, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 114 },
-    { note: 67, accent: true, slide: true, tie: false, rest: false, length: '1/16', velocity: 84 },
-    { note: 64, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 104 },
-    { note: 60, accent: true, slide: false, tie: true, rest: false, length: '1/16', velocity: 92 }
+    { note: 60, accent: true, slide: 'off', tie: false, rest: false, length: 0.8, velocity: 0.79 },
+    { note: 62, accent: true, slide: 'off', tie: true, rest: false, length: 0.72, velocity: 0.66 },
+    { note: 64, accent: true, slide: 'off', tie: false, rest: false, length: 0.88, velocity: 0.88 },
+    { note: 67, accent: true, slide: 'up', tie: false, rest: false, length: 0.74, velocity: 0.69 },
+    { note: 70, accent: true, slide: 'off', tie: false, rest: true, length: 1, velocity: 0.58 },
+    { note: 69, accent: true, slide: 'down', tie: false, rest: false, length: 0.92, velocity: 0.93 },
+    { note: 67, accent: true, slide: 'off', tie: true, rest: false, length: 0.7, velocity: 0.65 },
+    { note: 64, accent: true, slide: 'up', tie: true, rest: false, length: 0.78, velocity: 0.76 },
+    { note: 62, accent: true, slide: 'off', tie: false, rest: false, length: 0.72, velocity: 0.71 },
+    { note: 60, accent: true, slide: 'down', tie: false, rest: false, length: 0.84, velocity: 0.83 },
+    { note: 60, accent: true, slide: 'off', tie: false, rest: true, length: 1, velocity: 0.55 },
+    { note: 72, accent: true, slide: 'up', tie: false, rest: false, length: 0.7, velocity: 0.68 },
+    { note: 70, accent: true, slide: 'off', tie: true, rest: false, length: 0.9, velocity: 0.9 },
+    { note: 67, accent: true, slide: 'down', tie: false, rest: false, length: 0.66, velocity: 0.66 },
+    { note: 64, accent: true, slide: 'off', tie: true, rest: false, length: 0.82, velocity: 0.82 },
+    { note: 60, accent: true, slide: 'off', tie: true, rest: false, length: 0.72, velocity: 0.72 }
 ];
 
 export const defaultSequencerState: SequencerState = {
@@ -355,6 +359,8 @@ export const defaultSequencerState: SequencerState = {
     bpm: 140,
     swing: 0.54,
     gate: 0.8,
+    transpose: 0,
+    octaveOffset: 0,
     patternIndex: 23,
     steps: defaultSequencerSteps.map((step) => ({ ...step })),
     arpeggiator: {
