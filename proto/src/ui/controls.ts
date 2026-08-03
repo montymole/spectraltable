@@ -279,6 +279,7 @@ export class ControlPanel {
     private seqSwingValueEl: HTMLElement | null = null;
     private seqGateValueEl: HTMLElement | null = null;
     private seqPatternValueEl: HTMLElement | null = null;
+    private seqStepCountInput: HTMLInputElement | null = null;
     private seqArpControls: Partial<Record<string, HTMLSelectElement | HTMLInputElement | HTMLButtonElement>> = {};
     private seqOptionControls: Partial<Record<string, HTMLInputElement>> = {};
     private seqTransposeInput: HTMLInputElement | null = null;
@@ -614,7 +615,14 @@ export class ControlPanel {
                 <button type="button">Paste</button>
                 <button type="button">Clear</button>
             </div>
-            <div class="seq-steps-count"><span>Steps</span><strong>16</strong></div>
+            <div class="seq-steps-count">
+                <span>Steps</span>
+                <div class="seq-step-count-control">
+                    <button type="button" aria-label="Decrease active steps">‹</button>
+                    <input type="number" min="1" max="${this.sequencerState.steps.length}" step="1" value="${this.sequencerState.activeStepCount}">
+                    <button type="button" aria-label="Increase active steps">›</button>
+                </div>
+            </div>
             <div class="seq-transport">
                 <button type="button" class="seq-play">Play</button>
                 <button type="button" class="seq-stop">Stop</button>
@@ -623,6 +631,12 @@ export class ControlPanel {
             </div>
         `;
         this.seqPatternValueEl = editorHeader.querySelector('.seq-pattern-line strong');
+        this.seqStepCountInput = editorHeader.querySelector('.seq-step-count-control input');
+        editorHeader.querySelector('.seq-step-count-control button:first-of-type')?.addEventListener('click', () => this.adjustSequencerStepCount(-1));
+        editorHeader.querySelector('.seq-step-count-control button:last-of-type')?.addEventListener('click', () => this.adjustSequencerStepCount(1));
+        this.seqStepCountInput?.addEventListener('input', () => {
+            this.setSequencerStepCount(parseInt(this.seqStepCountInput?.value || '1', 10));
+        });
         this.seqPlayButton = editorHeader.querySelector('.seq-play');
         this.seqStopButton = editorHeader.querySelector('.seq-stop');
         editorHeader.querySelector('.seq-pattern-line button:first-of-type')?.addEventListener('click', () => this.changeSequencerPattern(-1));
@@ -761,7 +775,8 @@ export class ControlPanel {
             this.updateSequencerState({
                 steps: defaultSequencerState.steps.map((step) => ({ ...step })),
                 swing: defaultSequencerState.swing,
-                gate: defaultSequencerState.gate
+                gate: defaultSequencerState.gate,
+                activeStepCount: defaultSequencerState.activeStepCount
             });
         });
     }
@@ -853,12 +868,12 @@ export class ControlPanel {
         });
         noteSelect.value = String(step.note);
         noteSelect.addEventListener('change', () => {
-            this.patchSequencerStep(index, { note: parseInt(noteSelect.value, 10), rest: false });
+            this.patchSequencerStep(index, { note: parseInt(noteSelect.value, 10) });
         });
         cell.appendChild(noteSelect);
 
         cell.appendChild(this.createStepToggle('accent', step.accent, (accent) => {
-            this.patchSequencerStep(index, { accent, rest: false });
+            this.patchSequencerStep(index, { accent });
         }));
 
         const slideSelect = document.createElement('select');
@@ -876,12 +891,12 @@ export class ControlPanel {
         });
         slideSelect.value = step.slide;
         slideSelect.addEventListener('change', () => {
-            this.patchSequencerStep(index, { slide: slideSelect.value as SequencerSlideMode, rest: false });
+            this.patchSequencerStep(index, { slide: slideSelect.value as SequencerSlideMode });
         });
         cell.appendChild(slideSelect);
 
         cell.appendChild(this.createStepToggle('tie', step.tie, (tie) => {
-            this.patchSequencerStep(index, { tie, rest: false });
+            this.patchSequencerStep(index, { tie });
         }));
 
         cell.appendChild(this.createStepToggle('rest', step.rest, (rest) => {
@@ -889,11 +904,11 @@ export class ControlPanel {
         }));
 
         cell.appendChild(this.createStepRange('length', step.length, 0.1, 1, 0.01, (length) => {
-            this.patchSequencerStep(index, { length, rest: false });
+            this.patchSequencerStep(index, { length });
         }));
 
         cell.appendChild(this.createStepRange('velocity', step.velocity, 0, 1, 0.01, (velocity) => {
-            this.patchSequencerStep(index, { velocity, rest: false });
+            this.patchSequencerStep(index, { velocity });
         }));
     }
 
@@ -1002,11 +1017,24 @@ export class ControlPanel {
         this.updateSequencerState({ patternIndex: next });
     }
 
+    private adjustSequencerStepCount(delta: number): void {
+        this.setSequencerStepCount(this.sequencerState.activeStepCount + delta);
+    }
+
+    private setSequencerStepCount(count: number): void {
+        const max = this.sequencerState.steps.length;
+        const activeStepCount = Math.max(1, Math.min(max, Math.round(Number.isFinite(count) ? count : 1)));
+        this.updateSequencerState({ activeStepCount });
+    }
+
     private updateSequencerState(patch: Partial<SequencerState>): void {
+        const mergedSteps = patch.steps ? patch.steps.map((step) => this.normalizeSequencerStep(step)) : this.sequencerState.steps.map((step) => ({ ...step }));
+        const rawStepCount = patch.activeStepCount ?? this.sequencerState.activeStepCount;
         this.sequencerState = {
             ...this.sequencerState,
             ...patch,
-            steps: patch.steps ? patch.steps.map((step) => this.normalizeSequencerStep(step)) : this.sequencerState.steps.map((step) => ({ ...step })),
+            steps: mergedSteps,
+            activeStepCount: Math.max(1, Math.min(mergedSteps.length, Math.round(rawStepCount))),
             arpeggiator: patch.arpeggiator ? { ...this.sequencerState.arpeggiator, ...patch.arpeggiator } : this.sequencerState.arpeggiator
         };
         this.updateSequencerUI();
@@ -1032,6 +1060,7 @@ export class ControlPanel {
         if (this.seqSwingValueEl) this.seqSwingValueEl.textContent = `${Math.round(this.sequencerState.swing * 100)}%`;
         if (this.seqGateValueEl) this.seqGateValueEl.textContent = `${Math.round(this.sequencerState.gate * 100)}%`;
         if (this.seqPatternValueEl) this.seqPatternValueEl.textContent = String(this.sequencerState.patternIndex);
+        if (this.seqStepCountInput) this.seqStepCountInput.value = String(this.sequencerState.activeStepCount);
         if (this.seqTransposeInput) this.seqTransposeInput.value = String(this.sequencerState.transpose);
         if (this.seqOctaveInput) this.seqOctaveInput.value = String(this.sequencerState.octaveOffset);
         if (this.seqOptionControls.swing) this.seqOptionControls.swing.value = String(Math.round(this.sequencerState.swing * 100));
@@ -1047,6 +1076,11 @@ export class ControlPanel {
         }
         this.seqStepEls.forEach((cell, index) => {
             const step = this.sequencerState.steps[index];
+            const isActiveStep = index < this.sequencerState.activeStepCount;
+            cell.classList.toggle('is-inactive-step', !isActiveStep);
+            cell.querySelectorAll('select, button, input').forEach((control) => {
+                (control as HTMLInputElement | HTMLSelectElement | HTMLButtonElement).disabled = !isActiveStep;
+            });
             cell.classList.toggle('has-rest', Boolean(step?.rest));
             if (!step) return;
             const noteSelect = cell.querySelector('[data-step-control="note"]') as HTMLSelectElement | null;
@@ -2591,6 +2625,10 @@ export class ControlPanel {
                 ...state.sequencer,
                 bpm: state.bpm ?? state.sequencer.bpm ?? this.bpmValue,
                 steps: state.sequencer.steps?.map((step) => this.normalizeSequencerStep(step)) || defaultSequencerState.steps.map((step) => ({ ...step })),
+                activeStepCount: Math.max(1, Math.min(
+                    state.sequencer.steps?.length || defaultSequencerState.steps.length,
+                    Math.round(state.sequencer.activeStepCount ?? state.sequencer.steps?.length ?? defaultSequencerState.activeStepCount)
+                )),
                 arpeggiator: {
                     ...defaultSequencerState.arpeggiator,
                     ...state.sequencer.arpeggiator

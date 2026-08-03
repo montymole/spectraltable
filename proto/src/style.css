@@ -384,7 +384,7 @@ button:hover {
   gap: 12px;
   align-content: start;
   min-width: 980px;
-  padding-bottom: 16px;
+  padding-bottom: 132px;
 }
 
 .control-card {
@@ -1138,6 +1138,31 @@ button {
   font-size: 0.8rem;
 }
 
+.seq-step-count-control {
+  display: grid;
+  grid-template-columns: 30px 58px 30px;
+  gap: 6px;
+  align-items: center;
+}
+
+.seq-step-count-control button {
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+}
+
+.seq-step-count-control input {
+  width: 58px;
+  min-height: 30px;
+  border: 1px solid rgba(82, 111, 145, 0.28);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--accent-secondary);
+  font-family: "Berkeley Mono", monospace;
+  font-size: 1rem;
+  text-align: center;
+}
+
 .seq-editor-panel {
   min-width: 0;
   overflow: hidden;
@@ -1245,6 +1270,25 @@ button {
     linear-gradient(180deg, rgba(14, 42, 50, 0.96), rgba(5, 16, 23, 0.98)),
     repeating-linear-gradient(180deg, transparent 0 38px, rgba(255, 255, 255, 0.04) 38px 39px);
   box-shadow: 0 0 0 1px rgba(51, 244, 211, 0.28) inset, 0 0 26px rgba(51, 244, 211, 0.18);
+}
+
+.seq-step.is-inactive-step {
+  opacity: 0.38;
+  filter: grayscale(0.55);
+  background:
+    linear-gradient(180deg, rgba(8, 14, 22, 0.9), rgba(4, 8, 13, 0.96)),
+    repeating-linear-gradient(180deg, transparent 0 38px, rgba(255, 255, 255, 0.025) 38px 39px);
+}
+
+.seq-step.is-inactive-step.is-current {
+  border-color: rgba(82, 111, 145, 0.18);
+  box-shadow: none;
+}
+
+.seq-step.is-inactive-step select,
+.seq-step.is-inactive-step button,
+.seq-step.is-inactive-step input {
+  cursor: not-allowed;
 }
 
 .seq-step > * {

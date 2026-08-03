@@ -17,7 +17,7 @@ import {
     FilterState, defaultFilterState, FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX, FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX,
     PolyphonyState, defaultPolyphonyState, POLYPHONY_MIN, POLYPHONY_MAX,
     UNISON_DETUNE_CENTS_MIN, UNISON_DETUNE_CENTS_MAX, UNISON_VOICES_MIN, UNISON_VOICES_MAX,
-    MidiNoteSource
+    MidiNoteSource, defaultSequencerState
 } from './types';
 import { createDefaultModulatorStates, estimateModulatorRange, Modulator, resolveModulatorStates } from './modulators/modulator';
 import { noteToName } from './ui/ui-elements';
@@ -311,11 +311,17 @@ class SpectralTableApp {
             this.modulators.forEach(modulator => modulator.setBPM(state.bpm));
         }
         if (state.sequencer) {
+            const sequencerSteps = state.sequencer.steps?.map((step) => ({ ...step })) || defaultSequencerState.steps.map((step) => ({ ...step }));
             this.sequencerClock.setState({
+                ...defaultSequencerState,
                 ...state.sequencer,
                 bpm: state.bpm ?? state.sequencer.bpm ?? this.currentBpm,
-                steps: state.sequencer.steps.map((step) => ({ ...step })),
-                arpeggiator: { ...state.sequencer.arpeggiator }
+                steps: sequencerSteps,
+                activeStepCount: Math.max(1, Math.min(
+                    sequencerSteps.length,
+                    Math.round(state.sequencer.activeStepCount ?? sequencerSteps.length)
+                )),
+                arpeggiator: { ...defaultSequencerState.arpeggiator, ...state.sequencer.arpeggiator }
             });
         }
 

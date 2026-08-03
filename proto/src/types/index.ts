@@ -323,6 +323,7 @@ export interface SequencerState {
     transpose: number;
     octaveOffset: number;
     patternIndex: number;
+    activeStepCount: number;
     steps: Sequencer303Step[];
     arpeggiator: {
         mode: ArpeggiatorMode;
@@ -362,6 +363,7 @@ export const defaultSequencerState: SequencerState = {
     transpose: 0,
     octaveOffset: 0,
     patternIndex: 23,
+    activeStepCount: 16,
     steps: defaultSequencerSteps.map((step) => ({ ...step })),
     arpeggiator: {
         mode: 'up',

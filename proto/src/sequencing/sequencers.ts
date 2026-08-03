@@ -29,7 +29,12 @@ function stepDurationSeconds(bpm: number, division: string): number {
 }
 
 function clampMidi(note: number): number {
-    return Math.max(0, Math.min(127, Math.round(note)));
+    return Number.isFinite(note) ? Math.max(0, Math.min(127, Math.round(note))) : 60;
+}
+
+function clampCount(value: unknown, max: number): number {
+    const rounded = Math.round(Number(value));
+    return Number.isFinite(rounded) ? Math.max(1, Math.min(Math.max(1, max), rounded)) : Math.max(1, max);
 }
 
 function normalizeStep(step: Partial<Sequencer303Step> | Record<string, unknown>): Sequencer303Step {
@@ -135,11 +140,17 @@ export class Arpeggiator {
 
 export class Sequencer303 {
     private steps: Sequencer303Step[] = cloneState(defaultSequencerState).steps;
+    private activeStepCount = defaultSequencerState.activeStepCount;
     private index = -1;
 
     public setSteps(steps: Sequencer303Step[]): void {
         this.steps = steps.map((step) => normalizeStep(step));
-        if (this.index >= this.steps.length) this.index = -1;
+        if (this.index >= this.getActiveLength()) this.index = -1;
+    }
+
+    public setActiveStepCount(count: number): void {
+        this.activeStepCount = clampCount(count, this.steps.length);
+        if (this.index >= this.getActiveLength()) this.index = -1;
     }
 
     public reset(): void {
@@ -147,9 +158,14 @@ export class Sequencer303 {
     }
 
     public nextStep(): { step: Sequencer303Step, stepIndex: number } | null {
-        if (this.steps.length === 0) return null;
-        this.index = (this.index + 1) % this.steps.length;
+        const activeLength = this.getActiveLength();
+        if (activeLength === 0) return null;
+        this.index = (this.index + 1) % activeLength;
         return { step: this.steps[this.index], stepIndex: this.index };
+    }
+
+    private getActiveLength(): number {
+        return this.steps.length === 0 ? 0 : clampCount(this.activeStepCount, this.steps.length);
     }
 }
 
@@ -190,6 +206,7 @@ export class SequencerClock {
         });
         this.arpeggiator.setState(this.state.arpeggiator);
         this.sequencer.setSteps(this.state.steps);
+        this.sequencer.setActiveStepCount(this.state.activeStepCount);
         if (previousMode !== this.state.mode) {
             this.stopActiveNote();
             this.accumulator = this.state.isPlaying ? this.getCurrentInterval() : 0;
@@ -297,12 +314,13 @@ export class SequencerClock {
 
     private startNote(note: number, velocity: number, duration: number, retrigger = true): void {
         const hadActiveNote = this.currentNote !== null;
+        const previousNote = this.currentNote;
         if (this.currentNote !== null && this.currentNote !== note) this.stopActiveNote();
         if (this.currentNote === note && retrigger) this.sendNote(note, 0, false);
         this.currentNote = clampMidi(note);
         this.currentNoteElapsed = 0;
         this.currentNoteDuration = Math.max(0.01, duration);
-        if (retrigger || !hadActiveNote) this.sendNote(this.currentNote, velocity, true);
+        if (retrigger || !hadActiveNote || previousNote !== this.currentNote) this.sendNote(this.currentNote, velocity, true);
     }
 
     private stopActiveNote(): void {
